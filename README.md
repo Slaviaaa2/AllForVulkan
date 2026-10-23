@@ -1,77 +1,47 @@
-# <a href="https://github.com/xCollateral/VulkanMod"> <img src="./src/main/resources/assets/vulkanmod/Vlogo.png" width="30" height="30"/> </a> VulkanMod
+# All For Vulkan
 
-This is a fabric mod that introduces a brand new **Vulkan** based voxel rendering engine to **Minecraft java** in order to both replace the default OpenGL renderer and bring performance improvements.
+**All For Vulkan (AFV)** は、VulkanMod本家のフォークを基に開発する、Minecraft **1.21.1 / NeoForge** 向けの統合描画MODです。
 
-### Why?
-- Highly experimental project that overhauls and modernizes the internal renderer for Minecraft. <br>
-- Updates the renderer from OpenGL 3.2 to Vulkan 1.2.  <br>
-- Provides a potential reference for a future-proof Vulkan codebase for Minecraft Java. <br>
-- Utilizes the VulkanAPI to allow for capabilities not always possible with OpenGL. <br>
-- Including reduced CPU Overhead and use of newer, modern hardware capabilities. <br>
+VulkanMod由来のVulkan描画本体に、OpenGL互換機能とMOD連携を組み込み、Irisを含む様々なMODの描画をVulkan上で動かすことを目指します。GL変換エンジンにはMesa/Zinkの採用を検討しています。
 
-### Demonstration Video:
+| 項目 | 方針 |
+| --- | --- |
+| 正式名称 | All For Vulkan |
+| 略称 | AFV |
+| MOD ID | `allforvulkan` |
+| Minecraft | 1.21.1 |
+| MODローダー | NeoForge |
+| 将来の展開 | 共通コアを使うFabric版・過去のMinecraft向けForge版 |
+| Java | 21 |
+| 開発形態 | VulkanMod本家を直接フォークし、NeoForge移植・GL互換機能・MOD連携を統合 |
 
-[![Demostration Video](http://img.youtube.com/vi/sbr7UxcAmOE/0.jpg)](https://youtu.be/sbr7UxcAmOE)
+現在は **M0（NeoForge移植）の初期実装**です。本家タグ `0.5.5`（`f23855f2675f1efb52fb8aa2c26bc23dccfb5543`）を起点とし、NeoForge **21.1.228** 向けにビルド・メタデータ・起動順序・地形／流体描画を移植しました。`core-api` を独立したJavaモジュールとして追加しています。描画本体の共通コアへの抽出はこれからです。Linux / RTX 3060でタイトル画面の60 tickスモークテストと正常終了を確認しました。ワールド描画は未検証です。
 
-## FAQ
-- Remember to check the [Wiki](https://github.com/xCollateral/VulkanMod/wiki) we wrote before asking for support!
+**Mesa/Zink接続、汎用OpenGL互換、Iris統合は未実装**です。現時点では実験用の移植版で、Iris/Sodiumとの同時導入には対応していません。
 
-## Installation
+- [ビルド・起動方法と現状](docs/DEVELOPMENT.md)
+- [検証記録](docs/VALIDATION.md)
+- [ソースの由来とライセンス](NOTICE.md)
+- [開発計画](PLAN.md)
+- [共通コア・マルチローダー設計](ARCHITECTURE.md)
+- [調査記録・技術資料](RESEARCH.md)
+- [元プロジェクト: VulkanMod](https://github.com/xCollateral/VulkanMod)
 
-### Download Links:
+NeoForge移植の起動・描画を検証し、続いて内部でMesa/Zinkとの画像・同期共有を試作します。広いOpenGL互換性とIrisの描画統合を段階的に実装し、API・拡張・MODごとの対応範囲を記録します。
 
-- [![CurseForge](https://cf.way2muchnoise.eu/full_635429_downloads.svg?badge_style=flat)](https://www.curseforge.com/minecraft/mc-mods/vulkanmod)
+描画・GL互換・資源同期を共通コアへ集約し、ローダー固有処理とMinecraft版ごとの描画連携を分離します。将来は対象版・ローダー別にAFVをビルドします。現在の対応目標はNeoForge 1.21.1で、Fabric版・Forge版は設計上の展開先です。
 
-- [![Modrinth Downloads](https://img.shields.io/modrinth/dt/JYQhtZtO?logo=modrinth&label=Modrinth%20Downloads)](https://modrinth.com/mod/vulkanmod/versions)
+## 開発
 
-- [![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/xCollateral/VulkanMod/total?style=flat-square&logo=github&label=Github%20Downloads)](https://github.com/xCollateral/VulkanMod/releases)
+完全なJDK 21（`javac`を含む）を使用してください。
 
-### Install guide:
->1) Install the [fabric modloader](https://fabricmc.net).
->1) Download and put the `Vulkanmod.jar` file into `.minecraft/mods`
->1) Enjoy !
+```sh
+./gradlew build
+python3 scripts/verify_artifact.py
+./gradlew runClient
+```
 
-## Useful links
-<table>
-    <tr>
-      <th> Discord server</th>
-      <th> Ko-Fi</th>
-    </tr>
-  <tr>
-    <td style="text-align:center"> 
-        <a href="https://discord.gg/FVXg7AYR2Q"> 
-            <img alt="Discord" align="top" src="https://img.shields.io/discord/963180553547419670?style=flat-square&logo=discord&logoColor=%23FFFFFF&label=Vulkanmod%20official%20discord%20server&labelColor=%235865F2&color=%235865F2">
-        </a>
-     </td>
-    <td>
-        <a href="https://ko-fi.com/V7V7CHHJV">
-            <img alt="Static Badge" align="top" src="https://img.shields.io/badge/KoFi-%23ff5e5b?logo=ko-fi&logoColor=%23FFFFFF&link=https%3A%2F%2Fko-fi.com%2FV7V7CHHJV">
-        </a>
-    </td>
-  </tr>
-</table>
-
-
-## Features
-
-### Optimizations:
->- [x] Multiple chunk culling algorithms
->- [x] Reduced CPU overhead
->- [x] Improved GPU performance
->- [x] Indirect Draw mode (reduces CPU overhead)
->- [x] Chunk rendering optimizations
-
-### New changes:
->- [x] Native Wayland support
->- [x] GPU selector
->- [x] Windowed fullscreen mode
->- [x] Revamped graphic settings menu
->- [x] Resizable render frame queue
->- [ ] Shader support
->- [ ] Removed Herobrine
-
-
-## Notes
-- This mod is still in development, please report issues in the [issue tab](https://github.com/xCollateral/VulkanMod/issues) with logs attached!
-- This mode isn't just "minecraft on vulkan" (e.g: [zink](https://docs.mesa3d.org/drivers/zink.html) ), it is a full rewrite of the minecraft renderer.
-
+出力: `build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.1.jar`。
+開発クライアントではNeoForgeのOpenGL早期ウィンドウを無効にします。
+別のMinecraftインスタンスでは、その `config/fml.toml` に
+`earlyWindowControl = false` を設定してください。詳細は[開発手順](docs/DEVELOPMENT.md)を参照。

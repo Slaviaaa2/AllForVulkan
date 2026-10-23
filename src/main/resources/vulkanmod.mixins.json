@@ -2,14 +2,12 @@
   "required": true,
   "minVersion": "0.8",
   "package": "net.vulkanmod.mixin",
-  "compatibilityLevel": "JAVA_17",
+  "compatibilityLevel": "JAVA_21",
   "plugin": "net.vulkanmod.mixin.MixinPlugin",
-  "mixins": [
-  ],
+  "mixins": [],
   "client": [
     "window.WindowMixin",
     "window.WindowAccessor",
-
     "chunk.ClientPacketListenerM",
     "chunk.ClientChunkCacheM",
     "chunk.DirectionMixin",
@@ -19,26 +17,18 @@
     "chunk.SectionRenderDispatcherM",
     "chunk.ViewAreaM",
     "chunk.VisibilitySetMixin",
-
     "compatibility.EffectInstanceM",
     "compatibility.ProgramM",
     "compatibility.UniformM",
-    "compatibility.gl.GL11M",
-    "compatibility.gl.GL15M",
-    "compatibility.gl.GL30M",
-
     "debug.crash_report.SystemReportM",
     "debug.DebugScreenOverlayM",
     "debug.GlDebugInfoM",
     "debug.KeyboardHandlerM",
-
     "matrix.Matrix4fM",
     "matrix.PoseAccessor",
-
     "profiling.GuiMixin",
     "profiling.KeyboardHandlerM",
     "profiling.LevelRendererMixin",
-
     "render.BufferUploaderM",
     "render.GameRendererMixin",
     "render.GlProgramManagerMixin",
@@ -57,10 +47,6 @@
     "render.entity.model.ModelPartM",
     "render.frame.MinecraftMixin",
     "render.frame.RenderSystemMixin",
-    "render.frapi.BakedModelM",
-    "render.frapi.ItemRendererAccessor",
-    "render.frapi.ItemRendererMixin",
-    "render.frapi.ModelBlockRendererM",
     "render.particle.SingleQuadParticleM",
     "render.target.MainTargetMixin",
     "render.target.RenderTargetMixin",
@@ -69,10 +55,8 @@
     "render.vertex.IndexTypeMixin",
     "render.vertex.VertexBufferM",
     "render.vertex.VertexFormatMixin",
-
     "screen.ScreenM",
     "screen.OptionsScreenM",
-
     "texture.mip.MipmapGeneratorM",
     "texture.image.MNativeImage",
     "texture.image.NativeImageAccessor",
@@ -82,23 +66,16 @@
     "texture.update.MTextureManager",
     "texture.MAbstractTexture",
     "texture.MTextureUtil",
-
     "util.ScreenshotRecorderM",
-
     "vertex.EntityOutlineGeneratorM",
     "vertex.SpriteCoordinateExpanderM",
     "vertex.VertexMultiConsumersM$DoubleM",
     "vertex.VertexMultiConsumersM$MultipleM",
     "vertex.VertexMultiConsumersM$SheetDecalM",
-
     "wayland.InputConstantsM",
     "wayland.MinecraftMixin",
-
-    "texture.mip.MipmapGeneratorM",
-
     "compatibility.PostChainM",
     "compatibility.PostPassM",
-
     "voxel.VoxelShapeMixin"
   ],
   "injectors": {

@@ -90,6 +90,7 @@ public class TerrainBufferBuilder implements VertexConsumer {
 
 	@Override
 	public VertexConsumer addVertex(float x, float y, float z) {
+        this.ensureCapacity(this.vertexSize);
 		this.elementPtr = this.bufferPtr + this.nextElementByte;
 		this.endVertex();
 
@@ -136,6 +137,7 @@ public class TerrainBufferBuilder implements VertexConsumer {
 
 	@Override
 	public VertexConsumer setUv2(int i, int j) {
+        this.vertexBuilder.light(this.elementPtr, (i & 0xFFFF) | (j << 16));
 		return this;
 	}
 }

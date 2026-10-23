@@ -1,0 +1,53 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="LGPL-3.0-only"
+issueTrackerURL="https://github.com/Slaviaaa2/AllForVulkan/issues"
+
+[[mods]]
+modId="allforvulkan"
+version="${version}"
+displayName="All For Vulkan"
+displayURL="https://github.com/Slaviaaa2/AllForVulkan"
+logoFile="assets/vulkanmod/Vlogo.png"
+authors="Slaviaaa2, Collateral and VulkanMod contributors"
+description='''Experimental NeoForge 1.21.1 port of VulkanMod. Mesa/Zink and Iris integration are planned and not yet supported.'''
+displayTest="IGNORE_ALL_VERSION"
+
+[[mixins]]
+config="vulkanmod.mixins.json"
+
+[[mixins]]
+config="allforvulkan.neoforge.mixins.json"
+
+[[dependencies.allforvulkan]]
+modId="neoforge"
+type="required"
+versionRange="[21.1.228,21.2)"
+side="CLIENT"
+
+[[dependencies.allforvulkan]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1]"
+side="CLIENT"
+
+[[dependencies.allforvulkan]]
+modId="vulkanmod"
+type="incompatible"
+reason="AFV already includes the VulkanMod renderer."
+versionRange="[0,)"
+side="CLIENT"
+
+[[dependencies.allforvulkan]]
+modId="sodium"
+type="incompatible"
+reason="Sodium and AFV replace the same terrain renderer; integration is not implemented."
+versionRange="[0,)"
+side="CLIENT"
+
+[[dependencies.allforvulkan]]
+modId="iris"
+type="incompatible"
+reason="Mesa/Zink and Iris rendering integration are not implemented yet."
+versionRange="[0,)"
+side="CLIENT"

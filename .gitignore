@@ -31,3 +31,8 @@ bin/
 # fabric
 
 run/
+
+# Gradle subprojects and client diagnostics
+**/build/
+logs/
+crash-reports/

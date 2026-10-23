@@ -11,6 +11,11 @@ public class MixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public void onLoad(String mixinPackage) {
+        // LWJGL 3.3.3 enumerates all device extensions on the thread-local stack.
+        // Current drivers can exceed the default 64 KiB. Configure before Main
+        // initializes its render-thread stack, including production launches.
+        org.lwjgl.system.Configuration.STACK_SIZE.set(Math.max(1024,
+                org.lwjgl.system.Configuration.STACK_SIZE.get(64)));
     }
 
     @Override

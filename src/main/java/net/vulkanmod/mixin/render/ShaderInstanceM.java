@@ -79,9 +79,9 @@ public class ShaderInstanceM implements ShaderMixed {
         return pipeline;
     }
 
-    @Inject(method = "<init>", at = @At("RETURN"))
-    private void create(ResourceProvider resourceProvider, String name, VertexFormat format, CallbackInfo ci) {
-        String configName = name;
+    @Inject(method = "<init>(Lnet/minecraft/server/packs/resources/ResourceProvider;Lnet/minecraft/resources/ResourceLocation;Lcom/mojang/blaze3d/vertex/VertexFormat;)V", at = @At("RETURN"))
+    private void create(ResourceProvider resourceProvider, ResourceLocation location, VertexFormat format, CallbackInfo ci) {
+        String configName = this.name;
         JsonObject config = ShaderLoadUtil.getJsonConfig("core", configName);
 
         if (config == null) {
@@ -94,7 +94,7 @@ public class ShaderInstanceM implements ShaderMixed {
         program.bindPipeline(this.pipeline);
     }
 
-    @Redirect(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/ShaderInstance;getOrCreate(Lnet/minecraft/server/packs/resources/ResourceProvider;Lcom/mojang/blaze3d/shaders/Program$Type;Ljava/lang/String;)Lcom/mojang/blaze3d/shaders/Program;"))
+    @Redirect(method = "<init>(Lnet/minecraft/server/packs/resources/ResourceProvider;Lnet/minecraft/resources/ResourceLocation;Lcom/mojang/blaze3d/vertex/VertexFormat;)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/ShaderInstance;getOrCreate(Lnet/minecraft/server/packs/resources/ResourceProvider;Lcom/mojang/blaze3d/shaders/Program$Type;Ljava/lang/String;)Lcom/mojang/blaze3d/shaders/Program;"))
     private Program loadNames(ResourceProvider resourceProvider, Program.Type type, String name) {
         String path;
         if (this.name.contains(String.valueOf(ResourceLocation.NAMESPACE_SEPARATOR))) {
@@ -112,7 +112,7 @@ public class ShaderInstanceM implements ShaderMixed {
         return null;
     }
 
-    @Redirect(method = "<init>", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/shaders/Uniform;glBindAttribLocation(IILjava/lang/CharSequence;)V"))
+    @Redirect(method = "<init>(Lnet/minecraft/server/packs/resources/ResourceProvider;Lnet/minecraft/resources/ResourceLocation;Lcom/mojang/blaze3d/vertex/VertexFormat;)V", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/shaders/Uniform;glBindAttribLocation(IILjava/lang/CharSequence;)V"))
     private void bindAttr(int program, int index, CharSequence name) {}
 
     /**

@@ -9,16 +9,10 @@ import net.vulkanmod.vulkan.shader.SPIRVUtils;
 import org.apache.commons.io.IOUtils;
 
 import java.io.*;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 
 public abstract class ShaderLoadUtil {
 
-    private static final String RESOURCES_PATH = SPIRVUtils.class.getResource("/assets/vulkanmod").toExternalForm();
+    private static final String RESOURCES_PATH = "/assets/vulkanmod";
 
     public static void loadShaders(Pipeline.Builder pipelineBuilder, JsonObject config, String configName, String path) {
         String vertexShader = config.has("vertex") ? config.get("vertex").getAsString() : configName;
@@ -55,29 +49,6 @@ public abstract class ShaderLoadUtil {
         }
     }
 
-    public static String getConfigFilePath(String path, String rendertype) {
-        String basePath = "%s/shaders/%s".formatted(RESOURCES_PATH, path);
-        String configPath = "%s/%s/%s.json".formatted(basePath, rendertype, rendertype);
-
-        Path filePath;
-        try {
-            filePath = FileSystems.getDefault().getPath(configPath);
-
-            if (!Files.exists(filePath)) {
-                configPath = "%s/%s.json".formatted(basePath, rendertype);
-                filePath = FileSystems.getDefault().getPath(configPath);
-            }
-
-            if (!Files.exists(filePath)) {
-                return null;
-            }
-        } catch (Throwable e) {
-            throw new RuntimeException(e);
-        }
-
-        return filePath.toString();
-    }
-
     public static JsonObject getJsonConfig(String path, String rendertype) {
         // Check for external shader
         if (rendertype.contains(String.valueOf(ResourceLocation.NAMESPACE_SEPARATOR))) {
@@ -100,7 +71,7 @@ public abstract class ShaderLoadUtil {
                 return null;
             }
 
-            JsonElement jsonElement = JsonParser.parseReader(new BufferedReader(new InputStreamReader(stream)));
+            JsonElement jsonElement = JsonParser.parseReader(new BufferedReader(new InputStreamReader(stream, java.nio.charset.StandardCharsets.UTF_8)));
             stream.close();
 
             return (JsonObject) jsonElement;
@@ -140,7 +111,7 @@ public abstract class ShaderLoadUtil {
                 return null;
             }
 
-            String source = IOUtils.toString(new BufferedReader(new InputStreamReader(stream)));
+            String source = IOUtils.toString(new BufferedReader(new InputStreamReader(stream, java.nio.charset.StandardCharsets.UTF_8)));
             stream.close();
 
             return source;
@@ -166,15 +137,7 @@ public abstract class ShaderLoadUtil {
     }
 
     public static InputStream getInputStream(String path) {
-        try {
-            var path1 = Paths.get(new URI(path));
-
-            if (!Files.exists(path1))
-                return null;
-
-            return Files.newInputStream(path1);
-        } catch (URISyntaxException | IOException e) {
-            throw new RuntimeException(e);
-        }
+        // Class resources work for exploded dev roots and NeoForge's union/JAR loader.
+        return ShaderLoadUtil.class.getResourceAsStream(path);
     }
 }

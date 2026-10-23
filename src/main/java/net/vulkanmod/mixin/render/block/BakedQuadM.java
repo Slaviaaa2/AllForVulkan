@@ -3,7 +3,7 @@ package net.vulkanmod.mixin.render.block;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.core.Direction;
-import net.vulkanmod.render.chunk.build.frapi.helper.NormalHelper;
+import net.vulkanmod.render.model.quad.NormalHelper;
 import net.vulkanmod.render.chunk.cull.QuadFacing;
 import net.vulkanmod.render.model.quad.ModelQuadView;
 import net.vulkanmod.render.model.quad.ModelQuadFlags;

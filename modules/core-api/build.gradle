@@ -1,0 +1,4 @@
+plugins { id 'java-library' }
+group = 'dev.allforvulkan'
+version = rootProject.version
+java { toolchain.languageVersion = JavaLanguageVersion.of(21) }

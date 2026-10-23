@@ -1,6 +1,5 @@
 package net.vulkanmod.render.chunk.build;
 
-import net.fabricmc.fabric.api.rendering.data.v1.RenderAttachedBlockView;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -26,7 +25,7 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.function.Function;
 
-public class RenderRegion implements BlockAndTintGetter, RenderAttachedBlockView {
+public class RenderRegion implements BlockAndTintGetter {
     public static final int WIDTH = 3;
     public static final int SIZE = WIDTH * WIDTH * WIDTH;
 
@@ -40,6 +39,12 @@ public class RenderRegion implements BlockAndTintGetter, RenderAttachedBlockView
     private final int minX, minY, minZ;
     private final int maxX, maxY, maxZ;
     private final Level level;
+    private final it.unimi.dsi.fastutil.longs.Long2ObjectFunction<net.neoforged.neoforge.client.model.data.ModelData> modelData;
+
+    public net.neoforged.neoforge.client.model.data.ModelData getModelData(BlockPos pos) {
+        return modelData.get(pos.asLong());
+    }
+
     private final int blendRadius;
 
     private final PalettedContainer<BlockState>[] blockDataContainers;
@@ -56,6 +61,8 @@ public class RenderRegion implements BlockAndTintGetter, RenderAttachedBlockView
     RenderRegion(Level level, int x, int y, int z, PalettedContainer<BlockState>[] blockData, DataLayer[][] lightData,
                  BiomeData biomeData, Map<BlockPos, BlockEntity> blockEntityMap) {
         this.level = level;
+        // Region construction runs on the render thread. Workers only read this snapshot.
+        this.modelData = level.getModelDataManager().snapshotSectionRegion(x - 1, y - 1, z - 1, x + 1, y + 1, z + 1);
 
         this.minSecX = x - 1;
         this.minSecY = y - 1;

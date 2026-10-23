@@ -516,4 +516,34 @@ public class GlStateManagerM {
         // TODO
         return 0;
     }
+
+    // NeoForge loads LWJGL in its bootstrap layer, outside game mixin transforms.
+    // Route Minecraft's remaining framebuffer/texture entrypoints here instead.
+    @Overwrite(remap = false)
+    public static void _glDeleteFramebuffers(int framebuffer) {
+        VkGlFramebuffer.deleteFramebuffer(framebuffer);
+    }
+
+    @Overwrite(remap = false)
+    public static void _glDeleteRenderbuffers(int renderbuffer) {
+        VkGlRenderbuffer.deleteRenderbuffer(renderbuffer);
+    }
+
+    @Overwrite(remap = false)
+    public static void _glBlitFrameBuffer(int x0, int y0, int x1, int y1,
+            int dx0, int dy0, int dx1, int dy1, int mask, int filter) {
+        VkGlFramebuffer.glBlitFramebuffer(x0, y0, x1, y1, dx0, dy0, dx1, dy1, mask, filter);
+    }
+
+    @Overwrite(remap = false)
+    public static void _getTexImage(int target, int level, int format, int type, long pixels) {
+        VkGlTexture.getTexImage(target, level, format, type, pixels);
+    }
+
+    @Overwrite(remap = false)
+    public static int getBoundFramebuffer() {
+        var framebuffer = VkGlFramebuffer.getBoundFramebuffer();
+        return framebuffer == null ? 0 : framebuffer.id;
+    }
+
 }

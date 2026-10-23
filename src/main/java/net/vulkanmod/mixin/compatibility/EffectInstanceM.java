@@ -28,7 +28,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.asm.mixin.injection.callback.LocalCapture;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -60,20 +59,23 @@ public class EffectInstanceM {
 
     @Unique private static GraphicsPipeline lastPipeline;
     @Unique private GraphicsPipeline pipeline;
+    @Unique private String afv$vertexShader;
+    @Unique private String afv$fragmentShader;
 
     @Inject(method = "<init>",
             at = @At(value = "INVOKE",
                     target = "Lnet/minecraft/client/renderer/EffectInstance;updateLocations()V",
-                    shift = At.Shift.AFTER),
-            locals = LocalCapture.CAPTURE_FAILHARD
+                    shift = At.Shift.AFTER)
     )
-    private void inj(ResourceProvider resourceProvider, String string, CallbackInfo ci, ResourceLocation resourceLocation, Resource resource, Reader reader, JsonObject jsonObject, String string2, String string3) {
-        createShaders(resourceProvider, string2, string3);
+    private void inj(ResourceProvider resourceProvider, String name, CallbackInfo ci) {
+        createShaders(resourceProvider, afv$vertexShader, afv$fragmentShader);
     }
 
     @Redirect(method = "<init>", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/EffectInstance;getOrCreate(Lnet/minecraft/server/packs/resources/ResourceProvider;Lcom/mojang/blaze3d/shaders/Program$Type;Ljava/lang/String;)Lcom/mojang/blaze3d/shaders/EffectProgram;"))
     private EffectProgram redirectShader(ResourceProvider resourceProvider, Program.Type type, String string) {
+        if (type == Program.Type.VERTEX) afv$vertexShader = string;
+        else if (type == Program.Type.FRAGMENT) afv$fragmentShader = string;
         return null;
     }
 

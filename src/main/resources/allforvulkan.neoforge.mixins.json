@@ -1,0 +1,8 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.allforvulkan.neoforge.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": ["NeoForgeWindowMixin"],
+  "injectors": {"defaultRequire": 1}
+}

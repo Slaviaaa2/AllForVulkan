@@ -33,7 +33,7 @@ public class Config {
 
         if(!Files.exists(CONFIG_PATH.getParent())) {
             try {
-                Files.createDirectories(CONFIG_PATH);
+                Files.createDirectories(CONFIG_PATH.getParent());
             } catch (IOException e) {
                 e.printStackTrace();
             }
