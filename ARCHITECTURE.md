@@ -1,6 +1,6 @@
 # All For Vulkan 共通コアと移植設計
 
-更新: 2026-10-24。設計方針。`core-api`（`PlatformServices`）、NeoForgeアダプター、`native-bridge`のMesa/Zink・外部画像共有と、AFV VkDeviceへのフレーム合成診断を追加。以下の全体構成への移行は進行中で、描画本体はまだMinecraft依存を含む。実装済み境界は[開発手順](docs/DEVELOPMENT.md)に記録する。
+更新: 2026-10-24。設計方針。`core-api`（`PlatformServices`）、NeoForgeアダプター、`native-bridge`のMesa/Zink・外部画像共有と、AFV VkDeviceへのフレーム合成診断を追加。以下の全体構成への移行は進行中で、描画本体はまだMinecraft依存を含む。CPUアップロード資源の実GL名登録と、リサイズをまたぐGL context寿命も実装。実装済み境界は[開発手順](docs/DEVELOPMENT.md)に記録する。
 
 ## 目的
 

@@ -13,7 +13,7 @@ import static dev.allforvulkan.bridge.SharedImage.check;
  * The caller verifies after the existing frame fence. Nothing is saved or emitted as an image. */
 final class PatchReadback implements AutoCloseable {
     private long buffer, memory;
-    private int pixels;
+    private int pixels, width, height, format;
     private boolean pending, submitted;
 
     PatchReadback() {
@@ -46,7 +46,7 @@ final class PatchReadback implements AutoCloseable {
             image.transitionImageLayout(stack, command, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
             var region = VkBufferImageCopy.calloc(1, stack);
             region.imageSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
-            int width = Math.min(32, image.width), height = Math.min(32, image.height);
+            width = Math.min(32, image.width); height = Math.min(32, image.height); format = image.format;
             region.imageExtent().set(width, height, 1);
             pixels = width * height;
             vkCmdCopyImageToBuffer(command, image.getId(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, region);
@@ -69,9 +69,16 @@ final class PatchReadback implements AutoCloseable {
             check(vkMapMemory(Vulkan.getVkDevice(), memory, 0, (long) pixels * 4, 0, pointer), "map patch assertion");
             try {
                 var bytes = MemoryUtil.memByteBuffer(pointer.get(0), pixels * 4);
-                for (int i = 0; i < pixels * 4; i += 4)
-                    if ((bytes.get(i) & 255) != 255 || bytes.get(i + 1) != 0 || (bytes.get(i + 2) & 255) != 255 || (bytes.get(i + 3) & 255) != 255)
-                        throw new IllegalStateException("AFV_ZINK_PATCH_FAIL: swapchain patch pixel " + i / 4);
+                int[] colors = {0xFF00FFFF, 0xFFFF00FF, 0x00FFFFFF, 0xFFFFFFFF};
+                for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+                    int color = colors[Math.min(1, y * 2 / height) * 2 + Math.min(1, x * 2 / width)];
+                    int red = color >>> 24, green = color >>> 16 & 255, blue = color >>> 8 & 255;
+                    boolean bgra = format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
+                    int offset = (y * width + x) * 4;
+                    if ((bytes.get(offset) & 255) != (bgra ? blue : red) || (bytes.get(offset + 1) & 255) != green
+                            || (bytes.get(offset + 2) & 255) != (bgra ? red : blue) || (bytes.get(offset + 3) & 255) != 255)
+                        throw new IllegalStateException("AFV_ZINK_PATCH_FAIL: sampled Minecraft texture pixel " + x + "," + y);
+                }
             } finally { vkUnmapMemory(Vulkan.getVkDevice(), memory); }
         }
         pending = submitted = false;

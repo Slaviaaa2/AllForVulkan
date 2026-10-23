@@ -12,8 +12,6 @@ import java.nio.IntBuffer;
 public class VkGlBuffer {
     private static int ID_COUNTER = 1;
     private static final Int2ReferenceOpenHashMap<VkGlBuffer> map = new Int2ReferenceOpenHashMap<>();
-    private static int boundId = 0;
-    private static VkGlBuffer boundBuffer;
 
     private static VkGlBuffer pixelPackBufferBound;
     private static VkGlBuffer pixelUnpackBufferBound;
@@ -26,7 +24,6 @@ public class VkGlBuffer {
     }
 
     public static void glBindBuffer(int target, int buffer) {
-        boundId = buffer;
         VkGlBuffer glBuffer = map.get(buffer);
 
         if (buffer > 0 && glBuffer == null)
@@ -44,30 +41,18 @@ public class VkGlBuffer {
     }
 
     public static void glBufferData(int target, ByteBuffer byteBuffer, int usage) {
-        checkTarget(target);
-
-        // TODO
-
-        pixelUnpackBufferBound = boundBuffer;
+        VkGlBuffer buffer = requireBound(target);
+        buffer.allocate(byteBuffer.remaining());
+        buffer.data.put(byteBuffer.duplicate()).flip();
     }
 
     public static void glBufferData(int target, long size, int usage) {
-        VkGlBuffer buffer = switch (target) {
-            case GL32.GL_PIXEL_PACK_BUFFER -> pixelPackBufferBound;
-            case GL32.GL_PIXEL_UNPACK_BUFFER -> pixelUnpackBufferBound;
-            default -> throw new IllegalStateException("Unexpected value: " + target);
-        };
-
-        buffer.allocate((int) size);
+        if (size < 0 || size > Integer.MAX_VALUE) throw new IllegalArgumentException("Invalid CPU PBO size " + size);
+        requireBound(target).allocate((int) size);
     }
 
     public static ByteBuffer glMapBuffer(int target, int access) {
-        VkGlBuffer buffer = switch (target) {
-            case GL32.GL_PIXEL_PACK_BUFFER -> pixelPackBufferBound;
-            case GL32.GL_PIXEL_UNPACK_BUFFER -> pixelUnpackBufferBound;
-            default -> throw new IllegalStateException("Unexpected value: " + target);
-        };
-
+        VkGlBuffer buffer = requireBound(target);
         ByteBuffer mappedBuffer = buffer.data;
         mappedBuffer.position(0);
         return mappedBuffer;
@@ -86,8 +71,11 @@ public class VkGlBuffer {
     public static void glDeleteBuffers(int id) {
         var buffer = map.remove(id);
 
-        if (buffer != null)
+        if (buffer != null) {
+            if (pixelPackBufferBound == buffer) pixelPackBufferBound = null;
+            if (pixelUnpackBufferBound == buffer) pixelUnpackBufferBound = null;
             buffer.freeData();
+        }
     }
 
     public static VkGlBuffer getPixelUnpackBufferBound() {
@@ -96,6 +84,13 @@ public class VkGlBuffer {
 
     public static VkGlBuffer getPixelPackBufferBound() {
         return pixelPackBufferBound;
+    }
+
+    private static VkGlBuffer requireBound(int target) {
+        checkTarget(target);
+        VkGlBuffer buffer = target == GL32.GL_PIXEL_PACK_BUFFER ? pixelPackBufferBound : pixelUnpackBufferBound;
+        if (buffer == null) throw new IllegalStateException("No pixel buffer bound for " + target);
+        return buffer;
     }
 
     private static void checkTarget(int target) {
@@ -125,6 +120,7 @@ public class VkGlBuffer {
 
     private void freeData() {
         MemoryUtil.memFree(data);
+        data = null;
     }
 
 }

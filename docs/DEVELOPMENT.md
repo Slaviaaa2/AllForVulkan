@@ -121,7 +121,7 @@ other GPUs/OSes, and full-frame/pipeline integration remain to be implemented/te
 
 Passing Iris under Zink alone does not mean Iris is integrated with AFV.
 The opt-in diagnostic now connects this sharing boundary to AFV's own VkDevice
-and frame stages. Resource registration, general GL routing, and Iris's
+and frame stages. CPU texture registration is implemented; GPU-updated resource sharing, general GL routing, and Iris's
 Sodium-specific terrain/vertex and rendering hooks remain to be implemented.
 
 ## In-game Zink image composition (Linux diagnostic)
@@ -135,10 +135,12 @@ Zink's GPU UUID against AFV's VkPhysicalDevice, and imports dedicated external
 images allocated on **AFV's existing VkDevice**. Each in-flight frame has an image,
 bidirectional binary external semaphores and a release command buffer. The normal
 AFV frame fence protects reuse; no extra CPU fence wait, readback, `glFinish` or
-`vkDeviceWaitIdle` is used to transport frames. Zink clears a synthetic magenta
-32x32 patch, which is blitted into the swapchain before PRESENT. Normal AFV output
+`vkDeviceWaitIdle` is used to transport frames. With smoke tests enabled, a real
+GLSL shader samples a CPU-uploaded 2x2 Minecraft texture into a 32x32 patch, which is blitted into the swapchain before PRESENT. Normal AFV output
 elsewhere is unchanged. Resize/shutdown drain at the existing lifecycle boundary,
 then destroy GL imports before Vulkan resources and rebuild the ring on resize.
+The GL context and Minecraft texture registry survive resize; they close only
+after renderer shutdown, so texture names and loaded assets remain valid.
 
 With `afv.smokeTest=true` only, a separate buffer checks **only this bounded patch**
 after the normal frame fence. It emits numbers/pass markers, never image files.
@@ -152,3 +154,40 @@ This diagnostic supports one render-thread GL context, Linux opaque FDs and an
 RGBA8 image. It is not an Iris backend, general GL interception, a complete image
 registry, depth sharing, or a full shader-pack integration. Iris/Sodium admission
 restrictions remain until their actual rendering paths are supported.
+
+
+## CPU texture registration and transfer checks
+
+When `afv.zinkInterop=true`, Minecraft-generated texture IDs come from the real
+GL namespace. `GlTextureRegistry` owns these names, while `VkGlTexture` keeps
+the corresponding Vulkan images. The **original CPU input** is uploaded to each
+API: this currently stores two copies of asset data on the GPU. It does not
+use Vulkan readback as an upload path. TextureUtil preparation and NativeImage
+uploads cover atlases, fonts, animated regions, mip levels and sampler settings;
+GL state touched by internal allocation/upload/sampling is restored. Swapchain
+aliases reserve names without owning the swapchain VkImage; resize deletes old
+alias names and rebuilds only the external frame resources.
+
+CPU upload conversion honors unpack row length, alignment and skipped rows/pixels,
+RGB/BGRA channel order, signed bytes, and both packed 8_8_8_8 orders. Source bounds
+are checked for ByteBuffer and CPU-backed PBO uploads. These PBOs are still CPU
+buffers, not general GL buffer objects. Upload buffers keep their original
+positions; PBO deletion clears bindings. Vulkan staging handles rowLength=0
+and copies exactly through the last uploaded row.
+
+```sh
+# Also runs automatically as part of check/build; no GUI or GPU context needed.
+./gradlew verifyTextureUpload
+```
+
+The in-game smoke test compares private 2x2 Vulkan and real-GL results for packed
+RGBA/BGRA and REV, exercises BGRA row skips and PBO byte offsets, then samples that
+texture in GLSL. Only the resulting 32x32 shared patch is read back per completed
+frame. The block atlas's real GL dimensions and upload counts are checked before
+and after world/resize/reload transitions. Test setup waits/readbacks are separate
+from product image transport.
+
+This is a CPU-upload input bridge. GL writes to these texture objects are not yet
+propagated back to Vulkan, and GPU-rendered Minecraft targets do not acquire GL
+storage through this registry. General buffers/FBOs, depth, MRT and Iris/Sodium
+rendering integration remain required for full compatibility.

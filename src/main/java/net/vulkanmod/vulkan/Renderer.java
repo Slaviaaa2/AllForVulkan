@@ -116,6 +116,8 @@ public class Renderer {
     }
 
     private net.vulkanmod.vulkan.interop.ZinkFrameBridge zinkBridge;
+    private dev.allforvulkan.bridge.ZinkContext zinkContext;
+    private dev.allforvulkan.bridge.GlTextureRegistry glTextures;
 
     public net.vulkanmod.vulkan.interop.ZinkFrameBridge getZinkBridge() { return zinkBridge; }
 
@@ -123,6 +125,10 @@ public class Renderer {
         MemoryManager.createInstance(Renderer.getFramesNum());
         Vulkan.createStagingBuffers();
 
+        if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED) {
+            zinkContext = new dev.allforvulkan.bridge.ZinkContext(32, 32);
+            glTextures = new dev.allforvulkan.bridge.GlTextureRegistry();
+        }
         swapChain = new SwapChain();
         mainPass = DefaultMainPass.create();
 
@@ -136,7 +142,7 @@ public class Renderer {
         allocateCommandBuffers();
         createSyncObjects();
         if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED)
-            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(framesNum);
+            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(zinkContext, framesNum);
     }
 
     private void allocateCommandBuffers() {
@@ -515,7 +521,7 @@ public class Renderer {
         createSyncObjects();
         this.mainPass.onResize();
         if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED)
-            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(framesNum);
+            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(zinkContext, framesNum);
 
         this.onResizeCallbacks.forEach(Runnable::run);
         ((WindowAccessor) (Object) Minecraft.getInstance().getWindow()).getEventHandler().resizeDisplay();
@@ -534,6 +540,8 @@ public class Renderer {
 
         PipelineManager.destroyPipelines();
         VTextureSelector.getWhiteTexture().free();
+        if (glTextures != null) { glTextures.close(); glTextures = null; }
+        if (zinkContext != null) { zinkContext.close(); zinkContext = null; }
     }
 
     private void destroySyncObjects() {

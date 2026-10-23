@@ -68,6 +68,27 @@ public abstract class MNativeImage {
 
         VTextureSelector.uploadSubTexture(level, widthIn, heightIn, xOffset, yOffset, unpackSkipRows, unpackSkipPixels, this.getWidth(), this.buffer);
         VTextureSelector.getBoundTexture().updateTextureSampler(blur, clamp, mipmap);
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        if (registry != null) {
+            var texture = net.vulkanmod.gl.VkGlTexture.getBoundTexture();
+            if (texture == null || texture.getVulkanImage() != VTextureSelector.getBoundTexture())
+                throw new IllegalStateException("NativeImage GL/Vulkan texture binding differs");
+            int glFormat = switch (this.format.name()) {
+                case "RGBA" -> org.lwjgl.opengl.GL11.GL_RGBA;
+                case "RGB" -> org.lwjgl.opengl.GL11.GL_RGB;
+                case "LUMINANCE" -> org.lwjgl.opengl.GL11.GL_RED;
+                case "LUMINANCE_ALPHA" -> org.lwjgl.opengl.GL30.GL_RG;
+                default -> throw new IllegalStateException("Unsupported NativeImage format " + this.format);
+            };
+            registry.upload(texture.id, level, xOffset, yOffset, widthIn, heightIn, glFormat,
+                    org.lwjgl.opengl.GL11.GL_UNSIGNED_BYTE, this.pixels, 1, this.width, unpackSkipRows, unpackSkipPixels);
+            registry.parameter(texture.id, org.lwjgl.opengl.GL11.GL_TEXTURE_MAG_FILTER, blur ? org.lwjgl.opengl.GL11.GL_LINEAR : org.lwjgl.opengl.GL11.GL_NEAREST);
+            registry.parameter(texture.id, org.lwjgl.opengl.GL11.GL_TEXTURE_MIN_FILTER, mipmap
+                    ? (blur ? org.lwjgl.opengl.GL11.GL_LINEAR_MIPMAP_LINEAR : org.lwjgl.opengl.GL11.GL_NEAREST_MIPMAP_LINEAR)
+                    : (blur ? org.lwjgl.opengl.GL11.GL_LINEAR : org.lwjgl.opengl.GL11.GL_NEAREST));
+            registry.parameter(texture.id, org.lwjgl.opengl.GL11.GL_TEXTURE_WRAP_S, clamp ? org.lwjgl.opengl.GL12.GL_CLAMP_TO_EDGE : org.lwjgl.opengl.GL11.GL_REPEAT);
+            registry.parameter(texture.id, org.lwjgl.opengl.GL11.GL_TEXTURE_WRAP_T, clamp ? org.lwjgl.opengl.GL12.GL_CLAMP_TO_EDGE : org.lwjgl.opengl.GL11.GL_REPEAT);
+        }
 
         if (autoClose) {
             this.close();

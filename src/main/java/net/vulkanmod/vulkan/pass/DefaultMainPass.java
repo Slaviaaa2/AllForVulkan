@@ -91,6 +91,8 @@ public class DefaultMainPass implements MainPass {
 
     @Override
     public void cleanUp() {
+        if (this.colorAttachmentTextures != null)
+            for (var texture : this.colorAttachmentTextures) VkGlTexture.unregisterAlias(texture.id);
         this.mainRenderPass.cleanUp();
         this.auxRenderPass.cleanUp();
     }
@@ -143,6 +145,8 @@ public class DefaultMainPass implements MainPass {
         SwapChain swapChain = Renderer.getInstance().getSwapChain();
         var swapChainImages = swapChain.getImages();
         int imageCount = swapChainImages.size();
+        if (this.colorAttachmentTextures != null)
+            for (var texture : this.colorAttachmentTextures) VkGlTexture.unregisterAlias(texture.id);
         this.colorAttachmentTextures = new VkGlTexture[imageCount];
 
         for (int i = 0; i < swapChainImages.size(); i++) {

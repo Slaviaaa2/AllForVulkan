@@ -23,9 +23,22 @@ public class VkGlTexture {
     private static VkGlTexture boundTexture;
     private static int activeTexture = 0;
 
+    private static int unpackAlignment = 4;
     private static int unpackRowLength;
     private static int unpackSkipRows;
     private static int unpackSkipPixels;
+
+    public static final class UploadState implements AutoCloseable {
+        private final int texture = boundTextureId, unit = activeTexture;
+        private final int alignment = unpackAlignment, rows = unpackRowLength, skipRows = unpackSkipRows, skipPixels = unpackSkipPixels;
+        private UploadState() {}
+        @Override public void close() {
+            unpackAlignment = alignment; unpackRowLength = rows; unpackSkipRows = skipRows; unpackSkipPixels = skipPixels;
+            activeTexture(GL30.GL_TEXTURE0 + unit);
+            bindTexture(texture);
+        }
+    }
+    public static UploadState preserveUploadState() { return new UploadState(); }
 
     public static void bindIdToImage(int id, VulkanImage vulkanImage) {
         VkGlTexture texture = map.get(id);
@@ -33,15 +46,17 @@ public class VkGlTexture {
     }
 
     public static int genTextureId() {
-        int id = ID_COUNTER;
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        int id = registry != null ? registry.create() : ID_COUNTER++;
         map.put(id, new VkGlTexture(id));
-        ID_COUNTER++;
         return id;
     }
 
     public static void bindTexture(int id) {
         boundTextureId = id;
         boundTexture = map.get(id);
+        if (dev.allforvulkan.bridge.GlTextureRegistry.active() != null)
+            org.lwjgl.opengl.GL11.glBindTexture(GL11.GL_TEXTURE_2D, Math.max(id, 0));
 
         if (id <= 0)
             return;
@@ -61,10 +76,21 @@ public class VkGlTexture {
     }
 
     public static void glDeleteTextures(int i) {
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        if (registry != null) registry.delete(i);
         VkGlTexture glTexture = map.remove(i);
+        if (boundTexture == glTexture) { boundTexture = null; boundTextureId = 0; }
         VulkanImage image = glTexture != null ? glTexture.vulkanImage : null;
         if (image != null)
             MemoryManager.getInstance().addToFreeable(image);
+    }
+
+    public static void unregisterAlias(int id) {
+        VkGlTexture texture = map.remove(id);
+        if (texture == null) return;
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        if (registry != null) registry.delete(id);
+        if (boundTexture == texture) { boundTexture = null; boundTextureId = 0; }
     }
 
     public static VkGlTexture getTexture(int id) {
@@ -76,6 +102,8 @@ public class VkGlTexture {
 
     public static void activeTexture(int i) {
         activeTexture = i - GL30.GL_TEXTURE0;
+        if (dev.allforvulkan.bridge.GlTextureRegistry.active() != null)
+            org.lwjgl.opengl.GL13.glActiveTexture(i);
         VTextureSelector.setActiveTexture(activeTexture);
     }
 
@@ -85,6 +113,8 @@ public class VkGlTexture {
 
         boundTexture.updateParams(level, width, height, internalFormat, type);
         boundTexture.allocateIfNeeded();
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        if (registry != null) registry.allocate(boundTextureId, level, internalFormat, width, height, border, format, type);
 
         VTextureSelector.bindTexture(activeTexture, boundTexture.vulkanImage);
 
@@ -97,6 +127,8 @@ public class VkGlTexture {
 
         boundTexture.updateParams(level, width, height, internalFormat, type);
         boundTexture.allocateIfNeeded();
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        if (registry != null) registry.allocate(boundTextureId, level, internalFormat, width, height, border, format, type);
 
         VTextureSelector.bindTexture(activeTexture, boundTexture.vulkanImage);
 
@@ -111,58 +143,35 @@ public class VkGlTexture {
     }
 
     public static void texSubImage2D(int target, int level, int xOffset, int yOffset, int width, int height, int format, int type, long pixels) {
-        if (width == 0 || height == 0)
-            return;
-
-        ByteBuffer src;
-
-        VkGlBuffer glBuffer = VkGlBuffer.getPixelUnpackBufferBound();
-        if (glBuffer != null) {
-
-            glBuffer.data.position((int) pixels);
-            src = glBuffer.data;
-        } else {
-            if (pixels != 0L) {
-                src = getByteBuffer(width, height, pixels);
-            } else {
-                src = null;
-            }
-        }
-
-        if (src != null)
-            boundTexture.uploadSubImage(level, xOffset, yOffset, width, height, format, src);
+        if (width == 0 || height == 0) return;
+        VkGlBuffer buffer = VkGlBuffer.getPixelUnpackBufferBound();
+        if (buffer != null) {
+            if (pixels < 0 || pixels > buffer.data.capacity()) throw new IllegalArgumentException("Invalid unpack buffer offset");
+            uploadFromAddress(level, xOffset, yOffset, width, height, format, type,
+                    MemoryUtil.memAddress0(buffer.data) + pixels, buffer.data.capacity() - pixels);
+        } else if (pixels != 0) uploadFromAddress(level, xOffset, yOffset, width, height, format, type, pixels, Long.MAX_VALUE);
     }
 
-    private static ByteBuffer getByteBuffer(int width, int height, long pixels) {
-        ByteBuffer src;
-        // TODO: hardcoded format size
-        int formatSize = 4;
-        int rowLength = unpackRowLength != 0 ? unpackRowLength : width;
-        int offset = (unpackSkipRows * rowLength + unpackSkipPixels) * formatSize;
-        src = MemoryUtil.memByteBuffer(pixels + offset, (rowLength * height - unpackSkipPixels) * formatSize);
-        return src;
+    public static void texSubImage2D(int target, int level, int xOffset, int yOffset, int width, int height, int format, int type, @Nullable ByteBuffer pixels) {
+        if (width == 0 || height == 0) return;
+        VkGlBuffer buffer = VkGlBuffer.getPixelUnpackBufferBound();
+        if (buffer != null) {
+            if (pixels != null) throw new IllegalStateException("CPU pixels supplied with a pixel unpack buffer bound");
+            uploadFromAddress(level, xOffset, yOffset, width, height, format, type, MemoryUtil.memAddress0(buffer.data), buffer.data.capacity());
+        } else if (pixels != null) uploadFromAddress(level, xOffset, yOffset, width, height, format, type,
+                MemoryUtil.memAddress(pixels), pixels.remaining());
     }
 
-    public static void texSubImage2D(int target, int level, int xOffset, int yOffset, int width , int height, int format, int type, @Nullable ByteBuffer pixels) {
-        if (width == 0 || height == 0)
-            return;
-
-        ByteBuffer src;
-
-        VkGlBuffer glBuffer = VkGlBuffer.getPixelUnpackBufferBound();
-        if (glBuffer != null) {
-            if (pixels != null) {
-                throw new IllegalStateException("Trying to use pixel buffer when there is a Pixel Unpack Buffer bound.");
-            }
-
-            glBuffer.data.position(0);
-            src = glBuffer.data;
-        } else {
-            src = pixels;
+    private static void uploadFromAddress(int level, int x, int y, int width, int height, int format, int type, long source, long available) {
+        int required = TextureUpload.requiredBytes(width, height, format, type, unpackAlignment, unpackRowLength, unpackSkipRows, unpackSkipPixels);
+        if (required > available) throw new IllegalArgumentException("Pixel upload exceeds source buffer: " + required + " > " + available);
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        if (registry != null) registry.upload(boundTextureId, level, x, y, width, height, format, type, source,
+                unpackAlignment, unpackRowLength, unpackSkipRows, unpackSkipPixels);
+        try (TextureUpload upload = TextureUpload.decode(source, width, height, format, type, unpackAlignment,
+                unpackRowLength, unpackSkipRows, unpackSkipPixels, boundTexture.vulkanImage.format)) {
+            boundTexture.vulkanImage.uploadSubTextureAsync(level, width, height, x, y, 0, 0, 0, upload.bytes);
         }
-
-        if (src != null)
-            boundTexture.uploadSubImage(level, xOffset, yOffset, width, height, format, src);
     }
 
     public static void texParameteri(int target, int pName, int param) {
@@ -172,6 +181,8 @@ public class VkGlTexture {
         if (boundTexture == null)
             return;
 
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        if (registry != null) registry.parameter(boundTextureId, pName, param);
         switch (pName) {
             case GL30.GL_TEXTURE_MAX_LEVEL -> boundTexture.setMaxLevel(param);
             case GL30.GL_TEXTURE_MAX_LOD -> boundTexture.setMaxLod(param);
@@ -228,7 +239,12 @@ public class VkGlTexture {
     }
 
     public static void pixelStoreI(int pName, int value) {
+        if (value < 0) throw new IllegalArgumentException("Negative pixel-store parameter");
         switch (pName) {
+            case GL11.GL_UNPACK_ALIGNMENT -> {
+                if (value != 1 && value != 2 && value != 4 && value != 8) throw new IllegalArgumentException("Invalid unpack alignment");
+                unpackAlignment = value;
+            }
             case GL11.GL_UNPACK_ROW_LENGTH -> unpackRowLength = value;
             case GL11.GL_UNPACK_SKIP_ROWS -> unpackSkipRows = value;
             case GL11.GL_UNPACK_SKIP_PIXELS -> unpackSkipPixels = value;
@@ -239,8 +255,9 @@ public class VkGlTexture {
         if (target != GL11.GL_TEXTURE_2D)
             throw new UnsupportedOperationException("target != GL_TEXTURE_2D not supported");
 
-        // TODO: crashing
-//        boundTexture.generateMipmaps();
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        if (registry != null) registry.mipmap(boundTextureId);
+        // Vulkan mip generation remains on its existing backend path.
     }
 
     public static void getTexImage(int tex, int level, int format, int type, long pixels) {
@@ -351,23 +368,6 @@ public class VkGlTexture {
         };
 
         vulkanImage.updateTextureSampler(maxLod, samplerFlags);
-    }
-
-    private void uploadSubImage(int level, int xOffset, int yOffset, int width, int height, int format, ByteBuffer pixels) {
-        ByteBuffer src;
-        if (format == GL11.GL_RGB && vulkanImage.format == VK_FORMAT_R8G8B8A8_UNORM) {
-            src = GlUtil.RGBtoRGBA_buffer(pixels);
-        } else if (format == GL30.GL_BGRA && vulkanImage.format == VK_FORMAT_R8G8B8A8_UNORM) {
-            src = GlUtil.BGRAtoRGBA_buffer(pixels);
-        } else {
-            src = pixels;
-        }
-
-        this.vulkanImage.uploadSubTextureAsync(level, width, height, xOffset, yOffset, 0, 0, unpackRowLength, src);
-
-        if (src != pixels) {
-            MemoryUtil.memFree(src);
-        }
     }
 
     void generateMipmaps() {

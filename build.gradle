@@ -66,6 +66,9 @@ def devNatives = hostOs.contains('win') ? 'natives-windows' :
         hostOs.contains('mac') ? (hostArch == 'aarch64' ? 'natives-macos-arm64' : 'natives-macos') : 'natives-linux'
 def nativeTargets = ['natives-linux', 'natives-windows', 'natives-macos', 'natives-macos-arm64']
 dependencies {
+    testImplementation "org.lwjgl:lwjgl:${lwjglVersion}"
+    testImplementation "org.lwjgl:lwjgl-opengl:${lwjglVersion}"
+    testRuntimeOnly "org.lwjgl:lwjgl:${lwjglVersion}:${devNatives}"
     implementation project(':core-api')
     jarJar project(':core-api')
     implementation project(':native-bridge')
@@ -155,3 +158,11 @@ tasks.register('prepareIrisBaseline', Exec) {
 tasks.named('runIrisBaseline') { dependsOn 'prepareIrisBaseline' }
 
 tasks.named('runIrisZinkBaseline') { dependsOn 'prepareIrisBaseline' }
+
+// Pure CPU source-layout regressions; no game session or GPU context is opened.
+tasks.register('verifyTextureUpload', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'net.vulkanmod.gl.TextureUploadChecks'
+}
+tasks.named('check') { dependsOn 'verifyTextureUpload' }

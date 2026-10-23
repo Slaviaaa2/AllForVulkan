@@ -37,6 +37,7 @@ public final class ClientSmokeTest {
         if (client.getOverlay() != null) { stableTicks = 0; return; }
         if (phase == 0 && client.screen instanceof TitleScreen) {
             if (++stableTicks < 60) return;
+            verifyAtlas(client);
             Initializer.LOGGER.info("AFV_SMOKE_TITLE: framebuffer {}x{}", client.getWindow().getWidth(), client.getWindow().getHeight());
             if (!WORLD) { pass(client); return; }
             phase = 1;
@@ -54,6 +55,7 @@ public final class ClientSmokeTest {
         if (phase >= 1 && phase <= 3 && client.level != null && client.player != null && client.screen == null) {
             if (++stableTicks < 120) return;
             stableTicks = 0;
+            verifyAtlas(client);
             if (DrawBuffers.getSubmittedDraws() <= drawBaseline)
                 throw new IllegalStateException("AFV_SMOKE_FAIL: world has not submitted terrain draws");
             if (phase == 1) {
@@ -76,6 +78,16 @@ public final class ClientSmokeTest {
                 client.setScreen(new TitleScreen());
             }
         } else if (phase == 4 && client.screen instanceof TitleScreen && ++stableTicks >= 60) pass(client);
+    }
+
+    private static void verifyAtlas(Minecraft client) {
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        if (registry == null) return;
+        int id = client.getTextureManager().getTexture(net.minecraft.client.renderer.texture.TextureAtlas.LOCATION_BLOCKS).getId();
+        var image = net.vulkanmod.gl.VkGlTexture.getTexture(id).getVulkanImage();
+        registry.verifyDimensions(id, image.width, image.height);
+        if (registry.uploads() == 0) throw new IllegalStateException("No real Minecraft GL uploads");
+        Initializer.LOGGER.info("AFV_ZINK_ATLAS_PASS: id={}, {}x{}, allocations={}, uploads={}", id, image.width, image.height, registry.allocations(), registry.uploads());
     }
 
     private static void pass(Minecraft client) {

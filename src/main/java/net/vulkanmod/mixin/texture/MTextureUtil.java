@@ -45,7 +45,7 @@ public class MTextureUtil {
             GlStateManager._texParameter(GL11.GL_TEXTURE_2D, GL30.GL_TEXTURE_LOD_BIAS, 0.0F);
         }
 
-        if (image == null || image.mipLevels != mipLevels || image.width != width || image.height != height) {
+        if (image == null || image.mipLevels != mipLevels + 1 || image.width != width || image.height != height) {
             if (image != null)
                 image.free();
 
@@ -59,6 +59,12 @@ public class MTextureUtil {
 
             glTexture.setVulkanImage(image);
             VTextureSelector.bindTexture(image);
+        }
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        if (registry != null) {
+            int format = internalGlFormat == NativeImage.InternalGlFormat.RGBA ? GL11.GL_RGBA : GL11.GL_RED;
+            for (int level = 0; level <= mipLevels; level++)
+                registry.allocate(id, level, format, Math.max(1, width >> level), Math.max(1, height >> level), 0, format, GL11.GL_UNSIGNED_BYTE);
         }
     }
 

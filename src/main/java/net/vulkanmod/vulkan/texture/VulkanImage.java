@@ -208,7 +208,8 @@ public class VulkanImage {
     }
 
     public void uploadSubTextureAsync(int mipLevel, int width, int height, int xOffset, int yOffset, int unpackSkipRows, int unpackSkipPixels, int unpackRowLength, long srcPtr) {
-        long uploadSize = (long) (unpackRowLength * height - unpackSkipPixels) * this.formatSize;
+        int rowLength = unpackRowLength == 0 ? width : unpackRowLength;
+        long uploadSize = ((long) (height - 1) * rowLength + width) * this.formatSize;
 
         StagingBuffer stagingBuffer = Vulkan.getStagingBuffer();
 
@@ -219,7 +220,7 @@ public class VulkanImage {
             stagingBuffer.scheduleFree();
         }
 
-        srcPtr += ((long) unpackRowLength * unpackSkipRows + unpackSkipPixels) * this.formatSize;
+        srcPtr += ((long) rowLength * unpackSkipRows + unpackSkipPixels) * this.formatSize;
 
         stagingBuffer.align(this.formatSize);
         stagingBuffer.copyBuffer((int) uploadSize, srcPtr);

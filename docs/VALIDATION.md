@@ -98,3 +98,35 @@ Linux / RTX 3060で以下を実行。
 自前の診断パッチだけであり、ワールド描画の画素一致・Iris互換を証明するものではない。
 Iris/Sodiumの同時導入制限、汎用GL資源経路、深度・MRT・MSAA・実shader pack対応は
 引き続き残る。機能は `afv.zinkInterop` の明示指定時だけ有効。
+
+## CPU画像資源のGL登録と実サンプリング
+
+同じLinux / RTX 3060環境で、CPUからの画像入力をVulkanと実Zinkへ転送する経路を追加。
+これは各API側に資源を持つ入力経路であり、直接GLで変更した画像やGPU描画先の
+双方向共有を実装したものではない。
+
+- `verifyTextureUpload`：RGBA、RGBの行padding、BGRAとrow/skip、R8 alignment、
+  signed byte、packed 8_8_8_8/REV、入力サイズとoverflowの回帰検査が通過。
+- 実機の私有2×2画像でBGRAの行読み飛ばしとPBOのbyte offsetをVulkan側で照合。
+  packed RGBA/BGRAの通常/REVの4通りは、実GLドライバーとVulkanの両方で照合。
+  `AFV_TEXTURE_DUAL_UPLOAD_PASS` を記録。テスト準備中だけの数値readbackであり、
+  製品の画像輸送経路には使用しない。
+- MinecraftのテクスチャIDが実GL名になり、NativeImage／TextureUtil経由の
+  アトラス・フォント・各mip・アニメーション更新をZinkへ転送。
+- block atlasの実GL寸法1024×512と継続的なuploadを、title/world/resize/reloadの
+  各段階で確認。最終Zink実行ではreload後に134,398回のuploadを記録。
+  この回数はアニメーションやフレーム数で変動し、性能目標ではない。
+- GLSLがその2×2の入力を実サンプリングして共有画像へ描画。
+  画面用バッファの32×32診断領域の4色を1,339フレームで数値照合し、
+  `AFV_ZINK_COMPOSITION_PASS` とworld/resize/reload/disconnectの正常終了を記録。
+- resize中もGL contextとテクスチャregistryを保持し、旧swapchain aliasのGL名を解放。
+  共有フレーム資源だけを再生成し、CPU画像のGL名を無効にしない。
+- Luna Mediumで最終build、CPU回帰検査、16依存を含む配布JAR検査が通過。
+
+全画面等のスクリーンショットは取得していない。画素の数値照合は私有テスト画像と
+32×32診断領域に限定され、アトラス全体やワールド全体の画像一致は主張しない。
+Mesaのcopy-box性能警告は残り、速度・メモリ使用量の最適化は未実施。
+Iris/Sodiumの同時導入、render target／depth／MRT／buffer全般の共有は引き続き未達。
+
+同じ最終ソースで `-Dafv.smokeTest=true -Dafv.smokeWorld=true runClient`
+（Zink無効）もworld/resize/reload/disconnectまで通過し、終了コード0を確認した。

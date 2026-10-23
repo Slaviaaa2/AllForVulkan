@@ -164,7 +164,9 @@ public class GlStateManagerM {
      */
     @Overwrite(remap = false)
     public static void _texParameter(int i, int j, float k) {
-        //TODO
+        var registry = dev.allforvulkan.bridge.GlTextureRegistry.active();
+        var texture = VkGlTexture.getBoundTexture();
+        if (registry != null && texture != null) registry.parameter(texture.id, j, k);
     }
 
     /**

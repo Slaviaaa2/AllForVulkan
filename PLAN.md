@@ -1,6 +1,6 @@
 # All For Vulkan 開発計画
 
-更新: 2026-10-24。状態: M0初期実装。NeoForge移植のJavaビルド・RTX 3060でのタイトル画面スモークテストが通過。AFVのワールド・リサイズ・再読込・切断と、通常GL/Zinkの独立したIris比較を検証済み。M0のピクセル比較、M1のAFVフレーム統合、Irisとの同時動作は未達。
+更新: 2026-10-24。状態: M0初期実装。NeoForge移植のJavaビルド・RTX 3060でのタイトル画面スモークテストが通過。AFVのワールド・リサイズ・再読込・切断と、通常GL/Zinkの独立したIris比較を検証済み。M1のAFVフレーム接続は小領域の合成診断まで実装。M0の描画全体のピクセル比較と、Irisとの同時動作は未達。
 
 ## 目的と対象
 
@@ -156,6 +156,12 @@ macOSはVulkan実装とGL機能の制約を別に評価する。
 - AFV VkDeviceでの共有画像生成、実Zinkコンテキスト、双方向外部semaphore、
   フレームフェンスに沿ったring再利用とswapchainへの32×32診断合成を実装。
   resize時には既存のdevice idle後にringとGL/Vulkan共有資源を再生成する。
-- 最優先の残作業はGL資源IDの登録と経路統合、IrisのSodium依存描画／頂点形式／pass統合。
+- CPUから読み込むMinecraftテクスチャを実GL名で登録し、NativeImage・アトラス・
+  フォント・各mip・sampler設定をZinkにも転送する経路を追加。
+  リサイズではGL contextとテクスチャを保持し、共有フレームringのみ再生成する。
+  GLSLで2×2の入力画像を実サンプリングした32×32領域をVulkan側で照合。
+- GL unpack alignment/row/skip、BGRA、packed RGBA/BGRA、PBOオフセットの転送を修正・検証。
+- 最優先の残作業は描画先・GPU更新資源の共有と双方向のGL資源経路、
+  IrisのSodium依存描画／頂点形式／pass統合。
   起動制限だけを解除してIris対応と扱うことはしない。
 - 影・複数pass・各種pack・深度/MSAA等の完全互換テスト、他MOD/OS/GPUの範囲拡張は継続する。
