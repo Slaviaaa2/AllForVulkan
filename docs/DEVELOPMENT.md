@@ -74,3 +74,52 @@ Iris baseline. Extract renderer dependencies into common modules incrementally.
 Then build M1's isolated Mesa/Zink context, physical-device identity checks,
 external-memory capability probing and bidirectional semaphore sharing. No fake
 GL capabilities, readback-based product path or Iris compatibility claims.
+
+## World lifecycle and Iris comparisons
+
+```sh
+# AFV: creates a fresh flat save, verifies actual indexed terrain submissions,
+# resizes to 960x540, reloads resources, disconnects and returns to title.
+./gradlew -Dafv.smokeTest=true -Dafv.smokeWorld=true runClient
+
+# Unmodified, SHA-512-pinned Iris 1.8.12 + Sodium 0.6.13, without AFV.
+# A test-only mod checks that an IrisRenderingPipeline and shaders stay active.
+./gradlew runIrisBaseline
+
+# Same test under real Mesa/Zink desktop GL, using GLFW's EGL context path.
+./gradlew runIrisZinkBaseline
+
+# Standalone M1 prototype: compute pixels and external-memory/semaphore exchange.
+./gradlew :native-bridge:run
+```
+
+Iris comparisons use **only** `run-iris-baseline/` and the `baseline` source set.
+`compatibility/iris-baseline.lock.json` pins both upstream JARs and SHA-512 hashes;
+`prepareIrisBaseline` downloads/verifies them and copies the tiny, repository-owned
+`tests/shaderpacks/AFV-Smoke` pack. Unknown JARs in that comparison directory cause
+preparation to stop rather than silently altering the fixed test configuration.
+The test-only mod and its mixins are not included in AFV's production JAR.
+Run these GUI comparisons sequentially: they share one isolated directory.
+Normal AFV clients load only `allforvulkan`; they do not load the baseline fixture.
+
+The native bridge prototype is a separate application, **not embedded in the
+Minecraft JAR yet**. It requires Linux x64, system Mesa/Zink and the Mesa EGL
+vendor manifest. Override its path with `-PmesaEglVendor=/path/to/mesa.json` for
+both Zink tasks. Environment overrides are applied only to the respective child
+process. It verifies actual GL renderer strings/capabilities and Vulkan physical
+GPU UUID equality before allocating an exportable, dedicated RGBA8 optimal image.
+Opaque memory and semaphore FDs transfer ownership to GL on successful imports.
+External queue ownership, layouts and semaphore signal/wait pairs are explicit.
+
+The native probe tests 16x16 and 31x31 allocations, eight round trips each:
+Vulkan clears green, Zink sees green, GL clears magenta, Vulkan sees magenta.
+Private diagnostic readbacks assert the result; **image transport is shared GPU
+memory**, not a CPU copy. The single test command buffer is fence-serialized for
+verification, and teardown drains the test devices. These waits/readbacks are
+not an implemented product frame path. Depth/stencil, MSAA, MRT, other formats,
+other GPUs/OSes, and AFV in-frame presentation remain to be implemented/tested.
+
+Passing Iris under Zink alone does not mean Iris is integrated with AFV.
+The next integration must connect this sharing boundary to AFV's own VkDevice,
+resource registry and frame stages, route GL through a genuine Mesa context,
+and address Iris's Sodium-specific terrain/vertex and rendering hooks.

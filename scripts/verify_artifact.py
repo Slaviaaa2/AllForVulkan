@@ -15,6 +15,8 @@ def verify(path: Path) -> None:
         assert metadata['mods'][0]['modId'] == 'allforvulkan', 'Incorrect mod ID'
         assert '${version}' not in jar.read('META-INF/neoforge.mods.toml').decode(), 'Unexpanded version'
         assert 'fabric.mod.json' not in names, 'Fabric entrypoint in NeoForge artifact'
+        assert not any(n.startswith('dev/allforvulkan/baseline/') for n in names), 'Comparison fixture leaked into production JAR'
+        assert 'afvbaseline.mixins.json' not in names, 'Comparison mixins leaked into production JAR'
         assert 'META-INF/accesstransformer.cfg' in names
         assert 'LICENSE' in names and 'NOTICE.md' in names
         assert 'net/vulkanmod/vulkan/Vulkan.class' in names, 'Renderer missing'

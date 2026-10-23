@@ -7,3 +7,5 @@ pluginManagement {
 rootProject.name = 'AllForVulkan'
 include 'core-api'
 project(':core-api').projectDir = file('modules/core-api')
+include 'native-bridge'
+project(':native-bridge').projectDir = file('modules/native-bridge')

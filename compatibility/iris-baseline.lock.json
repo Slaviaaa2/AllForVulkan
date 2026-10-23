@@ -1,0 +1,22 @@
+{
+  "minecraft": "1.21.1",
+  "neoforge": "21.1.228",
+  "mods": [
+    {
+      "project": "IrisShaders/Iris",
+      "modrinth_version": "t3ruzodq",
+      "version": "1.8.12+1.21.1-neoforge",
+      "filename": "iris-neoforge-1.8.12+mc1.21.1.jar",
+      "url": "https://cdn.modrinth.com/data/YL57xq9U/versions/t3ruzodq/iris-neoforge-1.8.12%2Bmc1.21.1.jar",
+      "sha512": "57b8026a3c3c433cf6123d63dc6ce7e11f6d480a72926370db1fc7f2b06059bc16a753ecd7e7af659c19e90b592103196b0e89585ce4f0744a4ca433f59bcf1a"
+    },
+    {
+      "project": "CaffeineMC/sodium",
+      "modrinth_version": "Pb3OXVqC",
+      "version": "0.6.13+mc1.21.1-neoforge",
+      "filename": "sodium-neoforge-0.6.13+mc1.21.1.jar",
+      "url": "https://cdn.modrinth.com/data/AANobbMI/versions/Pb3OXVqC/sodium-neoforge-0.6.13%2Bmc1.21.1.jar",
+      "sha512": "ce58f34d05d96c0a109a5cea23c741f6bdb2e6be31fc087c5989274cefca5f10ba0c08c62083cf554a51f2c7667bf46e4164383f675c844e77633aef2659996b"
+    }
+  ]
+}

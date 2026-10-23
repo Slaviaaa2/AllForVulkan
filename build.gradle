@@ -12,24 +12,45 @@ java {
 }
 evaluationDependsOn(':core-api')
 sourceSets.main.java.srcDir 'platform/neoforge/src/main/java'
+sourceSets { baseline }
 repositories { mavenCentral() }
 neoForge {
     version = project.neo_version
+    addModdingDependenciesTo sourceSets.baseline
     accessTransformers.from 'src/main/resources/META-INF/accesstransformer.cfg'
     runs {
+        irisZinkBaseline {
+            client()
+            sourceSet = sourceSets.baseline
+            gameDirectory = file('run-iris-baseline')
+            systemProperty 'afv.expectZink', 'true'
+            environment 'MESA_LOADER_DRIVER_OVERRIDE', 'zink'
+            environment 'GALLIUM_DRIVER', 'zink'
+            environment '__EGL_VENDOR_LIBRARY_FILENAMES', providers.gradleProperty('mesaEglVendor').getOrElse('/usr/share/glvnd/egl_vendor.d/50_mesa.json')
+        }
+        irisBaseline {
+            client()
+            sourceSet = sourceSets.baseline
+            gameDirectory = file('run-iris-baseline')
+        }
         client {
             client()
             gameDirectory = file('run')
             systemProperty 'afv.smokeTest', System.getProperty('afv.smokeTest', 'false')
+            systemProperty 'afv.smokeWorld', System.getProperty('afv.smokeWorld', 'false')
         }
     }
     mods {
+        baseline { sourceSet sourceSets.baseline }
         allforvulkan {
             sourceSet sourceSets.main
             sourceSet project(':core-api').sourceSets.main
         }
     }
 }
+neoForge.runs.irisBaseline.loadedMods = [neoForge.mods.baseline]
+neoForge.runs.irisZinkBaseline.loadedMods = [neoForge.mods.baseline]
+neoForge.runs.client.loadedMods = [neoForge.mods.allforvulkan]
 ext.lwjglVersion = '3.3.3'
 def hostOs = System.getProperty('os.name').toLowerCase(Locale.ROOT)
 def hostArch = System.getProperty('os.arch')
@@ -117,3 +138,10 @@ tasks.register('prepareAfvClient') {
     }
 }
 tasks.named('runClient') { dependsOn 'prepareAfvClient' }
+
+tasks.register('prepareIrisBaseline', Exec) {
+    commandLine 'python3', 'scripts/prepare_iris_baseline.py'
+}
+tasks.named('runIrisBaseline') { dependsOn 'prepareIrisBaseline' }
+
+tasks.named('runIrisZinkBaseline') { dependsOn 'prepareIrisBaseline' }

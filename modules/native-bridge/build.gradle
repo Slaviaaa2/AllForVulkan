@@ -1,0 +1,21 @@
+plugins { id 'application' }
+group = 'dev.allforvulkan'
+version = rootProject.version
+java { toolchain.languageVersion = JavaLanguageVersion.of(21) }
+repositories { mavenCentral() }
+dependencies {
+    implementation project(':core-api')
+    ['lwjgl', 'lwjgl-egl', 'lwjgl-opengl', 'lwjgl-vulkan'].each {
+        implementation "org.lwjgl:${it}:3.3.3"
+    }
+    runtimeOnly 'org.lwjgl:lwjgl:3.3.3:natives-linux'
+    runtimeOnly 'org.lwjgl:lwjgl-opengl:3.3.3:natives-linux'
+}
+application { mainClass = 'dev.allforvulkan.bridge.ZinkProbe' }
+tasks.named('run', JavaExec) {
+    systemProperty 'org.lwjgl.system.stackSize', '1024'
+    // These variables affect this probe subprocess only, never the game or shell.
+    environment 'MESA_LOADER_DRIVER_OVERRIDE', 'zink'
+    environment 'GALLIUM_DRIVER', 'zink'
+    environment '__EGL_VENDOR_LIBRARY_FILENAMES', providers.gradleProperty('mesaEglVendor').getOrElse('/usr/share/glvnd/egl_vendor.d/50_mesa.json')
+}

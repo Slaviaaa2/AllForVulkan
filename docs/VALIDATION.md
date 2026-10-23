@@ -26,8 +26,8 @@ Mixinクラス、ライセンス、共通API、ネイティブJAR、重複しな
 
 実行結果は初期移植の開発クライアントで確認した。ゲーム画面のスクリーンショットは
 取得していないため、タイトル画面への到達とフレーム進行はログによる検証である。
-画面のピクセル比較・ワールド描画・他OS/GPU・配布JARを実ランチャーに入れた起動は
-別の検証が必要。
+画面のピクセル比較・他OS/GPU・配布JARを実ランチャーに入れた起動は
+別の検証が必要。ワールド等の追加実機結果は下の表に記録する。
 
 ## 起動で修正した移植点
 
@@ -41,6 +41,34 @@ Mixinクラス、ライセンス、共通API、ネイティブJAR、重複しな
 
 ## 未達の項目
 
-M0全体の合格宣言はまだ行わない。ワールド、resize、再読込、Iris比較構成が必要。
-Mesa/Zinkとの接続・外部メモリ／セマフォ共有・Iris互換性は未実装。
+M0全体の合格宣言はまだ行わない。描画のピクセル比較が必要。
+Mesa/Zink試作のAFV表示フレームへの接続と、Irisとの同時動作は未実装。
 直接LWJGL/JNIを呼ぶMODの包括的な捕捉も未実装。
+
+## 追加の実機検証（2026-10-24）
+
+いずれもLinux x64 / RTX 3060 / NVIDIA 595.99.02 / JDK 21で実行。
+全画面・アプリ画面のスクリーンショットは取得していない。
+
+| 構成 | 確認した範囲 | 結果 |
+| --- | --- | --- |
+| AFV単体 | 新規flat world、地形の実Vk indexed draw、960x540 resize、resource reload、切断、titleへ復帰 | `AFV_SMOKE_PASS: scenario=world-resize-reload-disconnect`、終了コード0 |
+| 独立したZink EGL | GL 4.6 core / GLSL 4.60、compute image-storeの16x16全画素 | `AFV_ZINK_PROBE_PASS`、終了コード0 |
+| 別VkDeviceとの実画像共有 | GPU UUID一致、RGBA8 optimal外部メモリFD、双方向semaphore、EXTERNAL queue ownership、16x16と31x31各8往復 | `AFV_EXTERNAL_IMAGE_PASS`、全比較画素一致 |
+| Iris 1.8.12 + Sodium 0.6.13、通常GL（AFVなし） | 自作AFV-Smoke pack、実IrisRenderingPipeline、world/resize/shader reload/disconnect | `AFV_IRIS_BASELINE_PASS`、終了コード0 |
+| 同じIris + Sodium、実Zink（AFVなし） | GL rendererがZinkであることを照合し、同じシナリオ | `AFV_IRIS_BASELINE_PASS`、終了コード0 |
+
+Irisはシェーダー無効へのfallbackとstored errorを毎段階で検査。
+ただしテスト用packはterrain、textured、shadow、finalの小さな入力に限る。
+Irisの全描画機能、市販・公開pack全般、AFVとIrisの同時実行を証明する結果ではない。
+NeoForgeは1.21.1で一部1.21の版指定をVersionSupportMatrixで許可するため、
+Iris JARのMinecraft版範囲だけから非対応と判定せず、未改変JARを実際に起動した。
+
+Zink側のMesaは25.2.8、rendererは
+`zink Vulkan 1.4(NVIDIA GeForce RTX 3060 (NVIDIA_PROPRIETARY))`。
+共有画像の輸送にはCPUコピーを使わず、数値判定のためだけに私有の小画像をreadbackする。
+AFV表示フレームへの組込み、深度/stencil、MSAA等はまだ検証していない。
+この環境にKhronos validation layerは導入されていないため、validation layerによる
+Vulkan仕様検証は未実施。Zink比較には性能警告や通常のshader sampler警告が残る。
+
+描画のピクセル比較は引き続き未実施であり、M0/M1全体の完了宣言ではない。

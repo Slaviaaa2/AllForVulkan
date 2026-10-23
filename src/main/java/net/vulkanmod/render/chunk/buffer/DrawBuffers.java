@@ -24,6 +24,10 @@ import java.util.EnumMap;
 import static org.lwjgl.vulkan.VK10.*;
 
 public class DrawBuffers {
+    private static long submittedDraws;
+    /** Render-thread diagnostic: number of actual indexed draws recorded. */
+    public static long getSubmittedDraws() { return submittedDraws; }
+
     public static final int VERTEX_SIZE = PipelineManager.terrainVertexFormat.getVertexSize();
     public static final int INDEX_SIZE = Short.BYTES;
 
@@ -265,6 +269,7 @@ public class DrawBuffers {
         indirectBuffer.recordCopyCmd(byteBuffer.position(0));
 
         vkCmdDrawIndexedIndirect(Renderer.getCommandBuffer(), indirectBuffer.getId(), indirectBuffer.getOffset(), drawCount, CMD_STRIDE);
+        submittedDraws += drawCount;
     }
 
     public void buildDrawBatchesDirect(Vec3 cameraPos, StaticQueue<RenderSection> queue, TerrainRenderType terrainRenderType) {
@@ -314,6 +319,7 @@ public class DrawBuffers {
                     }
 
                     vkCmdDrawIndexed(commandBuffer, indexCount, 1, firstIndex, vertexOffset, baseInstance);
+                    submittedDraws++;
                 }
             }
 
@@ -345,6 +351,7 @@ public class DrawBuffers {
                 }
 
                 vkCmdDrawIndexed(commandBuffer, indexCount, 1, firstIndex, vertexOffset, baseInstance);
+                    submittedDraws++;
             }
         }
     }

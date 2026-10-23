@@ -20,3 +20,10 @@ NeoForge target; Fabric-specific upstream sources remain recoverable in Git.
 The LWJGL native packaging approach was informed by VulkanMod-Reforged commit
 `0618965fbedb71ca2ee2e5d4528fcedc4fb27551`, build.gradle. Reforged is a reference,
 not an AFV runtime dependency. LWJGL libraries retain their own license notices.
+
+
+The standalone native-bridge prototype uses system Mesa/Zink and Vulkan via
+LWJGL. Mesa binaries are not redistributed. Iris and Sodium comparison artifacts
+are downloaded from their original Modrinth CDN using pinned checksums; neither
+is included in AFV's distribution or relicensed. `tests/shaderpacks/AFV-Smoke`
+and the baseline fixture are AFV-owned test sources, not third-party shader packs.

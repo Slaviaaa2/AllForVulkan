@@ -36,3 +36,6 @@ run/
 **/build/
 logs/
 crash-reports/
+
+# Isolated comparison instances
+/run-iris-baseline/
