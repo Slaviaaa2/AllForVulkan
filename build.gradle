@@ -11,6 +11,7 @@ java {
     withSourcesJar()
 }
 evaluationDependsOn(':core-api')
+evaluationDependsOn(':native-bridge')
 sourceSets.main.java.srcDir 'platform/neoforge/src/main/java'
 sourceSets { baseline }
 repositories { mavenCentral() }
@@ -38,6 +39,12 @@ neoForge {
             gameDirectory = file('run')
             systemProperty 'afv.smokeTest', System.getProperty('afv.smokeTest', 'false')
             systemProperty 'afv.smokeWorld', System.getProperty('afv.smokeWorld', 'false')
+            systemProperty 'afv.zinkInterop', System.getProperty('afv.zinkInterop', 'false')
+            if (Boolean.getBoolean('afv.zinkInterop')) {
+                environment 'MESA_LOADER_DRIVER_OVERRIDE', 'zink'
+                environment 'GALLIUM_DRIVER', 'zink'
+                environment '__EGL_VENDOR_LIBRARY_FILENAMES', providers.gradleProperty('mesaEglVendor').getOrElse('/usr/share/glvnd/egl_vendor.d/50_mesa.json')
+            }
         }
     }
     mods {
@@ -45,6 +52,7 @@ neoForge {
         allforvulkan {
             sourceSet sourceSets.main
             sourceSet project(':core-api').sourceSets.main
+            sourceSet project(':native-bridge').sourceSets.main
         }
     }
 }
@@ -60,7 +68,9 @@ def nativeTargets = ['natives-linux', 'natives-windows', 'natives-macos', 'nativ
 dependencies {
     implementation project(':core-api')
     jarJar project(':core-api')
-    ['vulkan', 'shaderc', 'vma'].each { module ->
+    implementation project(':native-bridge')
+    jarJar project(':native-bridge')
+    ['vulkan', 'shaderc', 'vma', 'egl'].each { module ->
         implementation "org.lwjgl:lwjgl-${module}:${lwjglVersion}"
         additionalRuntimeClasspath "org.lwjgl:lwjgl-${module}:${lwjglVersion}"
         jarJar "org.lwjgl:lwjgl-${module}:${lwjglVersion}"

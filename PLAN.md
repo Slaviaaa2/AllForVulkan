@@ -139,7 +139,7 @@ M1は方式選定の判定点。共有色画像だけでなく、M2/M3に必要�
 OS・GPUは未回答。最初の実証は開発環境に合わせたLinux x86_64を仮候補とし、Windows用handle/配布も設計から考慮する。対象OSの回答があれば優先順を変える。
 macOSはVulkan実装とGL機能の制約を別に評価する。
 
-次の実装は **独立試作で確認したMesa/Zink外部画像共有をAFVのVkDeviceと表示フレームへ接続し、Irisの描画passとGL資源の経路を統合すること**。フォーク作成とNeoForge移植の初期実装は実施済み。
+次の実装は **AFVフレームへのZink共有画像合成を基に、GL資源の登録・描画pass・IrisのSodium依存経路を統合すること**。フォーク作成とNeoForge移植の初期実装は実施済み。
 先に大量のGLラッパーを書くのではなく、最も不確実な資源・同期の接続を実際に成立させる。
 その結果で共有境界を固定し、汎用互換層とIris統合へ進む。
 
@@ -153,7 +153,9 @@ macOSはVulkan実装とGL機能の制約を別に評価する。
   2サイズ×8往復のGPU共有と数値結果を確認。検証用readbackは製品転送経路ではない。
 - Iris 1.8.12 / Sodium 0.6.13と自作テスト用packを固定。
   通常GL・Zinkの対照構成で実IrisRenderingPipelineを確認し、world/resize/reload/disconnectが通過。
-- 最優先の残作業はAFV VkDeviceでの共有資源生成・フレーム表示、Mesa側GLコンテキストと
-  GL資源ID経路、IrisのSodium依存描画／頂点形式／pass統合。
+- AFV VkDeviceでの共有画像生成、実Zinkコンテキスト、双方向外部semaphore、
+  フレームフェンスに沿ったring再利用とswapchainへの32×32診断合成を実装。
+  resize時には既存のdevice idle後にringとGL/Vulkan共有資源を再生成する。
+- 最優先の残作業はGL資源IDの登録と経路統合、IrisのSodium依存描画／頂点形式／pass統合。
   起動制限だけを解除してIris対応と扱うことはしない。
 - 影・複数pass・各種pack・深度/MSAA等の完全互換テスト、他MOD/OS/GPUの範囲拡張は継続する。

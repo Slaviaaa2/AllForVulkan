@@ -35,6 +35,8 @@ def verify(path: Path) -> None:
                 assert f'META-INF/jarjar/lwjgl-{module}-3.3.3-{classifier}.jar' in paths
         assert 'META-INF/jarjar/lwjgl-vulkan-3.3.3.jar' in paths
         assert any('core-api-' in p for p in paths), 'Shared API missing'
+        assert any('native-bridge-' in p for p in paths), 'Native bridge missing'
+        assert 'META-INF/jarjar/lwjgl-egl-3.3.3.jar' in paths, 'EGL binding missing'
         for item in embedded:
             with ZipFile(BytesIO(jar.read(item['path']))) as nested:
                 entries = nested.namelist()

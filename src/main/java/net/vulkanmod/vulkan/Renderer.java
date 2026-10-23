@@ -115,6 +115,10 @@ public class Renderer {
         vkCmdSetLineWidth(INSTANCE.currentCmdBuffer, width);
     }
 
+    private net.vulkanmod.vulkan.interop.ZinkFrameBridge zinkBridge;
+
+    public net.vulkanmod.vulkan.interop.ZinkFrameBridge getZinkBridge() { return zinkBridge; }
+
     private void init() {
         MemoryManager.createInstance(Renderer.getFramesNum());
         Vulkan.createStagingBuffers();
@@ -131,6 +135,8 @@ public class Renderer {
 
         allocateCommandBuffers();
         createSyncObjects();
+        if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED)
+            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(framesNum);
     }
 
     private void allocateCommandBuffers() {
@@ -269,6 +275,7 @@ public class Renderer {
             }
 
             imageIndex = pImageIndex.get(0);
+            if (zinkBridge != null) zinkBridge.prepare(currentFrame);
 
             this.beginRenderPass(stack);
         }
@@ -325,6 +332,11 @@ public class Renderer {
             submitInfo.waitSemaphoreCount(1);
             submitInfo.pWaitSemaphores(stack.longs(imageAvailableSemaphores.get(currentFrame)));
             submitInfo.pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT));
+            if (zinkBridge != null) {
+                submitInfo.waitSemaphoreCount(2);
+                submitInfo.pWaitSemaphores(stack.longs(imageAvailableSemaphores.get(currentFrame), zinkBridge.waitSemaphore()));
+                submitInfo.pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT));
+            }
             submitInfo.pSignalSemaphores(stack.longs(renderFinishedSemaphores.get(currentFrame)));
             submitInfo.pCommandBuffers(stack.pointers(currentCmdBuffer));
 
@@ -334,6 +346,8 @@ public class Renderer {
                 vkResetFences(device, inFlightFences.get(currentFrame));
                 throw new RuntimeException("Failed to submit draw command buffer: %s".formatted(VkResult.decode(vkResult)));
             }
+
+            if (zinkBridge != null) zinkBridge.submitted();
 
             VkPresentInfoKHR presentInfo = VkPresentInfoKHR.calloc(stack);
             presentInfo.sType(VK_STRUCTURE_TYPE_PRESENT_INFO_KHR);
@@ -480,6 +494,8 @@ public class Renderer {
         //Semaphores need to be recreated in order to make them unsignaled
         destroySyncObjects();
 
+        // Device is idle here. Rebuild the bridge ring with the frame-fence ring.
+        if (zinkBridge != null) { zinkBridge.close(); zinkBridge = null; }
         int newFramesNum = Initializer.CONFIG.frameQueueSize;
 
         if (framesNum != newFramesNum) {
@@ -498,6 +514,8 @@ public class Renderer {
 
         createSyncObjects();
         this.mainPass.onResize();
+        if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED)
+            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(framesNum);
 
         this.onResizeCallbacks.forEach(Runnable::run);
         ((WindowAccessor) (Object) Minecraft.getInstance().getWindow()).getEventHandler().resizeDisplay();
@@ -506,6 +524,7 @@ public class Renderer {
     }
 
     public void cleanUpResources() {
+        if (zinkBridge != null) { zinkBridge.close(); zinkBridge = null; }
         WorldRenderer.getInstance().cleanUp();
         destroySyncObjects();
 

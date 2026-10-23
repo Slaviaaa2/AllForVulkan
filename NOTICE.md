@@ -22,7 +22,7 @@ The LWJGL native packaging approach was informed by VulkanMod-Reforged commit
 not an AFV runtime dependency. LWJGL libraries retain their own license notices.
 
 
-The standalone native-bridge prototype uses system Mesa/Zink and Vulkan via
+The embedded native-bridge and its standalone diagnostic use system Mesa/Zink and Vulkan via
 LWJGL. Mesa binaries are not redistributed. Iris and Sodium comparison artifacts
 are downloaded from their original Modrinth CDN using pinned checksums; neither
 is included in AFV's distribution or relicensed. `tests/shaderpacks/AFV-Smoke`

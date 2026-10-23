@@ -11,6 +11,8 @@ public class MixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public void onLoad(String mixinPackage) {
+        if (Boolean.getBoolean("afv.zinkInterop"))
+            org.lwjgl.system.Configuration.OPENGL_EXPLICIT_INIT.set(true);
         // LWJGL 3.3.3 enumerates all device extensions on the thread-local stack.
         // Current drivers can exceed the default 64 KiB. Configure before Main
         // initializes its render-thread stack, including production launches.

@@ -71,8 +71,8 @@ loader, and shaderc include buffers live until the native release callback.
 
 Finish M0 title/world/resize/reload checks on real GPUs, including an independent
 Iris baseline. Extract renderer dependencies into common modules incrementally.
-Then build M1's isolated Mesa/Zink context, physical-device identity checks,
-external-memory capability probing and bidirectional semaphore sharing. No fake
+Extend M1's isolated Mesa/Zink context and external image/semaphore sharing
+from the current game-frame diagnostic into resource and rendering integration. No fake
 GL capabilities, readback-based product path or Iris compatibility claims.
 
 ## World lifecycle and Iris comparisons
@@ -102,8 +102,8 @@ The test-only mod and its mixins are not included in AFV's production JAR.
 Run these GUI comparisons sequentially: they share one isolated directory.
 Normal AFV clients load only `allforvulkan`; they do not load the baseline fixture.
 
-The native bridge prototype is a separate application, **not embedded in the
-Minecraft JAR yet**. It requires Linux x64, system Mesa/Zink and the Mesa EGL
+The native bridge is embedded in the Minecraft JAR and also provides a standalone
+probe application. It requires Linux x64, system Mesa/Zink and the Mesa EGL
 vendor manifest. Override its path with `-PmesaEglVendor=/path/to/mesa.json` for
 both Zink tasks. Environment overrides are applied only to the respective child
 process. It verifies actual GL renderer strings/capabilities and Vulkan physical
@@ -117,9 +117,38 @@ Private diagnostic readbacks assert the result; **image transport is shared GPU
 memory**, not a CPU copy. The single test command buffer is fence-serialized for
 verification, and teardown drains the test devices. These waits/readbacks are
 not an implemented product frame path. Depth/stencil, MSAA, MRT, other formats,
-other GPUs/OSes, and AFV in-frame presentation remain to be implemented/tested.
+other GPUs/OSes, and full-frame/pipeline integration remain to be implemented/tested.
 
 Passing Iris under Zink alone does not mean Iris is integrated with AFV.
-The next integration must connect this sharing boundary to AFV's own VkDevice,
-resource registry and frame stages, route GL through a genuine Mesa context,
-and address Iris's Sodium-specific terrain/vertex and rendering hooks.
+The opt-in diagnostic now connects this sharing boundary to AFV's own VkDevice
+and frame stages. Resource registration, general GL routing, and Iris's
+Sodium-specific terrain/vertex and rendering hooks remain to be implemented.
+
+## In-game Zink image composition (Linux diagnostic)
+
+```sh
+./gradlew -Dafv.zinkInterop=true -Dafv.smokeTest=true -Dafv.smokeWorld=true runClient
+```
+
+The game creates a real Mesa EGL GL 4.6 context on its render thread, verifies
+Zink's GPU UUID against AFV's VkPhysicalDevice, and imports dedicated external
+images allocated on **AFV's existing VkDevice**. Each in-flight frame has an image,
+bidirectional binary external semaphores and a release command buffer. The normal
+AFV frame fence protects reuse; no extra CPU fence wait, readback, `glFinish` or
+`vkDeviceWaitIdle` is used to transport frames. Zink clears a synthetic magenta
+32x32 patch, which is blitted into the swapchain before PRESENT. Normal AFV output
+elsewhere is unchanged. Resize/shutdown drain at the existing lifecycle boundary,
+then destroy GL imports before Vulkan resources and rebuild the ring on resize.
+
+With `afv.smokeTest=true` only, a separate buffer checks **only this bounded patch**
+after the normal frame fence. It emits numbers/pass markers, never image files.
+`AFV_ZINK_COMPOSITION_PASS` requires at least 120 verified patches. A frame discarded
+before submission is not verified. Without the smoke flag there is no readback.
+Without the interop flag, no EGL context or external FD device extension is needed.
+The Gradle client applies Mesa environment overrides only to its child process
+when this flag is enabled; `-PmesaEglVendor=...` overrides the system manifest.
+
+This diagnostic supports one render-thread GL context, Linux opaque FDs and an
+RGBA8 image. It is not an Iris backend, general GL interception, a complete image
+registry, depth sharing, or a full shader-pack integration. Iris/Sodium admission
+restrictions remain until their actual rendering paths are supported.

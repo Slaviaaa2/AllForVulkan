@@ -7,7 +7,7 @@
 完全なEclipse Temurin JDK 21で `./gradlew build` が通過。
 Java 21 JREのみの環境ではMinecraftの再コンパイルができないため、JDKが必要。
 Luna Mediumによる機械検証で、活動中のJavaソースにFabricクラスへの依存がないこと、
-NeoForgeメタデータ・Mixin設定・14個のネストされた依存JARの整合性を確認した。
+NeoForgeメタデータ・Mixin設定・16個のネストされた依存JARの整合性を確認した。
 
 `python3 scripts/verify_artifact.py` で、MOD ID、バージョン展開、起動クラス、描画本体、
 Mixinクラス、ライセンス、共通API、ネイティブJAR、重複しないJarJar IDとJPMS記述子の
@@ -42,7 +42,7 @@ Mixinクラス、ライセンス、共通API、ネイティブJAR、重複しな
 ## 未達の項目
 
 M0全体の合格宣言はまだ行わない。描画のピクセル比較が必要。
-Mesa/Zink試作のAFV表示フレームへの接続と、Irisとの同時動作は未実装。
+Mesa/ZinkのAFV表示フレーム接続は32×32診断合成まで実装。Irisとの同時動作は未実装。
 直接LWJGL/JNIを呼ぶMODの包括的な捕捉も未実装。
 
 ## 追加の実機検証（2026-10-24）
@@ -67,8 +67,34 @@ Iris JARのMinecraft版範囲だけから非対応と判定せず、未改変JAR
 Zink側のMesaは25.2.8、rendererは
 `zink Vulkan 1.4(NVIDIA GeForce RTX 3060 (NVIDIA_PROPRIETARY))`。
 共有画像の輸送にはCPUコピーを使わず、数値判定のためだけに私有の小画像をreadbackする。
-AFV表示フレームへの組込み、深度/stencil、MSAA等はまだ検証していない。
+AFV表示フレームの小領域への組込みは下記の追加試験で扱う。深度/stencil、MSAA等は未検証。
 この環境にKhronos validation layerは導入されていないため、validation layerによる
 Vulkan仕様検証は未実施。Zink比較には性能警告や通常のshader sampler警告が残る。
 
 描画のピクセル比較は引き続き未実施であり、M0/M1全体の完了宣言ではない。
+
+## AFV本体のVkDeviceとZinkの接続
+
+Linux / RTX 3060で以下を実行。
+
+```sh
+./gradlew -Dafv.zinkInterop=true -Dafv.smokeTest=true -Dafv.smokeWorld=true runClient
+```
+
+- AFVが既に使用しているVkDeviceで共有画像と外部semaphoreを生成。
+- 実Zink GL rendererと同一GPUのUUIDを照合。
+- 各フレームの既存フェンス完了後にslotを再利用し、release → GL描画 → acquire →
+  swapchain blit → PRESENTを接続。
+- swapchainの合成先32×32領域だけを数値検査し、magenta全画素を確認。
+  検査用bufferはsmoke test時のみ生成し、通常のフレーム輸送にCPUコピーを用いない。
+- worldでの実地形draw、960x540 resize、リソース再読込、切断、title復帰を通過。
+- resize時の共有画像・GL import・semaphore・command poolの破棄と再生成も実行。
+- 最終実行で `AFV_ZINK_COMPOSITION_PASS: 1325 GPU-composed patches verified`、
+  `AFV_SMOKE_PASS: scenario=world-resize-reload-disconnect`、終了コード0を確認。
+- フラグなしの通常AFVタイトル起動・正常終了も再検証。
+- 配布JARはnative-bridgeとEGLを含む16依存を検査。Luna Mediumの機械検証も通過。
+
+画面全体の画像比較やスクリーンショットは実施していない。数値検査の対象は
+自前の診断パッチだけであり、ワールド描画の画素一致・Iris互換を証明するものではない。
+Iris/Sodiumの同時導入制限、汎用GL資源経路、深度・MRT・MSAA・実shader pack対応は
+引き続き残る。機能は `afv.zinkInterop` の明示指定時だけ有効。
