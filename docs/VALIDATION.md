@@ -42,7 +42,7 @@ Mixinクラス、ライセンス、共通API、ネイティブJAR、重複しな
 ## 未達の項目
 
 M0全体の合格宣言はまだ行わない。描画のピクセル比較が必要。
-Mesa/ZinkのAFV表示フレーム接続は32×32診断合成まで実装。Irisとの同時動作は未実装。
+Mesa/ZinkのAFV表示フレーム接続はフレーム色画像の往復とGL後処理まで実装。Irisとの同時動作は未実装。
 直接LWJGL/JNIを呼ぶMODの包括的な捕捉も未実装。
 
 ## 追加の実機検証（2026-10-24）
@@ -130,3 +130,32 @@ Iris/Sodiumの同時導入、render target／depth／MRT／buffer全般の共有
 
 同じ最終ソースで `-Dafv.smokeTest=true -Dafv.smokeWorld=true runClient`
 （Zink無効）もworld/resize/reload/disconnectまで通過し、終了コード0を確認した。
+
+
+## Vulkan描画からGL後処理を経由するフレーム表示
+
+共有画像をフレーム寸法に拡張し、実際のMinecraft描画をZinkでサンプリングして
+Vulkan表示へ戻す経路に変更。入力画像と出力画像を分け、各方向に外部semaphoreを
+使う。最終Vk submitの通常frame fenceで、2段のVk commandとGL処理の完了を保護する。
+製品輸送にCPU画像コピーや追加の毎フレームfence waitは使用しない。
+
+同じLinux / RTX 3060 / UNORM swapchainでの追加結果：
+
+| 構成 | 検証した範囲 | 結果 |
+| --- | --- | --- |
+| Zink、identity GL pass | 実sceneのGPU往復、32×32の入出力RGBA一致、CPU assetの別32×32 sampler検査、world/resize/reload/disconnect | `AFV_ZINK_SCENE_PASS: 1351 scene regions verified, effect=identity`、終了コード0 |
+| Zink、invert GL pass | 実GLSLのRGB反転とalpha保持を小領域で照合、同じワールドライフサイクル | `AFV_ZINK_SCENE_PASS: 1339 scene regions verified, effect=invert`、終了コード0 |
+| build / 配布JAR | Luna Mediumによるbuild、CPU転送回帰、16依存のJarJar構造 | 通過 |
+
+GL passはnative-bridgeの `GlFramePass` を実装する。実texture/FBOは各呼び出し中だけ
+借用し、resize後に保持しない。現在の実行位置はGUIを含むMinecraft描画の後で、
+Irisのworld/shadowフックを代替するものではない。sRGB用の画像・GL変換も実装したが、
+この実機でそのsurface formatを選んだ起動は未検証。深度、MRT、MSAA、Iris/Sodiumとの
+同時動作、他GPU/OSは引き続き未達。
+
+数値readbackは(0,0)の32×32の私有asset診断領域と、(32,0)の32×32のscene比較領域に
+限定。フレーム全体のCPU取得・保存・スクリーンショットは実施していない。
+上記の小領域検査から、画面全体の画素一致やIrisの完全互換は主張しない。
+
+Zink無効の通常AFVでも同じ最終ソースでworld/resize/reload/disconnectを再実行し、
+`AFV_SMOKE_PASS` と終了コード0を確認した。

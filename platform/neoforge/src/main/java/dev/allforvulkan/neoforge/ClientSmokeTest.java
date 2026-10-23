@@ -93,9 +93,11 @@ public final class ClientSmokeTest {
     private static void pass(Minecraft client) {
         if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED) {
             var bridge = net.vulkanmod.vulkan.Renderer.getInstance().getZinkBridge();
-            if (bridge == null || bridge.verifiedFrames() < 120)
+            if (bridge == null || bridge.verifiedFrames() < 120 || bridge.verifiedScenes() < 120)
                 throw new IllegalStateException("AFV_SMOKE_FAIL: insufficient verified Zink swapchain patches");
             Initializer.LOGGER.info("AFV_ZINK_COMPOSITION_PASS: {} GPU-composed patches verified", bridge.verifiedFrames());
+            Initializer.LOGGER.info("AFV_ZINK_SCENE_PASS: {} scene regions verified, effect={}", bridge.verifiedScenes(),
+                    net.vulkanmod.vulkan.interop.ZinkFrameBridge.INVERT ? "invert" : "identity");
         }
         Initializer.LOGGER.info("AFV_SMOKE_PASS: scenario={}", WORLD ? "world-resize-reload-disconnect" : "title");
         phase = 5;

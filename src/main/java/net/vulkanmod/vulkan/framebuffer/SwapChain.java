@@ -108,14 +108,10 @@ public class SwapChain extends Framebuffer {
             createInfo.imageArrayLayers(1);
             int usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
             if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED) {
-                if ((surfaceProperties.capabilities.supportedUsageFlags() & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0)
-                    throw new IllegalStateException("Swapchain does not support Zink image transfer destination");
-                usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-                if (Boolean.getBoolean("afv.smokeTest")) {
-                    if ((surfaceProperties.capabilities.supportedUsageFlags() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0)
-                        throw new IllegalStateException("Swapchain does not support bounded patch assertion readback");
-                    usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-                }
+                int transfers = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                if ((surfaceProperties.capabilities.supportedUsageFlags() & transfers) != transfers)
+                    throw new IllegalStateException("Swapchain does not support bidirectional Zink scene transfer");
+                usage |= transfers;
             }
             createInfo.imageUsage(usage);
 

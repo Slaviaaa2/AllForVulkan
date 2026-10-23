@@ -40,6 +40,7 @@ neoForge {
             systemProperty 'afv.smokeTest', System.getProperty('afv.smokeTest', 'false')
             systemProperty 'afv.smokeWorld', System.getProperty('afv.smokeWorld', 'false')
             systemProperty 'afv.zinkInterop', System.getProperty('afv.zinkInterop', 'false')
+            systemProperty 'afv.zinkEffect', System.getProperty('afv.zinkEffect', 'identity')
             if (Boolean.getBoolean('afv.zinkInterop')) {
                 environment 'MESA_LOADER_DRIVER_OVERRIDE', 'zink'
                 environment 'GALLIUM_DRIVER', 'zink'

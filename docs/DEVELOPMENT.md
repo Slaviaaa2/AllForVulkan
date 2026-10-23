@@ -136,8 +136,9 @@ images allocated on **AFV's existing VkDevice**. Each in-flight frame has an ima
 bidirectional binary external semaphores and a release command buffer. The normal
 AFV frame fence protects reuse; no extra CPU fence wait, readback, `glFinish` or
 `vkDeviceWaitIdle` is used to transport frames. With smoke tests enabled, a real
-GLSL shader samples a CPU-uploaded 2x2 Minecraft texture into a 32x32 patch, which is blitted into the swapchain before PRESENT. Normal AFV output
-elsewhere is unchanged. Resize/shutdown drain at the existing lifecycle boundary,
+GLSL shader samples a CPU-uploaded 2x2 Minecraft texture into a 32x32 diagnostic
+corner on top of the scene post-processing result. The full scene now travels
+Vulkan -> Zink GL -> Vulkan before PRESENT; the default GL pass is identity. Resize/shutdown drain at the existing lifecycle boundary,
 then destroy GL imports before Vulkan resources and rebuild the ring on resize.
 The GL context and Minecraft texture registry survive resize; they close only
 after renderer shutdown, so texture names and loaded assets remain valid.
@@ -182,8 +183,8 @@ and copies exactly through the last uploaded row.
 
 The in-game smoke test compares private 2x2 Vulkan and real-GL results for packed
 RGBA/BGRA and REV, exercises BGRA row skips and PBO byte offsets, then samples that
-texture in GLSL. Only the resulting 32x32 shared patch is read back per completed
-frame. The block atlas's real GL dimensions and upload counts are checked before
+texture in GLSL. Only the resulting 32x32 asset patch and a separate 32x32 scene comparison
+region are read back per completed frame. The block atlas's real GL dimensions and upload counts are checked before
 and after world/resize/reload transitions. Test setup waits/readbacks are separate
 from product image transport.
 
@@ -191,3 +192,43 @@ This is a CPU-upload input bridge. GL writes to these texture objects are not ye
 propagated back to Vulkan, and GPU-rendered Minecraft targets do not acquire GL
 storage through this registry. General buffers/FBOs, depth, MRT and Iris/Sodium
 rendering integration remain required for full compatibility.
+
+
+## Vulkan scene through a real GL frame pass
+
+```sh
+# The existing smoke command now also checks the scene's identity round trip.
+./gradlew -Dafv.zinkInterop=true -Dafv.smokeTest=true -Dafv.smokeWorld=true runClient
+
+# Force a real color change in GL and compare its expected numeric result.
+./gradlew -Dafv.zinkInterop=true -Dafv.zinkEffect=invert -Dafv.smokeTest=true -Dafv.smokeWorld=true runClient
+```
+
+`GlFramePass` is a loader-independent native-bridge contract. It receives the
+real input GL texture, output GL FBO, extent and sRGB flag. These names belong
+to the frame slot and must not be retained. The default `SceneColorPass` performs
+GLSL identity/invert over the entire framebuffer. This boundary follows GUI
+rendering today; it does not replace Iris's world, shadow or terrain hooks.
+
+AFV's first submission renders Minecraft, blits the swapchain color into a shared
+input image, releases input/output queue ownership, and signals two GL acquire
+semaphores. Mesa GL waits, samples the input and writes the shared output. The
+second AFV submission waits for both GL release semaphores, reacquires both
+images, blits the result to the swapchain and transitions to PRESENT. Only the
+second submit signals the normal frame fence/renderFinished semaphore. There is
+no per-frame CPU fence wait beyond AFV's existing frame fence and no readback in
+product transport. Frame-sized images and composition commands are rebuilt on
+resize; the GL context, image registry and pass persist.
+
+The smoke test compares only the 32x32 scene region at (32,0), before and after
+GL, using small host buffers after the normal fence. A separate (0,0) 32x32
+corner continues the CPU-asset sampler check. No full-frame CPU capture or image
+file is generated. `AFV_ZINK_SCENE_PASS` requires at least 120 completed scene
+comparisons; invert requires the RGB complement (alpha unchanged). Supported
+image formats are RGBA/BGRA8 UNORM or sRGB; this machine's actual swapchain path
+was UNORM. The sRGB branch uses sRGB shared images, GL framebuffer conversion,
+and linear-space inversion, but still needs its own surface-format runtime test.
+Smoke assertions currently require a viewport of at least 64x32.
+
+General GL buffers/FBO registries, arbitrary GPU-updated asset synchronization,
+depth/stencil, MSAA, MRT and Iris/Sodium integration are still outstanding.

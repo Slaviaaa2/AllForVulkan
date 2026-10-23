@@ -119,3 +119,29 @@ FabricとForge向けの配布・テストを実施するまでは、それぞれ
 対応対象を増やした後は、対象版/ローダー別のビルドをCIへ追加する。ネイティブ接続と実描画は必要なOS/GPU環境で確認する。
 同一のテストシーンを使い、Irisの影・半透明・再読込・resize等の結果を比較する。
 共通化はソースの重複削減と挙動の統一のために行い、抽象化のための毎drawの資源再生成・同期・データコピーは導入しない。
+
+
+## 実装済みのフレーム色画像境界
+
+`afv.zinkInterop` 指定時に限り、Minecraftの通常描画が終わった位置で
+frame slotごとの共有入力へVk blitし、入力/出力画像のqueue ownershipを外部へ渡す。
+そのVk command bufferをimageAvailable待ちで先にsubmitしてから、Mesa側で
+`GlFramePass.render(Frame)` を呼ぶ。入力textureと出力FBOはその呼び出し中だけ借用する。
+GLの完了semaphoreを待つ2本目のVk command bufferが両画像をacquireし、
+出力をswapchainへblitしてPRESENTへ遷移する。最終submitに通常のframe fenceを付ける。
+
+```mermaid
+flowchart LR
+    A[Minecraft Vk描画] --> B[共有scene入力へGPU blit]
+    B --> C[外部semaphore / Mesa GL]
+    C --> D[GlFramePass: 実textureから出力FBOへ]
+    D --> E[外部semaphore / Vk acquire]
+    E --> F[swapchainへGPU blit / PRESENT]
+```
+
+GL context、CPU画像のregistry、frame passの寿命はrendererと同じ。
+resizeではGPUを既存の境界でdrainし、サイズ依存の入力/出力画像とcomposition
+command bufferだけを再生成する。製品のフレーム輸送にCPU readbackは用いない。
+`SceneColorPass` は接続確認用のidentity/invert後処理で、Irisバックエンドではない。
+現状の位置はGUIを含むフレーム描画の後。Irisにはworld内の各描画段階、深度、
+shadow/MRT、Sodiumの頂点/terrainフック、資源registryの追加統合が必要。

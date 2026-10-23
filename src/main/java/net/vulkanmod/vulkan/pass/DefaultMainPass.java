@@ -79,8 +79,8 @@ public class DefaultMainPass implements MainPass {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             SwapChain framebuffer = Renderer.getInstance().getSwapChain();
             if (Renderer.getInstance().getZinkBridge() != null)
-                Renderer.getInstance().getZinkBridge().compose(commandBuffer, framebuffer.getColorAttachment());
-            framebuffer.getColorAttachment().transitionImageLayout(stack, commandBuffer, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+                Renderer.getInstance().getZinkBridge().releaseScene(commandBuffer, framebuffer.getColorAttachment());
+            else framebuffer.getColorAttachment().transitionImageLayout(stack, commandBuffer, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
         }
 
         int result = vkEndCommandBuffer(commandBuffer);

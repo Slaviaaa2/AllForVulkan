@@ -26,9 +26,15 @@ public final class SharedImage implements AutoCloseable {
     private final int width, height;
     private long image, memory, toGl, fromGl;
     private int glMemory, glToGl, glFromGl, texture, framebuffer;
-    private boolean closed, used;
+    private boolean closed;
+    private int layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     public SharedImage(VkPhysicalDevice physical, VkDevice device, int width, int height) {
+        this(physical, device, width, height, VK_FORMAT_R8G8B8A8_UNORM);
+    }
+    public SharedImage(VkPhysicalDevice physical, VkDevice device, int width, int height, int format) {
+        if (format != VK_FORMAT_R8G8B8A8_UNORM && format != VK_FORMAT_R8G8B8A8_SRGB)
+            throw new IllegalArgumentException("Unsupported shared color format " + format);
         this.device = device;
         this.width = width;
         this.height = height;
@@ -46,9 +52,9 @@ public final class SharedImage implements AutoCloseable {
             var external = VkPhysicalDeviceExternalImageFormatInfo.calloc(stack).sType$Default().handleType(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
             var properties = VkExternalImageFormatProperties.calloc(stack).sType$Default();
             var output = VkImageFormatProperties2.calloc(stack).sType$Default().pNext(properties.address());
-            int usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+            int usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
             check(vkGetPhysicalDeviceImageFormatProperties2(physical, VkPhysicalDeviceImageFormatInfo2.calloc(stack).sType$Default()
-                    .pNext(external.address()).format(VK_FORMAT_R8G8B8A8_UNORM).type(VK_IMAGE_TYPE_2D)
+                    .pNext(external.address()).format(format).type(VK_IMAGE_TYPE_2D)
                     .tiling(VK_IMAGE_TILING_OPTIMAL).usage(usage), output), "shared RGBA8 support");
             if ((properties.externalMemoryProperties().externalMemoryFeatures() & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) == 0)
                 throw new IllegalStateException("RGBA8 opaque FD export is unsupported");
@@ -60,7 +66,7 @@ public final class SharedImage implements AutoCloseable {
             var handle = stack.mallocLong(1);
             var externalImage = VkExternalMemoryImageCreateInfo.calloc(stack).sType$Default().handleTypes(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
             var create = VkImageCreateInfo.calloc(stack).sType$Default().pNext(externalImage.address()).imageType(VK_IMAGE_TYPE_2D)
-                    .format(VK_FORMAT_R8G8B8A8_UNORM).mipLevels(1).arrayLayers(1).samples(VK_SAMPLE_COUNT_1_BIT)
+                    .format(format).mipLevels(1).arrayLayers(1).samples(VK_SAMPLE_COUNT_1_BIT)
                     .tiling(VK_IMAGE_TILING_OPTIMAL).usage(usage).sharingMode(VK_SHARING_MODE_EXCLUSIVE).initialLayout(VK_IMAGE_LAYOUT_UNDEFINED);
             create.extent().set(width, height, 1);
             check(vkCreateImage(device, create, null, handle), "shared image");
@@ -96,7 +102,7 @@ public final class SharedImage implements AutoCloseable {
             texture = glGenTextures();
             glBindTexture(GL_TEXTURE_2D, texture);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_TILING_EXT, GL_OPTIMAL_TILING_EXT);
-            glTexStorageMem2DEXT(GL_TEXTURE_2D, 1, GL_RGBA8, width, height, glMemory, 0);
+            glTexStorageMem2DEXT(GL_TEXTURE_2D, 1, format == VK_FORMAT_R8G8B8A8_SRGB ? org.lwjgl.opengl.GL21.GL_SRGB8_ALPHA8 : GL_RGBA8, width, height, glMemory, 0);
             framebuffer = glGenFramebuffers();
             glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
@@ -132,23 +138,42 @@ public final class SharedImage implements AutoCloseable {
     public int width() { return width; }
     public int height() { return height; }
 
+    /** Local graphics ownership: prepare an image for a GPU copy from the scene. */
+    public void prepareTransferDestination(VkCommandBuffer command) {
+        assertOwner();
+        barrier(command, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                layout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+                layout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT);
+        layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    }
     /** Record release on the game's graphics queue, then signal readyForGl in that submission. */
     public void release(VkCommandBuffer command, int family) {
         assertOwner();
-        barrier(command, used ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                used ? VK_ACCESS_TRANSFER_READ_BIT : 0, 0, family, VK_QUEUE_FAMILY_EXTERNAL,
-                used ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+        int access = layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? VK_ACCESS_TRANSFER_WRITE_BIT
+                : layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL ? VK_ACCESS_TRANSFER_READ_BIT : 0;
+        barrier(command, layout, VK_IMAGE_LAYOUT_GENERAL, access, 0, family, VK_QUEUE_FAMILY_EXTERNAL,
+                layout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+        layout = VK_IMAGE_LAYOUT_GENERAL;
     }
-    /** Wait in the GL queue; returns this real GL FBO for the producer. No CPU wait/readback. */
-    public int beginGlWrite() {
+    /** Wait in the GL queue and return the sampled texture, without changing framebuffer state. */
+    public int beginGlRead() {
         assertOwner();
         try (MemoryStack stack = MemoryStack.stackPush()) {
             glWaitSemaphoreEXT(glToGl, stack.mallocInt(0), stack.ints(texture), stack.ints(GL_LAYOUT_GENERAL_EXT));
-            glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-            glViewport(0, 0, width, height);
         }
+        return texture;
+    }
+    /** Wait in the GL queue; returns this real GL FBO for the producer. No CPU wait/readback. */
+    public int beginGlWrite() {
+        beginGlRead();
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glViewport(0, 0, width, height);
         return framebuffer;
     }
+    public void endGlRead() { endGlWrite(); }
     public void endGlWrite() {
         assertOwner();
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -162,7 +187,7 @@ public final class SharedImage implements AutoCloseable {
         assertOwner();
         barrier(command, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0, VK_ACCESS_TRANSFER_READ_BIT,
                 VK_QUEUE_FAMILY_EXTERNAL, family, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-        used = true;
+        layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     }
     private void barrier(VkCommandBuffer command, int oldLayout, int newLayout, int srcAccess, int dstAccess,
                          int srcFamily, int dstFamily, int srcStage, int dstStage) {

@@ -117,6 +117,7 @@ public class Renderer {
 
     private net.vulkanmod.vulkan.interop.ZinkFrameBridge zinkBridge;
     private dev.allforvulkan.bridge.ZinkContext zinkContext;
+    private dev.allforvulkan.bridge.GlFramePass glFramePass;
     private dev.allforvulkan.bridge.GlTextureRegistry glTextures;
 
     public net.vulkanmod.vulkan.interop.ZinkFrameBridge getZinkBridge() { return zinkBridge; }
@@ -128,6 +129,7 @@ public class Renderer {
         if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED) {
             zinkContext = new dev.allforvulkan.bridge.ZinkContext(32, 32);
             glTextures = new dev.allforvulkan.bridge.GlTextureRegistry();
+            glFramePass = new dev.allforvulkan.bridge.SceneColorPass(net.vulkanmod.vulkan.interop.ZinkFrameBridge.INVERT);
         }
         swapChain = new SwapChain();
         mainPass = DefaultMainPass.create();
@@ -142,7 +144,7 @@ public class Renderer {
         allocateCommandBuffers();
         createSyncObjects();
         if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED)
-            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(zinkContext, framesNum);
+            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(zinkContext, glFramePass, framesNum, swapChain.getWidth(), swapChain.getHeight(), swapChain.getFormat());
     }
 
     private void allocateCommandBuffers() {
@@ -339,12 +341,14 @@ public class Renderer {
             submitInfo.pWaitSemaphores(stack.longs(imageAvailableSemaphores.get(currentFrame)));
             submitInfo.pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT));
             if (zinkBridge != null) {
+                VkCommandBuffer composition = zinkBridge.process(currentCmdBuffer, imageAvailableSemaphores.get(currentFrame));
                 submitInfo.waitSemaphoreCount(2);
-                submitInfo.pWaitSemaphores(stack.longs(imageAvailableSemaphores.get(currentFrame), zinkBridge.waitSemaphore()));
-                submitInfo.pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT));
+                submitInfo.pWaitSemaphores(stack.longs(zinkBridge.sceneWaitSemaphore(), zinkBridge.outputWaitSemaphore()));
+                submitInfo.pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT));
+                submitInfo.pCommandBuffers(stack.pointers(composition));
             }
             submitInfo.pSignalSemaphores(stack.longs(renderFinishedSemaphores.get(currentFrame)));
-            submitInfo.pCommandBuffers(stack.pointers(currentCmdBuffer));
+            if (zinkBridge == null) submitInfo.pCommandBuffers(stack.pointers(currentCmdBuffer));
 
             vkResetFences(device, inFlightFences.get(currentFrame));
 
@@ -521,7 +525,7 @@ public class Renderer {
         createSyncObjects();
         this.mainPass.onResize();
         if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED)
-            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(zinkContext, framesNum);
+            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(zinkContext, glFramePass, framesNum, swapChain.getWidth(), swapChain.getHeight(), swapChain.getFormat());
 
         this.onResizeCallbacks.forEach(Runnable::run);
         ((WindowAccessor) (Object) Minecraft.getInstance().getWindow()).getEventHandler().resizeDisplay();
@@ -540,6 +544,7 @@ public class Renderer {
 
         PipelineManager.destroyPipelines();
         VTextureSelector.getWhiteTexture().free();
+        if (glFramePass != null) { glFramePass.close(); glFramePass = null; }
         if (glTextures != null) { glTextures.close(); glTextures = null; }
         if (zinkContext != null) { zinkContext.close(); zinkContext = null; }
     }
