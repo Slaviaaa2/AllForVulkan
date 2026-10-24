@@ -54,6 +54,7 @@ neoForge {
             systemProperty 'afv.smokeIrisCycle', System.getProperty('afv.smokeIrisCycle', 'false')
             systemProperty 'afv.smokeWindowCycle', System.getProperty('afv.smokeWindowCycle', 'false')
             systemProperty 'afv.smokeDimensions', System.getProperty('afv.smokeDimensions', 'false')
+            systemProperty 'afv.smokeDimensionInspectTicks', System.getProperty('afv.smokeDimensionInspectTicks', '0')
             systemProperty 'afv.smokeScene', System.getProperty('afv.smokeScene', 'false')
             systemProperty 'afv.smokeFinalOutput', System.getProperty('afv.smokeFinalOutput', 'false')
             systemProperty 'afv.debugGlClient', System.getProperty('afv.debugGlClient', 'false')

@@ -25,7 +25,8 @@ final class DimensionLifecycle {
     private final String pack;
     private final Map<ResourceKey<Level>, Object> pipelines = new HashMap<>();
     private CompletableFuture<Void> transfer;
-    private int step, stableTicks;
+    private int step, stableTicks, inspectTicks;
+    private boolean validated;
     private long firstFrame;
 
     DimensionLifecycle(Minecraft client) {
@@ -49,15 +50,16 @@ final class DimensionLifecycle {
                 || !client.level.hasChunkAt(client.player.blockPosition())) { stableTicks = 0; return false; }
         if (stableTicks++ == 0) firstFrame = ZinkClientSession.presentedFrames();
         if (stableTicks < 120 || ZinkClientSession.presentedFrames() - firstFrame < 120) return false;
-        IrisAssertions.requireDimension(expected.location().toString());
-        Object pipeline = IrisAssertions.requireActive();
-        for (var entry : pipelines.entrySet()) {
-            if (!entry.getKey().equals(expected) && entry.getValue() == pipeline)
-                throw new IllegalStateException("Iris retained another dimension's pipeline for " + expected.location());
+        int inspection = Math.max(0, Integer.getInteger("afv.smokeDimensionInspectTicks", 0));
+        if (!validated) {
+            validate(expected);
+            validated = true;
+            if (inspection > 0) Initializer.LOGGER.info("AFV_DIMENSION_INSPECT: {}, stable rendered world; holding {} client ticks for scoped inspection",
+                    expected.location(), inspection);
         }
-        if (!pack.equals(IrisAssertions.configuredPack())) throw new IllegalStateException("Dimension transition changed the selected shader pack");
-        pipelines.put(expected, pipeline);
-        GlFrameChecks.sampleColor(client.getMainRenderTarget().getColorTextureId());
+        if (inspectTicks++ < inspection) return false;
+        // Validate again after an inspection interval, before the world is changed.
+        if (inspection > 0) validate(expected);
         Initializer.LOGGER.info("AFV_DIMENSION_STAGE_PASS: {}, actual client chunks, Iris dimension/pipeline, same GL context, {} Vulkan frames",
                 expected.location(), ZinkClientSession.presentedFrames() - firstFrame);
         if (++step == ROUTE.size()) {
@@ -68,8 +70,21 @@ final class DimensionLifecycle {
         return false;
     }
 
+    private void validate(ResourceKey<Level> expected) {
+        IrisAssertions.requireDimension(expected.location().toString());
+        Object pipeline = IrisAssertions.requireActive();
+        for (var entry : pipelines.entrySet()) {
+            if (!entry.getKey().equals(expected) && entry.getValue() == pipeline)
+                throw new IllegalStateException("Iris retained another dimension's pipeline for " + expected.location());
+        }
+        if (!pack.equals(IrisAssertions.configuredPack())) throw new IllegalStateException("Dimension transition changed the selected shader pack");
+        pipelines.put(expected, pipeline);
+        GlFrameChecks.sampleColor(client.getMainRenderTarget().getColorTextureId());
+    }
+
     private void request() {
-        stableTicks = 0;
+        stableTicks = inspectTicks = 0;
+        validated = false;
         var destination = ROUTE.get(step);
         var playerId = client.player.getUUID();
         transfer = CompletableFuture.runAsync(() -> {

@@ -143,6 +143,30 @@ nonblack color samples and the same EGL context. The selected shader pack remain
 unchanged. The launcher requires `AFV_DIMENSION_CYCLE_PASS`. No FPS measurement
 is performed unless benchmarking is separately requested.
 
+For dimension screenshots, add `--dimension-inspect-ticks 200`. The client emits
+`AFV_DIMENSION_INSPECT` only after real world/pipeline/frame checks and then holds
+the current world for that many client ticks. Synchronize a scoped Minecraft
+viewport capture to that marker, not to the server transfer or loading screen.
+The same assertions run again before leaving the inspected dimension.
+
+A second independent profile can select only exact source JAR filenames:
+
+```sh
+python3 scripts/prepare_modpack_client.py \
+  --source /path/to/DTFuel --destination /path/to/iris-sodium-only \
+  --mod-file iris-neoforge-1.8.14-beta.1+mc1.21.1.jar \
+  --mod-file sodium-neoforge-0.8.13+mc1.21.1.jar
+```
+
+Selected profiles omit pack overrides and include no implicit dependencies;
+select each required dependency explicitly. Their manifest records the full
+source's JAR count, selected JARs and hashes, and `selected-mods` profile type.
+Full-profile creation retains the previous copy behavior. Both modes refuse an
+existing destination or a destination inside the original pack. Before launch,
+all recorded MOD hashes are verified and extra JARs are rejected, apart from
+the launcher's own AFV artifact. Run `python3 -m unittest discover -s tests
+-p test_modpack_profiles.py` for independent-copy/profile-integrity checks.
+
 For a matched Zink/EGL presentation comparison, replace `--zink-client` with
 `--zink --x11-no-modifiers` when that fallback is required by the nested X server.
 Keep scene, shader options, warmup, resolution and game settings identical. This

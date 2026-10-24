@@ -544,3 +544,50 @@ world-ready時点に同期する必要がある。
 
 証跡はローカル`build/reports/afv-validation/dtfuel-dimension-cycle-*`。元のmodpack・
 既存save・提供shaderは変更せず、第三者バイナリーは公開しない。
+
+## 検証profileの分離と描画安定後の画像取得（2026-10-24）
+
+最小構成を同じ実運用packから再現できるよう、準備scriptへ`--mod-file`を追加した。
+選択した正確なファイル名のJARだけを独立コピーし、packのoverridesは持ち込まない。
+manifestには元204本と選択2本を区別して記録する。起動時も全記録JARのSHA-256を
+照合し、追加・欠落・改変したMODを拒否する。launcher自身のAFV JARだけを例外にする。
+既存のfull profileのコピー動作は保持した。
+
+profileの検査では、元pack内への出力・既存出力・不正／重複／不存在ファイル名の拒否、
+最小構成のoverrides除外、非共有コピー、MOD混入・改変・欠落の検出を確認した。
+Gradle build、baselineコンパイル、配布JAR、Python構文と2本のprofile unittestが通過。
+ログはローカル`profile-inspection-build.log`と`modpack-profile-checks.log`。
+
+元packと同じIris 1.8.14-beta.1 / Sodium 0.8.13の2 JARだけのprofileを新規作成し、
+NeoForge 21.1.251＋AFV＋指定Complementaryで起動した。pack固有configは使用しない。
+AUTO→実Vulkan表示、シェーダー有効・無効切替、再リサイズ、再有効化、shader-only
+reload、リソース再読込、切断、タイトル復帰と正常終了を通過した。
+2058回のVulkan表示と2054回の最終出力のVulkan画像照合を確認した。元の2 JARの
+SHA-256はDTFuel full profileのものと一致している。証跡はローカル
+`build/reports/afv-validation/minimal-iris-sodium-*`。
+
+ディメンション画像用には`--dimension-inspect-ticks`を追加した。実チャンクと
+Iris pipelineの数値検査、120 tickと120 frame以上のVulkan表示を通過してから
+`AFV_DIMENSION_INSPECT`を出し、現在のworldを一定tick保持する。移動要求に同期して
+Loading terrainを撮ってしまった前回の問題を避け、待機後も同じ判定を再実行する。
+
+同じ配布JAR（SHA-256 `4d8677abd101b41745a833e3725e93597a986d2fd2419d6e9f700ce64d1b73e4`）で、
+DTFuel full profileの204 JARも起動前照合し、ディメンション検査を200 tick保持で実施した。
+Nether・End・Overworld復帰後の各`AFV_DIMENSION_INSPECT`に同期し、その時点の
+Minecraft SingleplayerのX11 window ID、title、絶対client boundsを確認してから、
+854×480のviewportだけを取得した。別clientがある場合は取得を拒否する。
+読み込み画面ではない3画像をそれぞれ一度確認し、ディメンション別の空・霧、
+ガラス、発光ブロック、手元、HUD、ミニマップ、およびOverworldの影・葉・水を確認した。
+右上の小さなmagenta領域は明示した最終出力検査用で、通常起動では出ない。
+shaderの全設定や全効果の正しさを目視したという意味ではない。
+
+検証後も実Iris pipeline、3つのdimension key、同じEGL contextと元pack選択を保持し、
+7758回のVulkan表示、7755回の最終出力のVulkan画像照合、切断・タイトル復帰・clientと
+launcherの終了コード0を確認した。2 MODの最小構成と204 MODのfull構成の両方が
+同じartifactで正常終了している。FPS比較は行っていない。
+
+証跡はローカル`build/reports/afv-validation/dtfuel-dimension-visual-*`、
+`dtfuel-validated-dimension-{the_nether,the_end,overworld}.png`と同名の`target.json`、
+`dtfuel-dimension-capture.log`。capture待機中にログのtruncateを検知できない問題が
+見つかり、取得補助だけを修正して同じ実行中クライアントへ再接続した。ゲームを
+再起動して合格にしたものではない。元pack・既存save・提供shaderは変更していない。

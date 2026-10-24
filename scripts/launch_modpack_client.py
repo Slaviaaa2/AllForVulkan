@@ -46,6 +46,25 @@ def expand(items, values):
     return result
 
 
+def verify_client_mods(game, manifest):
+    expected = {entry['file']: entry for entry in manifest['jars']}
+    if len(expected) != len(manifest['jars']):
+        raise ValueError('Duplicate source mod names in validation manifest')
+    for name, entry in expected.items():
+        if Path(name).name != name or not name.endswith('.jar'):
+            raise ValueError('Invalid source mod filename in validation manifest')
+        jar = game / 'mods' / name
+        if not jar.is_file():
+            raise ValueError('Verified client mod changed or disappeared: ' + name)
+        with jar.open('rb') as stream:
+            checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if checksum != entry['sha256']:
+            raise ValueError('Verified client mod changed or disappeared: ' + name)
+    unknown = {p.name for p in (game / 'mods').glob('*.jar')} - expected.keys() - {'AllForVulkan-validation.jar'}
+    if unknown:
+        raise ValueError('Unrecorded client mods would invalidate the selected profile: ' + ', '.join(sorted(unknown)))
+
+
 def launch(args):
     if args.iris_cycle and not (args.smoke and args.require_iris):
         raise ValueError('--iris-cycle requires --smoke --require-iris')
@@ -53,11 +72,14 @@ def launch(args):
         raise ValueError('--window-cycle requires --smoke --zink-client')
     if args.dimension_cycle and not (args.smoke and args.require_iris and args.zink_client):
         raise ValueError('--dimension-cycle requires --smoke --require-iris --zink-client')
+    if args.dimension_inspect_ticks < 0 or (args.dimension_inspect_ticks and not args.dimension_cycle):
+        raise ValueError('--dimension-inspect-ticks requires --dimension-cycle and a nonnegative value')
     game, install = args.instance.resolve(), args.install.resolve()
     manifest_file = game / '.afv-validation-source.json'
     manifest = json.loads(manifest_file.read_text())
     if (game / '.afv-copy-incomplete').exists() or game.is_relative_to(Path(manifest['source']).resolve()):
         raise ValueError('Refusing an incomplete client or the source pack')
+    verify_client_mods(game, manifest)
     minecraft, neoforge = manifest['minecraft'], manifest['neoforge']
     vanilla = json.loads((install / f'versions/{minecraft}/{minecraft}.json').read_text())
     profile_name = f'neoforge-{neoforge}'
@@ -128,6 +150,7 @@ def launch(args):
             if shader_options.is_file():
                 shutil.copy2(shader_options, shaders / shader_options.name)
         iris = game / 'config/iris.properties'
+        iris.parent.mkdir(parents=True, exist_ok=True)
         content = iris.read_text() if iris.exists() else ''
         backup = game / '.afv-original-iris.properties'
         if not backup.exists():
@@ -172,6 +195,7 @@ def launch(args):
         command += ['-Dafv.smokeWindowCycle=true']
     if args.dimension_cycle:
         command += ['-Dafv.smokeDimensions=true']
+        command += ['-Dafv.smokeDimensionInspectTicks=' + str(args.dimension_inspect_ticks)]
     if args.scene:
         command += ['-Dafv.smokeScene=true']
     if args.final_output_probe:
@@ -208,6 +232,8 @@ def launch(args):
     command += ['--width', '960', '--height', '540']
     record = {'instance': str(game), 'packVersion': manifest['pack_version'],
               'neoforge': neoforge, 'minecraft': minecraft, 'sourceMods': manifest['jar_count'],
+              'profile': manifest.get('profile', 'full-modpack'),
+              'mods': [{'file': m['file'], 'sha256': m['sha256']} for m in manifest['jars']],
               'afvSha256': hashlib.sha256(jar.read_bytes()).hexdigest(),
               'route': 'AFV Vulkan presentation with Zink GL client' if args.zink_client else 'OpenGL via Zink comparison' if args.zink else 'Auto; see AFV_BACKEND',
               'benchmarkTicks': args.benchmark_ticks, 'warmupTicks': args.warmup_ticks,
@@ -217,6 +243,7 @@ def launch(args):
     record['irisCycle'] = args.iris_cycle
     record['windowCycle'] = args.window_cycle
     record['dimensionCycle'] = args.dimension_cycle
+    record['dimensionInspectTicks'] = args.dimension_inspect_ticks
     record['requestedBackend'] = args.backend or ('VULKAN' if args.zink_client else 'OPENGL' if args.zink else 'saved setting')
     record['x11NoModifiers'] = args.x11_no_modifiers
     if shader_source:
@@ -273,6 +300,7 @@ if __name__ == '__main__':
     parser.add_argument('--iris-cycle', action='store_true', help='Disable/re-enable/reload real Iris shaders with an additional resize in the same world')
     parser.add_argument('--window-cycle', action='store_true', help='Iconify/restore the private Vulkan window and switch VSync; requires a real window manager')
     parser.add_argument('--dimension-cycle', action='store_true', help='Transfer the fresh QA world through Nether/End and back with real Iris pipelines')
+    parser.add_argument('--dimension-inspect-ticks', type=int, default=0, help='Hold each validated dimension for scoped visual inspection')
     parser.add_argument('--scene', action='store_true', help='Build a shader validation scene in the new smoke world')
     parser.add_argument('--final-output-probe', action='store_true', help='Verify a last default-framebuffer draw reaches the Vulkan shared image')
     parser.add_argument('--debug-gl', action='store_true', help='Log bounded synchronous GL errors for client-bridge diagnosis')
