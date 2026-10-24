@@ -57,6 +57,8 @@ public final class ZinkClientSession {
     public static void setVsync(boolean enabled) { vsync = enabled; if (presenter != null) presenter.setVsync(enabled); }
     public static long presentedFrames() { return presenter == null ? 0 : presenter.presentedFrames(); }
     public static long verifiedFinalOutputFrames() { return presenter == null ? 0 : presenter.verifiedFinalOutputFrames(); }
+    public static long reusedTransferFrames() { return presenter == null ? 0 : presenter.reusedTransferFrames(); }
+    public static long recordedTransferCommands() { return presenter == null ? 0 : presenter.recordedTransferCommands(); }
     public static void close() {
         if (presenter != null) { presenter.close(); presenter = null; Vulkan.cleanUpPresentation(); }
         dev.allforvulkan.validation.GlDebugTrace.close();

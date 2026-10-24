@@ -40,6 +40,16 @@ semaphores belong to individual swapchain images, not frame slots. Resize drains
 both queues and recreates shared images/WSI; the GL context and game resources
 survive. VSync changes follow the same recreation path.
 
+Transfers are recorded once per shared-frame-slot/swapchain-image pair and
+resubmitted after the owning slot fence completes. The normal frame path does
+not reset/begin/end or record Vulkan transfer command buffers. These commands
+retain the same image barriers, semaphore waits/signals and vertical blit.
+Recreation drains the device, frees all cached commands before referenced
+resources, then records a new generation. The opt-in final-output diagnostic
+records a second variant per pair and alternates it with the normal variant,
+so one smoke run also exercises normal command reuse. No simultaneous-use or
+one-time-submit flags are used on reusable commands.
+
 The EGL drawable matches the real window size and includes depth/stencil.
 `Minecraft.runTick` prepares its size before drawing, retaining the same GL
 context, live objects and viewport/scissor state. It is not resized after a
@@ -121,7 +131,7 @@ The smoke test requires 120 real AFV Vulkan presentations, an actual active Iris
 pipeline, nonblack bounded GL color samples, resize, reload, disconnect and exit.
 Use `--debug-gl` only for bounded synchronous GL error diagnosis.
 `--final-output-probe` draws a test-only 8x8 marker directly into the last default
-framebuffer and verifies its pixels in AFV's actual Vulkan shared image after
+framebuffer on alternating frames and verifies its pixels in AFV's actual Vulkan shared image after
 the slot fence. No main texture is changed. `--backend AUTO --zink-client
 --require-iris` checks automatic selection without the vanilla force flag.
 

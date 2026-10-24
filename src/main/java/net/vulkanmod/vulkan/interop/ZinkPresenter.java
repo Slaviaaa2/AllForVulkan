@@ -27,7 +27,10 @@ public final class ZinkPresenter implements AutoCloseable {
     private final VkDevice device = Vulkan.getVkDevice();
     private final int family = Queue.getQueueFamilies().graphicsFamily;
     private final SharedImage[] frames = new SharedImage[FRAMES];
-    private final VkCommandBuffer[] commands = new VkCommandBuffer[FRAMES];
+    private VkCommandBuffer setupCommand;
+    private VkCommandBuffer[] transferCommands;
+    private boolean[] commandSubmitted;
+    private int commandVariants;
     private final long[] available = new long[FRAMES], fences = new long[FRAMES];
     private final FinalOutputReadback[] outputChecks = Boolean.getBoolean("afv.smokeFinalOutput") ? new FinalOutputReadback[FRAMES] : null;
     private long swapchain;
@@ -37,18 +40,20 @@ public final class ZinkPresenter implements AutoCloseable {
     private boolean vsync = true, dirty = true, closed;
     private long presented;
     private long verifiedOutput;
+    private long reusedTransfers, recordedTransfers;
+    private int transferGenerations;
     private int producerErrors;
 
     public ZinkPresenter(ZinkContext context, long window) {
         this.context = context;
         this.window = window;
         try (var stack = MemoryStack.stackPush()) {
-            var pointers = stack.mallocPointer(FRAMES);
+            var pointers = stack.mallocPointer(1);
             check(vkAllocateCommandBuffers(device, VkCommandBufferAllocateInfo.calloc(stack).sType$Default()
-                    .commandPool(Vulkan.getCommandPool()).level(VK_COMMAND_BUFFER_LEVEL_PRIMARY).commandBufferCount(FRAMES), pointers), "allocate presentation commands");
+                    .commandPool(Vulkan.getCommandPool()).level(VK_COMMAND_BUFFER_LEVEL_PRIMARY).commandBufferCount(1), pointers), "allocate presentation setup command");
+            setupCommand = new VkCommandBuffer(pointers.get(0), device);
             var handle = stack.mallocLong(1);
             for (int i = 0; i < FRAMES; i++) {
-                commands[i] = new VkCommandBuffer(pointers.get(i), device);
                 available[i] = semaphore(stack);
                 check(vkCreateFence(device, VkFenceCreateInfo.calloc(stack).sType$Default().flags(VK_FENCE_CREATE_SIGNALED_BIT), null, handle), "presentation fence");
                 fences[i] = handle.get(0);
@@ -59,6 +64,8 @@ public final class ZinkPresenter implements AutoCloseable {
     public void setVsync(boolean enabled) { if (vsync != enabled) { vsync = enabled; dirty = true; } }
     public long presentedFrames() { return presented; }
     public long verifiedFinalOutputFrames() { return verifiedOutput; }
+    public long reusedTransferFrames() { return reusedTransfers; }
+    public long recordedTransferCommands() { return recordedTransfers; }
 
     public void present() {
         context.assertCurrentThread();
@@ -85,7 +92,10 @@ public final class ZinkPresenter implements AutoCloseable {
             else dirty = true;
             int imageIndex = index.get(0);
             var shared = frames[frame];
-            boolean checkOutput = outputChecks != null && width == context.width() && height == context.height() && width >= 32 && height >= 32;
+            // Alternate only in the opt-in diagnostic, exercising both normal
+            // and readback commands in one real client lifecycle.
+            boolean checkOutput = outputChecks != null && (presented & 1) == 0
+                    && width == context.width() && height == context.height() && width >= 32 && height >= 32;
             if (checkOutput) drawFinalMarker();
             try (var state = new GlBlitScope()) {
                 shared.beginGlCopy();
@@ -97,32 +107,18 @@ public final class ZinkPresenter implements AutoCloseable {
                 shared.endGlWrite();
             }
 
-            var command = commands[frame];
-            check(vkResetCommandBuffer(command, 0), "reset presentation command");
-            check(vkBeginCommandBuffer(command, VkCommandBufferBeginInfo.calloc(stack).sType$Default()
-                    .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)), "begin presentation command");
-            shared.acquire(command, family);
-            if (checkOutput) outputChecks[frame].record(command, shared.image(), width, height, stack);
-            imageBarrier(command, images[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, stack);
-            var blit = VkImageBlit.calloc(1, stack);
-            blit.srcSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
-            blit.dstSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
-            // GL texture rows start at the bottom; Vulkan WSI rows start at the top.
-            blit.srcOffsets(0).set(0, height, 0); blit.srcOffsets(1).set(width, 0, 1);
-            blit.dstOffsets(1).set(width, height, 1);
-            vkCmdBlitImage(command, shared.image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                    images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, blit, VK_FILTER_NEAREST);
-            imageBarrier(command, images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                    VK_ACCESS_TRANSFER_WRITE_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, stack);
-            shared.release(command, family);
-            check(vkEndCommandBuffer(command), "end presentation command");
+            // The slot fence above covers every command variant referencing this
+            // shared image, so an executable command is never resubmitted pending.
+            int commandIndex = (frame * images.length + imageIndex) * commandVariants + (checkOutput ? 1 : 0);
+            var command = transferCommands[commandIndex];
             check(vkResetFences(device, fences[frame]), "reset presentation fence");
             check(vkQueueSubmit(DeviceManager.getGraphicsQueue().queue(), VkSubmitInfo.calloc(stack).sType$Default()
                     .waitSemaphoreCount(2).pWaitSemaphores(stack.longs(available[frame], shared.readyForVulkan()))
                     .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT))
                     .pCommandBuffers(stack.pointers(command))
                     .pSignalSemaphores(stack.longs(presentReady[imageIndex], shared.readyForGl())), fences[frame]), "submit client Vulkan presentation");
+            if (commandSubmitted[commandIndex]) reusedTransfers++;
+            commandSubmitted[commandIndex] = true;
             if (checkOutput) outputChecks[frame].submitted();
             int result = vkQueuePresentKHR(DeviceManager.getPresentQueue().queue(), VkPresentInfoKHR.calloc(stack).sType$Default()
                     .pWaitSemaphores(stack.longs(presentReady[imageIndex])).swapchainCount(1)
@@ -183,7 +179,7 @@ public final class ZinkPresenter implements AutoCloseable {
                 frames[i] = new SharedImage(DeviceManager.physicalDevice, device, width, height, sharedFormat);
                 if (outputChecks != null) outputChecks[i] = new FinalOutputReadback();
             }
-            var command = commands[0];
+            var command = setupCommand;
             check(vkResetCommandBuffer(command, 0), "reset initial ownership command");
             check(vkBeginCommandBuffer(command, VkCommandBufferBeginInfo.calloc(stack).sType$Default()
                     .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)), "begin initial ownership");
@@ -192,10 +188,55 @@ public final class ZinkPresenter implements AutoCloseable {
             check(vkQueueSubmit(DeviceManager.getGraphicsQueue().queue(), VkSubmitInfo.calloc(stack).sType$Default()
                     .pCommandBuffers(stack.pointers(command)).pSignalSemaphores(stack.longs(frames[0].readyForGl(), frames[1].readyForGl())), 0), "release initial client images");
             check(vkQueueWaitIdle(DeviceManager.getGraphicsQueue().queue()), "complete initial ownership");
+            recordTransferCommands(stack);
             dirty = false;
             windowWidth = requestedWidth; windowHeight = requestedHeight;
             Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}", width, height, format, images.length, vsync);
             return true;
+        }
+    }
+
+    /** Record immutable transfers once per swapchain generation, including an
+     * optional readback variant so diagnostics exercise the same reusable path. */
+    private void recordTransferCommands(MemoryStack stack) {
+        commandVariants = outputChecks != null && width >= 32 && height >= 32 ? 2 : 1;
+        int count = FRAMES * images.length * commandVariants;
+        var pointers = stack.mallocPointer(count);
+        check(vkAllocateCommandBuffers(device, VkCommandBufferAllocateInfo.calloc(stack).sType$Default()
+                .commandPool(Vulkan.getCommandPool()).level(VK_COMMAND_BUFFER_LEVEL_PRIMARY).commandBufferCount(count), pointers), "allocate reusable presentation commands");
+        transferCommands = new VkCommandBuffer[count];
+        commandSubmitted = new boolean[count];
+        for (int i = 0; i < count; i++) transferCommands[i] = new VkCommandBuffer(pointers.get(i), device);
+        for (int slot = 0; slot < FRAMES; slot++) for (int image = 0; image < images.length; image++) {
+            for (int variant = 0; variant < commandVariants; variant++) {
+                recordTransferCommand(transferCommands[(slot * images.length + image) * commandVariants + variant], slot, image, variant != 0);
+            }
+        }
+        recordedTransfers += count;
+        Initializer.LOGGER.info("AFV_ZINK_TRANSFER_COMMANDS: generation={}, recorded={}, variants={}", ++transferGenerations, count, commandVariants);
+    }
+
+    private void recordTransferCommand(VkCommandBuffer command, int slot, int imageIndex, boolean checkOutput) {
+        try (var stack = MemoryStack.stackPush()) {
+            // No ONE_TIME_SUBMIT flag: the slot fence permits sequential reuse.
+            check(vkBeginCommandBuffer(command, VkCommandBufferBeginInfo.calloc(stack).sType$Default()), "begin reusable presentation command");
+            var shared = frames[slot];
+            shared.acquire(command, family);
+            if (checkOutput) outputChecks[slot].record(command, shared.image(), width, height, stack);
+            imageBarrier(command, images[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, stack);
+            var blit = VkImageBlit.calloc(1, stack);
+            blit.srcSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
+            blit.dstSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
+            // GL texture rows start at the bottom; Vulkan WSI rows start at the top.
+            blit.srcOffsets(0).set(0, height, 0); blit.srcOffsets(1).set(width, 0, 1);
+            blit.dstOffsets(1).set(width, height, 1);
+            vkCmdBlitImage(command, shared.image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, blit, VK_FILTER_NEAREST);
+            imageBarrier(command, images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, stack);
+            shared.release(command, family);
+            check(vkEndCommandBuffer(command), "end reusable presentation command");
         }
     }
 
@@ -223,6 +264,18 @@ public final class ZinkPresenter implements AutoCloseable {
         vkCmdPipelineBarrier(command, srcStage, dstStage, 0, null, null, barrier);
     }
     private void destroySwapchain() {
+        // Caller has drained the device. Free executable references before their
+        // images/readback buffers, and never retain a command across recreation.
+        if (transferCommands != null) {
+            try (var stack = MemoryStack.stackPush()) {
+                var pointers = stack.mallocPointer(transferCommands.length);
+                for (var command : transferCommands) pointers.put(command);
+                pointers.flip();
+                vkFreeCommandBuffers(device, Vulkan.getCommandPool(), pointers);
+            }
+            transferCommands = null;
+            commandSubmitted = null;
+        }
         if (outputChecks != null) for (int i = 0; i < FRAMES; i++) if (outputChecks[i] != null) {
             if (outputChecks[i].verify()) verifiedOutput++;
             outputChecks[i].close(); outputChecks[i] = null;
@@ -244,6 +297,9 @@ public final class ZinkPresenter implements AutoCloseable {
             if (available[i] != 0) vkDestroySemaphore(device, available[i], null);
             if (fences[i] != 0) vkDestroyFence(device, fences[i], null);
         }
-        // Commands belong to Vulkan's presentation pool and are freed with it.
+        if (setupCommand != null) {
+            vkFreeCommandBuffers(device, Vulkan.getCommandPool(), setupCommand);
+            setupCommand = null;
+        }
     }
 }

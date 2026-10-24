@@ -229,6 +229,9 @@ public final class ClientSmokeTest {
             if (!BackendBootstrap.zinkClient() || ZinkClientSession.presentedFrames() < 120)
                 throw new IllegalStateException("AFV_SMOKE_FAIL: Zink client did not present through AFV Vulkan");
             Initializer.LOGGER.info("AFV_ZINK_CLIENT_SMOKE_PASS: {} real Vulkan presentations", ZinkClientSession.presentedFrames());
+            if (ZinkClientSession.reusedTransferFrames() < 120 || ZinkClientSession.recordedTransferCommands() == 0)
+                throw new IllegalStateException("AFV_SMOKE_FAIL: presentation transfer commands were not reused");
+            Initializer.LOGGER.info("AFV_ZINK_TRANSFER_REUSE_PASS: reused={}, recorded={}", ZinkClientSession.reusedTransferFrames(), ZinkClientSession.recordedTransferCommands());
         }
         if (Boolean.getBoolean("afv.smokeFinalOutput")) {
             if (!BackendBootstrap.zinkClient() || ZinkClientSession.verifiedFinalOutputFrames() < 120)

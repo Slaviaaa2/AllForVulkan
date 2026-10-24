@@ -634,3 +634,37 @@ world／resize／shader off→on／shader-only reload／resource reload／discon
 全GPU・全MODへ検証範囲を広げることを改善開始の条件にはせず、追加のDTFuel一式や
 ディメンション試験は今回は反復していない。以前のDTFuel通過結果は上記の版に対する
 証跡として扱い、今回のJARで全packを再確認したという意味にはしない。
+
+## Vulkan転送コマンドの再利用（2026-10-24）
+
+GL→共有画像→WSIのコピーと同期を保持したまま、毎frameのVulkan command bufferの
+reset／begin／barrier・blit記録／endを廃止した。共有frame slotとswapchain imageの
+組合せごとに、swapchain再作成時に1度だけ記録する。slot fenceの完了を待ってから
+再submitし、同じcommandをpendingの間に再利用しない。swapchain imageの取得と
+imageごとのpresent semaphoreの方針も維持する。
+
+[Vulkanのcommand buffer lifecycle](https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html)
+に従い、再利用するcommandにはONE_TIME_SUBMIT／SIMULTANEOUS_USEを指定しない。
+resize／VSync変更時はdevice idle後、画像・readback bufferを破棄する前に全cacheを
+freeし、次のgenerationを記録する。初回の共有画像ownership設定には別commandを使う。
+
+明示的な最終出力診断ではreadback付きvariantも事前記録する。通常variantと交互に
+実行し、診断のために通常の再利用経路を迂回しない。smokeは記録数と120回以上の
+実再利用を要求し、`AFV_ZINK_TRANSFER_REUSE_PASS`を出す。FPS測定は行わない。
+
+Gradle build／baselineコンパイル、配布JAR検査（16 nested libraries）、launcher構文と
+差分の空白検査が通過した。同じ専用X、Iris 1.8.14-beta.1／Sodium 0.8.13最小構成、
+指定ComplementaryでAUTO→Vulkanの実クライアントを1回起動した。world、resize、
+shader off→on／shader-only reload、resource reload、実iconify中の停止と復帰、
+VSync変更と復帰、disconnect、タイトル復帰と終了コード0を確認した。
+
+6 generationで計72 commandを記録し、2582回の実Vulkan表示のうち2544回は既存の
+commandを再利用した。通常variantと診断variantの両方を使い、1288回の最終出力を
+実Vulkan画像で照合した。shader ZIPのSHA-256と元の9設定もprivate copyと一致した。
+この変更後にDTFuel全204 MODの再試験やFPS比較は行っていない。Vulkan validation
+layerはこの環境に未導入で、VUID／同期validationを通過したという主張はしない。
+
+配布JARのSHA-256は
+`734af2d364b0b4b502afc9a6e2e1dd522e92e6f2bae4811af4876ed4b0196261`。
+ローカル証跡は`transfer-reuse-build.log`、`minimal-transfer-reuse-{launch,client,preflight}.log`、
+`minimal-transfer-reuse-result.json`。元pack・既存save・提供shaderは変更していない。

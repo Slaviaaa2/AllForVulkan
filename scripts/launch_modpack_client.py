@@ -284,6 +284,8 @@ def launch(args):
         passed = passed and 'AFV_DIMENSION_CYCLE_PASS' in text
     if args.expect_backend:
         passed = passed and bool(re.search(r'AFV_BACKEND: requested=[A-Z]+, active=' + args.expect_backend + r',', text))
+    if args.zink_client and args.smoke:
+        passed = passed and 'AFV_ZINK_TRANSFER_REUSE_PASS' in text
     print(('AFV_PRODUCTION_PASS' if passed else 'AFV_PRODUCTION_FAIL') + f': exit={code} log={log}', flush=True)
     return 0 if passed else 1
 
