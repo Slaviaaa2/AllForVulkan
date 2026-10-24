@@ -93,9 +93,9 @@ public final class ZinkPresenter implements AutoCloseable {
             else dirty = true;
             int imageIndex = index.get(0);
             var shared = frames[frame];
-            // Alternate only in the opt-in diagnostic, exercising both normal
-            // and readback commands in one real client lifecycle.
-            boolean checkOutput = outputChecks != null && (presented & 1) == 0
+            // Alternate whole slot batches in the opt-in diagnostic, so every
+            // shared image exercises both normal and readback commands.
+            boolean checkOutput = outputChecks != null && ((presented / FRAMES) & 1) == 0
                     && width == context.width() && height == context.height() && width >= 32 && height >= 32;
             if (checkOutput) drawFinalMarker();
             try (var state = new GlBlitScope(context.defaultReadBuffer())) {
@@ -175,7 +175,7 @@ public final class ZinkPresenter implements AutoCloseable {
             presentReady = new long[images.length];
             for (int i = 0; i < images.length; i++) presentReady[i] = semaphore(stack);
             for (int i = 0; i < FRAMES; i++) {
-                frames[i] = new SharedImage(DeviceManager.physicalDevice, device, width, height, sharedFormat);
+                frames[i] = SharedImage.forGlCopy(DeviceManager.physicalDevice, device, width, height, sharedFormat);
                 if (outputChecks != null) outputChecks[i] = new FinalOutputReadback();
             }
             var command = setupCommand;
@@ -190,7 +190,7 @@ public final class ZinkPresenter implements AutoCloseable {
             recordTransferCommands(stack);
             dirty = false;
             windowWidth = requestedWidth; windowHeight = requestedHeight;
-            Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}", width, height, format, images.length, vsync);
+            Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}, sharedLayout=transfer", width, height, format, images.length, vsync);
             return true;
         }
     }

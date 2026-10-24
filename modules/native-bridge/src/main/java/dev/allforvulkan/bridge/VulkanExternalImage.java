@@ -214,14 +214,7 @@ public final class VulkanExternalImage implements AutoCloseable {
             begin(stack);
             barrier(stack, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0, VK_ACCESS_TRANSFER_READ_BIT,
                     VK_QUEUE_FAMILY_EXTERNAL, queueFamily, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-            var copy = VkBufferImageCopy.calloc(1, stack);
-            copy.imageSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
-            copy.imageExtent().set(width, height, 1);
-            vkCmdCopyImageToBuffer(command, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback, copy);
-            var hostBarrier = VkBufferMemoryBarrier.calloc(1, stack).sType$Default().srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
-                    .dstAccessMask(VK_ACCESS_HOST_READ_BIT).srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED).dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                    .buffer(readback).offset(0).size(VK_WHOLE_SIZE);
-            vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, null, hostBarrier, null);
+            recordReadback(stack, image);
             check(vkEndCommandBuffer(command), "end acquire commands");
             var submit = VkSubmitInfo.calloc(stack).sType$Default().pCommandBuffers(stack.pointers(command))
                     .waitSemaphoreCount(1).pWaitSemaphores(stack.longs(fromGl)).pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_TRANSFER_BIT));
@@ -229,14 +222,82 @@ public final class VulkanExternalImage implements AutoCloseable {
             check(vkQueueSubmit(queue, submit, fence), "submit acquire");
             awaitFence();
             currentLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            verifyReadback(255, 0, 255);
+        }
+    }
+    private void recordReadback(MemoryStack stack, long sourceImage) {
+        var copy = VkBufferImageCopy.calloc(1, stack);
+        copy.imageSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
+        copy.imageExtent().set(width, height, 1);
+        vkCmdCopyImageToBuffer(command, sourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback, copy);
+        var hostBarrier = VkBufferMemoryBarrier.calloc(1, stack).sType$Default().srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                .dstAccessMask(VK_ACCESS_HOST_READ_BIT).srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED).dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .buffer(readback).offset(0).size(VK_WHOLE_SIZE);
+        vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, null, hostBarrier, null);
+    }
+    private void verifyReadback(int red, int green, int blue) {
+        try (var stack = MemoryStack.stackPush()) {
             var mapped = stack.mallocPointer(1);
             check(vkMapMemory(device, readbackMemory, 0, (long) width * height * 4, 0, mapped), "map diagnostic readback");
             try {
                 ByteBuffer bytes = org.lwjgl.system.MemoryUtil.memByteBuffer(mapped.get(0), width * height * 4);
                 for (int i = 0; i < bytes.remaining(); i += 4)
-                    if ((bytes.get(i) & 255) != 255 || bytes.get(i + 1) != 0 || (bytes.get(i + 2) & 255) != 255 || (bytes.get(i + 3) & 255) != 255)
-                        throw new IllegalStateException("Vulkan did not see the Zink magenta image at pixel " + i / 4);
+                    if ((bytes.get(i) & 255) != red || (bytes.get(i + 1) & 255) != green
+                            || (bytes.get(i + 2) & 255) != blue || (bytes.get(i + 3) & 255) != 255)
+                        throw new IllegalStateException("Vulkan did not see the expected Zink color at pixel " + i / 4);
             } finally { vkUnmapMemory(device, readbackMemory); }
+        }
+    }
+    /** Exercise the production copy-only image, including implicit signal flush,
+     * external ownership, changing bytes and reuse across multiple submissions. */
+    void verifySharedCopy() {
+        verifySharedCopy(false);
+        verifySharedCopy(true);
+    }
+    private void verifySharedCopy(boolean copyOnly) {
+        assertUsable();
+        try (var state = new GlStateScope(); var stack = MemoryStack.stackPush()) {
+            var shared = copyOnly ? SharedImage.forGlCopy(physical, device, width, height, VK_FORMAT_R8G8B8A8_UNORM)
+                    : new SharedImage(physical, device, width, height, VK_FORMAT_R8G8B8A8_UNORM);
+            try {
+                org.lwjgl.opengl.GL11.glDisable(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST);
+                org.lwjgl.opengl.GL11.glDisable(org.lwjgl.opengl.GL30.GL_FRAMEBUFFER_SRGB);
+                org.lwjgl.opengl.GL11.glColorMask(true, true, true, true);
+                begin(stack);
+                shared.release(command, queueFamily);
+                check(vkEndCommandBuffer(command), "end copy initial release");
+                check(vkResetFences(device, fence), "reset copy initial release fence");
+                check(vkQueueSubmit(queue, VkSubmitInfo.calloc(stack).sType$Default()
+                        .pCommandBuffers(stack.pointers(command)).pSignalSemaphores(stack.longs(shared.readyForGl())), fence), "submit copy initial release");
+                awaitFence();
+                for (int frame = 0; frame < 8; frame++) {
+                    int red = frame * 17, green = 255 - red, blue = (frame ^ 1) * 11;
+                    int framebuffer = shared.beginGlCopy();
+                    org.lwjgl.opengl.GL45.glClearNamedFramebufferfv(framebuffer, org.lwjgl.opengl.GL11.GL_COLOR, 0,
+                            stack.floats(red / 255f, green / 255f, blue / 255f, 1f));
+                    shared.endGlWrite(); // No explicit glFlush here or in SharedImage.
+                    begin(stack);
+                    shared.acquire(command, queueFamily);
+                    recordReadback(stack, shared.image());
+                    shared.release(command, queueFamily);
+                    check(vkEndCommandBuffer(command), "end copy acquire/release");
+                    check(vkResetFences(device, fence), "reset copy acquire/release fence");
+                    check(vkQueueSubmit(queue, VkSubmitInfo.calloc(stack).sType$Default()
+                            .pCommandBuffers(stack.pointers(command)).waitSemaphoreCount(1)
+                            .pWaitSemaphores(stack.longs(shared.readyForVulkan()))
+                            .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_TRANSFER_BIT))
+                            .pSignalSemaphores(stack.longs(shared.readyForGl())), fence), "submit copy acquire/release");
+                    awaitFence();
+                    verifyReadback(red, green, blue);
+                }
+                System.out.println((copyOnly ? "AFV_SHARED_COPY_LAYOUT_PASS: TRANSFER_DST -> GL -> TRANSFER_SRC"
+                        : "AFV_SHARED_GENERAL_PASS: GENERAL -> GL -> GENERAL")
+                        + ", 8 changing frames, implicit signal flush, size=" + width + "x" + height);
+            } finally {
+                org.lwjgl.opengl.GL11.glFinish(); // Diagnostic teardown only.
+                vkDeviceWaitIdle(device);
+                shared.close();
+            }
         }
     }
     private void awaitFence() {

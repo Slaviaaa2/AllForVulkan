@@ -737,3 +737,44 @@ shader切替cycleの反復は行っていない。
 `dtfuel-named-blit-result.json`。元pack・既存save・提供shaderは変更していない。
 配布JARのSHA-256は
 `85dbb429ae925eeb586539a27fcc867a004d4fe6c05342a01797c92cf21d81cb`。
+
+## 表示専用共有画像の転送レイアウト（2026-10-25）
+
+表示用の色画像だけを`SharedImage.forGlCopy`で作成し、Vulkan release／GL waitには
+TRANSFER_DST、GL signal／Vulkan acquireにはTRANSFER_SRCを使うようにした。
+Vulkan acquireのGENERAL→TRANSFER_SRCへのレイアウト変更をなくし、所有権移譲の
+barrierと双方向semaphoreは保持する。sampling／rendering／depth用の汎用画像は
+従来のGENERAL契約を使う。表示用画像を誤ってsamplingやVulkan scene入力に使う
+呼出しは拒否する。画面コピーの内容・向きやIrisの描画順は変更しない。
+
+[EXT_external_objectsのsemaphore仕様](https://raw.githubusercontent.com/KhronosGroup/OpenGL-Registry/main/extensions/EXT/EXT_external_objects.txt)
+のレイアウト対応に従い、GL driverが必要な内部遷移を行う。SignalSemaphoreEXTは
+signal直後のflushも行うため、`SharedImage.endGlWrite`の重複した`glFlush`を削除した。
+これはAPI呼出しとレイアウト変更の削減であり、FPS向上幅を測定した結果ではない。
+
+起動前helperは本番のSharedImageをGENERAL／転送レイアウトの両方で作成し、16×16と
+31×31の各サイズで8 frameずつ色を変え、GL→Vulkanの全RGBAを照合する。明示的な
+glFlushは挟まず、実external memoryと双方向semaphoreを使用する。コピー専用の成功
+markerも起動条件に追加し、失敗時はゲームにGL driverを入れる前にOpenGLへ戻す。
+最終出力診断はframe slotの一巡ごとに通常／readbackを切り替え、両slotで両variantを
+使用するようにした。
+
+build／baselineコンパイル、配布JAR、差分空白検査が通過。専用Xが終了していたため
+GPU検査を保留し、Xephyr :97とmetacityを専用workspaceに立て直した。以後の実GPU検査で
+GENERAL／転送レイアウト各2サイズ、indexed state、default drawable、compute、外部画像、
+hidden WSIが通過した。ログはローカル`copy-layout-{build,probe}.log`。
+
+同じ配布JARを専用のIris 1.8.14-beta.1／Sodium 0.8.13最小構成、NeoForge 21.1.251、
+指定Complementaryで1回起動した。埋め込みhelperでも両契約・両サイズの成功を確認し、
+AUTO→Vulkan、各swapchainで`sharedLayout=transfer`を確認した。world、resize、
+shader off→on／shader-only reload、resource reload、実iconify中の停止・復帰、
+VSync変更・復帰、disconnectと正常終了を通過。2177回の実Vulkan表示、2105回の
+command再利用（6 generation計72個を記録）、1086回の最終出力照合が通過した。
+指定shader ZIPのSHA-256と9つの設定値もprivate copyと一致した。今回の版ではDTFuel
+全204 MODの再起動やFPS比較は行っていない。
+
+配布JARのSHA-256は
+`59b971dace89424cd9fafbfc53834f6987c63b829c677dafe8902f256f74a63a`。
+詳細はローカル`minimal-copy-layout-result.json`、実行証跡は
+`minimal-copy-layout-{launch,client,preflight}.log`。元pack・既存save・提供shaderは
+変更していない。

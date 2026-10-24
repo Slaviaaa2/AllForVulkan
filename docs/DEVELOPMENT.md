@@ -50,6 +50,18 @@ records a second variant per pair and alternates it with the normal variant,
 so one smoke run also exercises normal command reuse. No simultaneous-use or
 one-time-submit flags are used on reusable commands.
 
+Presentation-only shared images use a copy-specific external layout contract:
+Vulkan releases in `TRANSFER_DST_OPTIMAL`, GL waits with `LAYOUT_TRANSFER_DST_EXT`
+and signals with `LAYOUT_TRANSFER_SRC_EXT`, and Vulkan acquires directly in
+`TRANSFER_SRC_OPTIMAL`. The acquire still transfers queue ownership; it no longer
+changes the image from GENERAL to TRANSFER_SRC. Scene sampling/rendering/depth
+images retain their GENERAL contract. `glSignalSemaphoreEXT` already flushes by
+specification, so shared-image submission does not issue a second `glFlush`.
+The isolated preflight tests the production SharedImage in both contracts, with
+changing exact pixels at two sizes and the same external semaphores. The copy
+layout pass is required before enabling the GL client in the game. Diagnostics
+alternate whole slot batches so both slots exercise normal and readback commands.
+
 The EGL drawable matches the real window size and includes depth/stencil.
 `Minecraft.runTick` prepares its size before drawing, retaining the same GL
 context, live objects and viewport/scissor state. It is not resized after a

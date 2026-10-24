@@ -12,6 +12,8 @@ import static org.lwjgl.opengl.EXTSemaphore.glDeleteSemaphoresEXT;
 import static org.lwjgl.opengl.EXTSemaphore.glWaitSemaphoreEXT;
 import static org.lwjgl.opengl.EXTSemaphore.glSignalSemaphoreEXT;
 import static org.lwjgl.opengl.EXTSemaphore.GL_LAYOUT_GENERAL_EXT;
+import static org.lwjgl.opengl.EXTSemaphore.GL_LAYOUT_TRANSFER_SRC_EXT;
+import static org.lwjgl.opengl.EXTSemaphore.GL_LAYOUT_TRANSFER_DST_EXT;
 import static org.lwjgl.opengl.EXTSemaphoreFD.glImportSemaphoreFdEXT;
 import static org.lwjgl.vulkan.VK10.*;
 import static org.lwjgl.vulkan.VK11.*;
@@ -24,6 +26,7 @@ public final class SharedImage implements AutoCloseable {
     private final Thread owner = Thread.currentThread();
     private final VkDevice device;
     private final int width, height, aspect;
+    private final boolean copyOnly;
     private long image, memory, toGl, fromGl;
     private int glMemory, glToGl, glFromGl, texture, framebuffer;
     private boolean closed;
@@ -33,6 +36,13 @@ public final class SharedImage implements AutoCloseable {
         this(physical, device, width, height, VK_FORMAT_R8G8B8A8_UNORM);
     }
     public SharedImage(VkPhysicalDevice physical, VkDevice device, int width, int height, int format) {
+        this(physical, device, width, height, format, false);
+    }
+    /** GL writes a final color copy; Vulkan only reads it for presentation. */
+    public static SharedImage forGlCopy(VkPhysicalDevice physical, VkDevice device, int width, int height, int format) {
+        return new SharedImage(physical, device, width, height, format, true);
+    }
+    private SharedImage(VkPhysicalDevice physical, VkDevice device, int width, int height, int format, boolean copyOnly) {
         int glFormat = switch (format) {
             case VK_FORMAT_R8G8B8A8_UNORM -> GL_RGBA8;
             case VK_FORMAT_R8G8B8A8_SRGB -> org.lwjgl.opengl.GL21.GL_SRGB8_ALPHA8;
@@ -51,7 +61,9 @@ public final class SharedImage implements AutoCloseable {
         this.device = device;
         this.width = width;
         this.height = height;
+        this.copyOnly = copyOnly;
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Invalid shared image size");
+        if (copyOnly && aspect != VK_IMAGE_ASPECT_COLOR_BIT) throw new IllegalArgumentException("Presentation copies require a color image");
         var caps = GL.getCapabilities();
         if (!caps.GL_EXT_memory_object_fd || !caps.GL_EXT_semaphore_fd)
             throw new IllegalStateException("Zink lacks opaque FD memory/semaphore sharing");
@@ -159,6 +171,7 @@ public final class SharedImage implements AutoCloseable {
     /** Local graphics ownership: prepare an image for a GPU copy from the scene. */
     public void prepareTransferDestination(VkCommandBuffer command) {
         assertOwner();
+        if (copyOnly) throw new IllegalStateException("A GL presentation copy is not a Vulkan scene producer");
         barrier(command, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 layout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
                 VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
@@ -171,18 +184,24 @@ public final class SharedImage implements AutoCloseable {
         assertOwner();
         int access = layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? VK_ACCESS_TRANSFER_WRITE_BIT
                 : layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL ? VK_ACCESS_TRANSFER_READ_BIT : 0;
-        barrier(command, layout, VK_IMAGE_LAYOUT_GENERAL, access, 0, family, VK_QUEUE_FAMILY_EXTERNAL,
+        int nextLayout = copyOnly ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL;
+        barrier(command, layout, nextLayout, access, 0, family, VK_QUEUE_FAMILY_EXTERNAL,
                 layout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-        layout = VK_IMAGE_LAYOUT_GENERAL;
+        layout = nextLayout;
     }
     /** Wait in the GL queue and return the sampled texture, without changing framebuffer state. */
     public int beginGlRead() {
+        if (copyOnly) throw new IllegalStateException("A GL presentation copy cannot be sampled");
+        awaitGl();
+        return texture;
+    }
+    private void awaitGl() {
         assertOwner();
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            glWaitSemaphoreEXT(glToGl, stack.mallocInt(0), stack.ints(texture), stack.ints(GL_LAYOUT_GENERAL_EXT));
+            glWaitSemaphoreEXT(glToGl, stack.mallocInt(0), stack.ints(texture),
+                    stack.ints(copyOnly ? GL_LAYOUT_TRANSFER_DST_EXT : GL_LAYOUT_GENERAL_EXT));
         }
-        return texture;
     }
     /** Wait in the GL queue; returns this real GL FBO for the producer. No CPU wait/readback. */
     public int beginGlWrite() {
@@ -193,22 +212,24 @@ public final class SharedImage implements AutoCloseable {
     }
     /** Wait and return the destination for a named blit, without binding any FBO. */
     public int beginGlCopy() {
-        beginGlRead();
+        awaitGl();
         return framebuffer;
     }
     public void endGlRead() { endGlWrite(); }
     public void endGlWrite() {
         assertOwner();
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            glSignalSemaphoreEXT(glFromGl, stack.mallocInt(0), stack.ints(texture), stack.ints(GL_LAYOUT_GENERAL_EXT));
-            glFlush();
+            glSignalSemaphoreEXT(glFromGl, stack.mallocInt(0), stack.ints(texture),
+                    stack.ints(copyOnly ? GL_LAYOUT_TRANSFER_SRC_EXT : GL_LAYOUT_GENERAL_EXT));
+            // EXT_semaphore already flushes immediately after signaling.
             checkGl("submit shared game image");
         }
     }
     /** Record acquire in a submission waiting on readyForVulkan at TRANSFER. */
     public void acquire(VkCommandBuffer command, int family) {
         assertOwner();
-        barrier(command, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0, VK_ACCESS_TRANSFER_READ_BIT,
+        barrier(command, copyOnly ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0, VK_ACCESS_TRANSFER_READ_BIT,
                 VK_QUEUE_FAMILY_EXTERNAL, family, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
         layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     }

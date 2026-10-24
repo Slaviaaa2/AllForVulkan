@@ -73,7 +73,7 @@ final class WsiSupportProbe {
                             stack.UTF8(KHRExternalSemaphoreFd.VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME)));
             check(vkCreateDevice(physical, deviceInfo, null, pointer), "WSI probe logical device");
             device = new VkDevice(pointer.get(0), physical, deviceInfo);
-            try (var state = new GlStateScope(); var shared = new SharedImage(physical, device, 8, 8, sharedFormat)) {
+            try (var state = new GlStateScope(); var shared = SharedImage.forGlCopy(physical, device, 8, 8, sharedFormat)) {
                 org.lwjgl.opengl.GL11.glFinish();
             }
             var extent = PresentationSurface.extent(capabilities, 32, 32);
