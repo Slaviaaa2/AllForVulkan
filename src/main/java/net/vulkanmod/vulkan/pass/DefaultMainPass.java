@@ -73,13 +73,23 @@ public class DefaultMainPass implements MainPass {
     }
 
     @Override
+    public void resume(VkCommandBuffer commandBuffer, MemoryStack stack) {
+        SwapChain framebuffer = Renderer.getInstance().getSwapChain();
+        framebuffer.getColorAttachment().transitionImageLayout(stack, commandBuffer, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        framebuffer.getDepthAttachment().transitionImageLayout(stack, commandBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+        framebuffer.beginRenderPass(commandBuffer, this.auxRenderPass, stack);
+        vkCmdSetViewport(commandBuffer, 0, framebuffer.viewport(stack));
+        vkCmdSetScissor(commandBuffer, 0, framebuffer.scissor(stack));
+    }
+
+    @Override
     public void end(VkCommandBuffer commandBuffer) {
         Renderer.getInstance().endRenderPass(commandBuffer);
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             SwapChain framebuffer = Renderer.getInstance().getSwapChain();
-            if (Renderer.getInstance().getZinkBridge() != null)
-                Renderer.getInstance().getZinkBridge().releaseScene(commandBuffer, framebuffer.getColorAttachment());
+            if (Renderer.getInstance().getZinkBridge() != null && !Renderer.getInstance().isWorldProcessed())
+                Renderer.getInstance().getZinkBridge().releaseScene(commandBuffer, framebuffer.getColorAttachment(), framebuffer.getDepthAttachment(), false);
             else framebuffer.getColorAttachment().transitionImageLayout(stack, commandBuffer, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
         }
 

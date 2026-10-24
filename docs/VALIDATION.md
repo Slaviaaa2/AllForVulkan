@@ -159,3 +159,44 @@ Irisのworld/shadowフックを代替するものではない。sRGB用の画像
 
 Zink無効の通常AFVでも同じ最終ソースでworld/resize/reload/disconnectを再実行し、
 `AFV_SMOKE_PASS` と終了コード0を確認した。
+
+
+## 2026-10-24: ワールド深度、HUD、設定と別Xセッション
+
+以下が現在の実装の検証結果。上のフレーム合成節は、その時点の履歴である。
+Linux / RTX 3060 / Xephyr :97、NeoForge 21.1.228で実施した。
+
+| 構成 | 結果 |
+| --- | --- |
+| 通常AFV、投影行列修正後 | world/resize/reload/disconnect、終了コード0。クライアントだけの画像でHUD・照準・通知・手元を確認 |
+| AFV＋Zink、identity | ワールド終了段階844フレーム、小領域1092回一致、終了コード0。HUDとワールドの実画面も確認 |
+| AFV＋Zink、D24S8 depth | 手元の深度クリア前のワールド826フレーム、深度可視化の小領域1059回一致、同じライフサイクルで終了コード0 |
+| OpenGL明示 | AFV描画Mixinを適用せず通常GLでworld/resize/reload/disconnect、終了コード0 |
+| 設定画面 | OpenGL上で実表示、Auto/Vulkan/OpenGL、保存、戻る、現在の描画方式を配置。画面の保持と正常終了を確認 |
+| Vulkan loader不在の注入 | 存在しないライブラリパスでUnsatisfiedLinkErrorを捕捉、OpenGLへ復帰。タイトル・実GLアトラスと正常終了を確認 |
+| 中断起動の復旧 | 専用インスタンスに作った試験用startup markerを検出してOpenGLへ復帰、タイトル・正常終了を確認 |
+| 機械検査 | Luna MediumによるbuildとProjection/Texture回帰が通過。その後の環境調整は別途最終検査する |
+
+JOMLのMatrix4f MixinはNeoForgeのbootstrapクラスに適用されないため、Vulkanへ渡す
+投影行列の境界でGLの[-1,1]を[0,1]へ変換した。GUIの奥行きがクリップされていた
+HUD欠落を修正。元のGL行列は書き換えない。D24S8の深度可視化比較には浮動小数点と
+UNORM量子化による最大1段階の差を許容する。色identityのUNORM比較は完全一致。
+
+キャプチャはタイトル/ID/現在の境界を確認したMinecraftクライアントか設定パネルに限定。
+仮想デスクトップ全体は撮っていない。最初の不適切な対象キャプチャは検出して破棄し、
+別Xセッションへ移して対象を限定した。画面全体の画素一致は主張しない。
+
+FPS計測用に固定seed/カメラ、warmup後のRenderFrameEvent.Post間隔とp95/p99を保存する
+ハーネスを追加した。:97の通常GLはllvmpipe、VulkanはRTX 3060となったため、得られた
+FPSをVulkanの改善率として比較しない。性能条件の一致と実DTFuelでの性能評価は未達。
+
+### DTFuel専用コピー
+
+`/mnt/hdd/MinecraftModpacks/DTFuel`（0.1.10）の204 MOD（984,847,996 bytes）を
+`build/compatibility/dtfuel-client`へ独立コピーし、すべてSHA-256で照合した。
+NeoForge 21.1.251 / Iris 1.8.14-beta.1 / Sodium 0.8.13 / Sodium Extra 0.9.4。
+元の環境に設定変更、MOD追加削除、ワールド書込みは行っていない。
+
+初回の実起動はAFVがOpenGLを選択した後、CocoaInputのXIM初期化でネイティブSIGSEGV
+（XIMOfIC、XIC=null）になった。別XセッションのXIM設定と実GPUでのGL環境を調整中。
+まだDTFuelが正常動作したとは扱わず、Vulkan上のIris完全互換も未達のままとする。

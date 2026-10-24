@@ -1,0 +1,10 @@
+{
+  "afv.backend.title": "All For Vulkan",
+  "afv.backend.auto": "自動",
+  "afv.backend.active": "現在の描画: %s",
+  "afv.backend.renderer": "描画方式",
+  "afv.backend.save": "保存",
+  "afv.backend.saved": "保存しました。Minecraftの再起動後に適用されます。",
+  "afv.backend.error": "保存できませんでした: %s",
+  "afv.backend.restart": "描画方式の変更にはMinecraftの再起動が必要です。"
+}

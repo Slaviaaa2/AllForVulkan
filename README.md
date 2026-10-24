@@ -15,9 +15,11 @@ VulkanMod由来のVulkan描画本体に、OpenGL互換機能とMOD連携を組�
 | Java | 21 |
 | 開発形態 | VulkanMod本家を直接フォークし、NeoForge移植・GL互換機能・MOD連携を統合 |
 
-現在は **M0（NeoForge移植）の初期実装**です。本家タグ `0.5.5`（`f23855f2675f1efb52fb8aa2c26bc23dccfb5543`）を起点とし、NeoForge **21.1.228** 向けにビルド・メタデータ・起動順序・地形／流体描画を移植しました。`core-api` を独立したJavaモジュールとして追加しています。描画本体の共通コアへの抽出はこれからです。Linux / RTX 3060でタイトル画面の60 tickスモークテストと正常終了を確認しました。ワールド内の地形描画命令、リサイズ、リソース再読込、切断の自動検証も追加・通過しました。描画全体のピクセル比較は未実施です。
+VulkanModタグ `0.5.5`（`f23855f2675f1efb52fb8aa2c26bc23dccfb5543`）からNeoForge **21.1.228** へ移植し、タイトル・ワールド・地形／流体・リサイズ・リソース再読込・切断を実機で検証しています。NeoForgeでは効かないJOMLのMixin依存を廃し、投影行列をVulkanへ渡す境界で深度範囲を変換しました。Linux / RTX 3060ではホットバー・照準・通知・手元の表示もクライアント範囲の画像で確認しています。描画全体の画素一致や、全GPUでの動作確認を意味しません。
 
-**汎用OpenGL互換、Iris統合は未実装**です。`-Dafv.zinkInterop=true` で有効にするLinux向け診断では、AFV本体の描画を共有画像でZinkへ渡し、GLSLの後処理を通してVulkanの表示へ戻します。`-Dafv.zinkEffect=invert` で色反転も試せます。smoke testの数値検査は小領域に限定します。通常は無効です。CPUから読み込むテクスチャ・アトラス・NativeImageは、同じ実GL名でZink側にも転送する経路を追加しました。フレーム色画像の往復を実装しましたが、任意の描画先・深度・直接GLで書き換えた資源の双方向統合はまだ必要です。独立した `native-bridge` 試作では、実際のZink GL 4.6/GLSL 4.60、GPU UUID照合、外部メモリFDと双方向セマフォによる画像共有を確認しました。AFVを載せないIris＋Sodium比較環境では、通常GL／Zinkそれぞれでテスト用シェーダーパックの起動・ワールド・リサイズ・再読込が通過しています。現時点では実験用の移植版で、Iris/Sodiumとの同時導入には対応していません。
+MOD一覧のAFV設定から **「自動」「Vulkan」「OpenGL」** を選択できます。変更は再起動後に適用します。起動前にVulkan 1.2・必要な機能／拡張・論理デバイス作成を調べ、使えない場合はAFVの描画Mixinを適用せずOpenGLで起動します。起動途中の異常終了時も次回はOpenGLで復旧します。Iris/Sodium/Embeddiumがある場合も現在はOpenGLを選びます。これは**Vulkan上でのIris対応を意味しません**。ドライバー内部のクラッシュや全環境での無事故を保証するものではありません。
+
+Linux向け実験機能 `-Dafv.zinkInterop=true` は、ワールドの色と深度をGPU共有画像でZinkへ渡し、GLSL後処理からVulkanへ戻します。処理位置はワールド描画後・手元の深度クリアとGUI描画の前です。`-Dafv.zinkEffect=invert` / `depth` で診断用の色反転／深度表示を選べます。CPU assetのテクスチャIDも実GL名で共有します。通常は無効です。汎用GLのbuffer／FBO／MRT・GPU更新資源の同期・Irisの地形／影／複数pass統合は開発中です。AFVなしのIris＋Sodium比較環境では実IrisRenderingPipelineの起動と再読込を確認していますが、**AFVのVulkan描画とIrisを同時に動かす実装は未完了**です。
 
 - [ビルド・起動方法と現状](docs/DEVELOPMENT.md)
 - [検証記録](docs/VALIDATION.md)

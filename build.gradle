@@ -14,6 +14,9 @@ evaluationDependsOn(':core-api')
 evaluationDependsOn(':native-bridge')
 sourceSets.main.java.srcDir 'platform/neoforge/src/main/java'
 sourceSets { baseline }
+sourceSets.main.java.srcDir 'validation/common/java'
+sourceSets.baseline.java.srcDir 'validation/common/java'
+def clientDirectory = providers.gradleProperty('afvGameDir').map { file(it) }.getOrElse(file('run'))
 repositories { mavenCentral() }
 neoForge {
     version = project.neo_version
@@ -25,6 +28,7 @@ neoForge {
             sourceSet = sourceSets.baseline
             gameDirectory = file('run-iris-baseline')
             systemProperty 'afv.expectZink', 'true'
+            systemProperty 'afv.benchmarkTicks', System.getProperty('afv.benchmarkTicks', '0')
             environment 'MESA_LOADER_DRIVER_OVERRIDE', 'zink'
             environment 'GALLIUM_DRIVER', 'zink'
             environment '__EGL_VENDOR_LIBRARY_FILENAMES', providers.gradleProperty('mesaEglVendor').getOrElse('/usr/share/glvnd/egl_vendor.d/50_mesa.json')
@@ -33,12 +37,23 @@ neoForge {
             client()
             sourceSet = sourceSets.baseline
             gameDirectory = file('run-iris-baseline')
+            systemProperty 'afv.benchmarkTicks', System.getProperty('afv.benchmarkTicks', '0')
         }
         client {
             client()
-            gameDirectory = file('run')
+            gameDirectory = clientDirectory
+            jvmArgument '-Xmx' + providers.gradleProperty('afvClientHeap').getOrElse('4G')
             systemProperty 'afv.smokeTest', System.getProperty('afv.smokeTest', 'false')
             systemProperty 'afv.smokeWorld', System.getProperty('afv.smokeWorld', 'false')
+            systemProperty 'afv.smokeInspectTicks', System.getProperty('afv.smokeInspectTicks', '0')
+            systemProperty 'afv.smokeSettings', System.getProperty('afv.smokeSettings', 'false')
+            systemProperty 'afv.smokeIris', System.getProperty('afv.smokeIris', 'false')
+            systemProperty 'afv.validationEgl', System.getProperty('afv.validationEgl', 'false')
+            systemProperty 'afv.validationPack', System.getProperty('afv.validationPack', 'false')
+            systemProperty 'afv.expectZink', System.getProperty('afv.expectZink', 'false')
+            systemProperty 'afv.benchmarkTicks', System.getProperty('afv.benchmarkTicks', '0')
+            if (System.getProperty('afv.backend') != null) systemProperty 'afv.backend', System.getProperty('afv.backend')
+            if (project.hasProperty('afvVulkanLibrary')) systemProperty 'org.lwjgl.vulkan.libname', project.property('afvVulkanLibrary')
             systemProperty 'afv.zinkInterop', System.getProperty('afv.zinkInterop', 'false')
             systemProperty 'afv.zinkEffect', System.getProperty('afv.zinkEffect', 'identity')
             if (Boolean.getBoolean('afv.zinkInterop')) {
@@ -67,6 +82,7 @@ def devNatives = hostOs.contains('win') ? 'natives-windows' :
         hostOs.contains('mac') ? (hostArch == 'aarch64' ? 'natives-macos-arm64' : 'natives-macos') : 'natives-linux'
 def nativeTargets = ['natives-linux', 'natives-windows', 'natives-macos', 'natives-macos-arm64']
 dependencies {
+    testImplementation "org.joml:joml:1.10.5"
     testImplementation "org.lwjgl:lwjgl:${lwjglVersion}"
     testImplementation "org.lwjgl:lwjgl-opengl:${lwjglVersion}"
     testRuntimeOnly "org.lwjgl:lwjgl:${lwjglVersion}:${devNatives}"
@@ -136,7 +152,7 @@ jar {
 // Keep this development instance's GL splash disabled before FML starts.
 tasks.register('prepareAfvClient') {
     doLast {
-        def configFile = file('run/config/fml.toml')
+        def configFile = new File(clientDirectory, 'config/fml.toml')
         configFile.parentFile.mkdirs()
         def content = configFile.exists() ? configFile.text : ''
         if (content =~ /(?m)^earlyWindowControl\s*=/) {
@@ -144,10 +160,10 @@ tasks.register('prepareAfvClient') {
         } else content += '\nearlyWindowControl = false\n'
         configFile.text = content
         if (System.getProperty('afv.smokeTest', 'false') == 'true') {
-            def optionsFile = file('run/options.txt')
+            def optionsFile = new File(clientDirectory, 'options.txt')
             def options = optionsFile.exists() ? optionsFile.text : ''
-            options = options.readLines().findAll { it.trim() && !it.startsWith('onboardAccessibility:') }.join('\n')
-            optionsFile.text = options + '\nonboardAccessibility:false\n'
+            options = options.readLines().findAll { it.trim() && !it.startsWith('onboardAccessibility:') && !it.startsWith('pauseOnLostFocus:') }.join('\n')
+            optionsFile.text = options + '\nonboardAccessibility:false\npauseOnLostFocus:false\n'
         }
     }
 }
@@ -167,3 +183,10 @@ tasks.register('verifyTextureUpload', JavaExec) {
     mainClass = 'net.vulkanmod.gl.TextureUploadChecks'
 }
 tasks.named('check') { dependsOn 'verifyTextureUpload' }
+
+tasks.register('verifyProjection', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'net.vulkanmod.vulkan.util.ProjectionChecks'
+}
+tasks.named('check') { dependsOn 'verifyProjection' }

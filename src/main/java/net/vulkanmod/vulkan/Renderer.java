@@ -120,6 +120,9 @@ public class Renderer {
     private dev.allforvulkan.bridge.GlFramePass glFramePass;
     private dev.allforvulkan.bridge.GlTextureRegistry glTextures;
 
+    private boolean worldProcessed;
+    public boolean isWorldProcessed() { return worldProcessed; }
+
     public net.vulkanmod.vulkan.interop.ZinkFrameBridge getZinkBridge() { return zinkBridge; }
 
     private void init() {
@@ -129,7 +132,7 @@ public class Renderer {
         if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED) {
             zinkContext = new dev.allforvulkan.bridge.ZinkContext(32, 32);
             glTextures = new dev.allforvulkan.bridge.GlTextureRegistry();
-            glFramePass = new dev.allforvulkan.bridge.SceneColorPass(net.vulkanmod.vulkan.interop.ZinkFrameBridge.INVERT);
+            glFramePass = new dev.allforvulkan.bridge.SceneColorPass(net.vulkanmod.vulkan.interop.ZinkFrameBridge.EFFECT);
         }
         swapChain = new SwapChain();
         mainPass = DefaultMainPass.create();
@@ -144,7 +147,7 @@ public class Renderer {
         allocateCommandBuffers();
         createSyncObjects();
         if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED)
-            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(zinkContext, glFramePass, framesNum, swapChain.getWidth(), swapChain.getHeight(), swapChain.getFormat());
+            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(zinkContext, glFramePass, framesNum, swapChain.getWidth(), swapChain.getHeight(), swapChain.getFormat(), swapChain.getDepthFormat());
     }
 
     private void allocateCommandBuffers() {
@@ -283,6 +286,7 @@ public class Renderer {
             }
 
             imageIndex = pImageIndex.get(0);
+            worldProcessed = false;
             if (zinkBridge != null) zinkBridge.prepare(currentFrame);
 
             this.beginRenderPass(stack);
@@ -308,6 +312,43 @@ public class Renderer {
 
         resetDynamicState(commandBuffer);
     }
+
+    /** Loader adapter calls after world/last-level hooks, before hand depth clear and GUI. */
+    public void finishWorld() {
+        if (zinkBridge == null || worldProcessed || skipRendering || !recordingCmds || swapChainUpdate) return;
+        endRenderPass(currentCmdBuffer);
+        zinkBridge.releaseScene(currentCmdBuffer, swapChain.getColorAttachment(), swapChain.getDepthAttachment(), true);
+        if (vkEndCommandBuffer(currentCmdBuffer) != VK_SUCCESS) throw new IllegalStateException("Cannot end world interop commands");
+        waitFences();
+        try (MemoryStack stack = stackPush()) {
+            VkCommandBuffer composition = zinkBridge.process(currentCmdBuffer, imageAvailableSemaphores.get(currentFrame), false);
+            VkSubmitInfo submit = VkSubmitInfo.calloc(stack).sType$Default().waitSemaphoreCount(3)
+                    .pWaitSemaphores(stack.longs(zinkBridge.sceneWaitSemaphore(), zinkBridge.outputWaitSemaphore(), zinkBridge.depthWaitSemaphore()))
+                    .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT))
+                    .pCommandBuffers(stack.pointers(composition));
+            if (vkQueueSubmit(DeviceManager.getGraphicsQueue().queue(), submit, VK_NULL_HANDLE) != VK_SUCCESS)
+                throw new IllegalStateException("Cannot submit world interop composition");
+            zinkBridge.submitted();
+            worldProcessed = true;
+            currentCmdBuffer = zinkBridge.continuation(currentFrame);
+            vkResetCommandBuffer(currentCmdBuffer, 0);
+            resumeMainPass(stack);
+        }
+    }
+
+    private void resumeMainPass(MemoryStack stack) {
+        VkCommandBufferBeginInfo begin = VkCommandBufferBeginInfo.calloc(stack).sType$Default()
+                .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+        if (vkBeginCommandBuffer(currentCmdBuffer, begin) != VK_SUCCESS) throw new IllegalStateException("Cannot resume main pass");
+        mainPass.resume(currentCmdBuffer, stack);
+        boundPipelineHandle = 0;
+        boundPipeline = null;
+        resetDynamicState(currentCmdBuffer);
+    }
+
+    private long presentedFrames;
+
+    public long presentedFrames() { return presentedFrames; }
 
     public void endFrame() {
         if (skipRendering || !recordingCmds)
@@ -340,15 +381,16 @@ public class Renderer {
             submitInfo.waitSemaphoreCount(1);
             submitInfo.pWaitSemaphores(stack.longs(imageAvailableSemaphores.get(currentFrame)));
             submitInfo.pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT));
-            if (zinkBridge != null) {
-                VkCommandBuffer composition = zinkBridge.process(currentCmdBuffer, imageAvailableSemaphores.get(currentFrame));
-                submitInfo.waitSemaphoreCount(2);
-                submitInfo.pWaitSemaphores(stack.longs(zinkBridge.sceneWaitSemaphore(), zinkBridge.outputWaitSemaphore()));
-                submitInfo.pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT));
+            if (zinkBridge != null && !worldProcessed) {
+                VkCommandBuffer composition = zinkBridge.process(currentCmdBuffer, imageAvailableSemaphores.get(currentFrame), true);
+                submitInfo.waitSemaphoreCount(3);
+                submitInfo.pWaitSemaphores(stack.longs(zinkBridge.sceneWaitSemaphore(), zinkBridge.outputWaitSemaphore(), zinkBridge.depthWaitSemaphore()));
+                submitInfo.pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT));
                 submitInfo.pCommandBuffers(stack.pointers(composition));
             }
             submitInfo.pSignalSemaphores(stack.longs(renderFinishedSemaphores.get(currentFrame)));
-            if (zinkBridge == null) submitInfo.pCommandBuffers(stack.pointers(currentCmdBuffer));
+            if (zinkBridge == null || worldProcessed) submitInfo.pCommandBuffers(stack.pointers(currentCmdBuffer));
+            if (worldProcessed) submitInfo.waitSemaphoreCount(0).pWaitSemaphores(null).pWaitDstStageMask(null);
 
             vkResetFences(device, inFlightFences.get(currentFrame));
 
@@ -357,7 +399,7 @@ public class Renderer {
                 throw new RuntimeException("Failed to submit draw command buffer: %s".formatted(VkResult.decode(vkResult)));
             }
 
-            if (zinkBridge != null) zinkBridge.submitted();
+            if (zinkBridge != null && !worldProcessed) zinkBridge.submitted();
 
             VkPresentInfoKHR presentInfo = VkPresentInfoKHR.calloc(stack);
             presentInfo.sType(VK_STRUCTURE_TYPE_PRESENT_INFO_KHR);
@@ -378,6 +420,7 @@ public class Renderer {
                 throw new RuntimeException("Failed to present rendered frame: %s".formatted(VkResult.decode(vkResult)));
             }
 
+            presentedFrames++;
             currentFrame = (currentFrame + 1) % framesNum;
         }
     }
@@ -411,7 +454,7 @@ public class Renderer {
 
             vkWaitForFences(device, inFlightFences.get(currentFrame), true, VUtil.UINT64_MAX);
 
-            this.beginRenderPass(stack);
+            this.resumeMainPass(stack);
         }
     }
 
@@ -525,7 +568,7 @@ public class Renderer {
         createSyncObjects();
         this.mainPass.onResize();
         if (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED)
-            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(zinkContext, glFramePass, framesNum, swapChain.getWidth(), swapChain.getHeight(), swapChain.getFormat());
+            zinkBridge = new net.vulkanmod.vulkan.interop.ZinkFrameBridge(zinkContext, glFramePass, framesNum, swapChain.getWidth(), swapChain.getHeight(), swapChain.getFormat(), swapChain.getDepthFormat());
 
         this.onResizeCallbacks.forEach(Runnable::run);
         ((WindowAccessor) (Object) Minecraft.getInstance().getWindow()).getEventHandler().resizeDisplay();

@@ -23,7 +23,7 @@ import static org.lwjgl.vulkan.KHRExternalSemaphoreFd.*;
 public final class SharedImage implements AutoCloseable {
     private final Thread owner = Thread.currentThread();
     private final VkDevice device;
-    private final int width, height;
+    private final int width, height, aspect;
     private long image, memory, toGl, fromGl;
     private int glMemory, glToGl, glFromGl, texture, framebuffer;
     private boolean closed;
@@ -33,8 +33,21 @@ public final class SharedImage implements AutoCloseable {
         this(physical, device, width, height, VK_FORMAT_R8G8B8A8_UNORM);
     }
     public SharedImage(VkPhysicalDevice physical, VkDevice device, int width, int height, int format) {
-        if (format != VK_FORMAT_R8G8B8A8_UNORM && format != VK_FORMAT_R8G8B8A8_SRGB)
-            throw new IllegalArgumentException("Unsupported shared color format " + format);
+        int glFormat = switch (format) {
+            case VK_FORMAT_R8G8B8A8_UNORM -> GL_RGBA8;
+            case VK_FORMAT_R8G8B8A8_SRGB -> org.lwjgl.opengl.GL21.GL_SRGB8_ALPHA8;
+            case VK_FORMAT_D16_UNORM -> org.lwjgl.opengl.GL14.GL_DEPTH_COMPONENT16;
+            case VK_FORMAT_X8_D24_UNORM_PACK32 -> org.lwjgl.opengl.GL14.GL_DEPTH_COMPONENT24;
+            case VK_FORMAT_D24_UNORM_S8_UINT -> GL_DEPTH24_STENCIL8;
+            case VK_FORMAT_D32_SFLOAT -> GL_DEPTH_COMPONENT32F;
+            case VK_FORMAT_D32_SFLOAT_S8_UINT -> GL_DEPTH32F_STENCIL8;
+            default -> throw new IllegalArgumentException("Unsupported shared format " + format);
+        };
+        aspect = switch (format) {
+            case VK_FORMAT_D16_UNORM, VK_FORMAT_X8_D24_UNORM_PACK32, VK_FORMAT_D32_SFLOAT -> VK_IMAGE_ASPECT_DEPTH_BIT;
+            case VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT -> VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            default -> VK_IMAGE_ASPECT_COLOR_BIT;
+        };
         this.device = device;
         this.width = width;
         this.height = height;
@@ -52,12 +65,12 @@ public final class SharedImage implements AutoCloseable {
             var external = VkPhysicalDeviceExternalImageFormatInfo.calloc(stack).sType$Default().handleType(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
             var properties = VkExternalImageFormatProperties.calloc(stack).sType$Default();
             var output = VkImageFormatProperties2.calloc(stack).sType$Default().pNext(properties.address());
-            int usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+            int usage = (aspect == VK_IMAGE_ASPECT_COLOR_BIT ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
             check(vkGetPhysicalDeviceImageFormatProperties2(physical, VkPhysicalDeviceImageFormatInfo2.calloc(stack).sType$Default()
                     .pNext(external.address()).format(format).type(VK_IMAGE_TYPE_2D)
-                    .tiling(VK_IMAGE_TILING_OPTIMAL).usage(usage), output), "shared RGBA8 support");
+                    .tiling(VK_IMAGE_TILING_OPTIMAL).usage(usage), output), "shared image format support " + format);
             if ((properties.externalMemoryProperties().externalMemoryFeatures() & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) == 0)
-                throw new IllegalStateException("RGBA8 opaque FD export is unsupported");
+                throw new IllegalStateException("Opaque FD export unsupported for format " + format);
             var semProperties = VkExternalSemaphoreProperties.calloc(stack).sType$Default();
             vkGetPhysicalDeviceExternalSemaphoreProperties(physical, VkPhysicalDeviceExternalSemaphoreInfo.calloc(stack).sType$Default()
                     .handleType(VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT), semProperties);
@@ -102,10 +115,15 @@ public final class SharedImage implements AutoCloseable {
             texture = glGenTextures();
             glBindTexture(GL_TEXTURE_2D, texture);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_TILING_EXT, GL_OPTIMAL_TILING_EXT);
-            glTexStorageMem2DEXT(GL_TEXTURE_2D, 1, format == VK_FORMAT_R8G8B8A8_SRGB ? org.lwjgl.opengl.GL21.GL_SRGB8_ALPHA8 : GL_RGBA8, width, height, glMemory, 0);
+            glTexStorageMem2DEXT(GL_TEXTURE_2D, 1, glFormat, width, height, glMemory, 0);
             framebuffer = glGenFramebuffers();
             glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+            int attachment = aspect == VK_IMAGE_ASPECT_COLOR_BIT ? GL_COLOR_ATTACHMENT0
+                    : (aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0 ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT;
+            glFramebufferTexture2D(GL_FRAMEBUFFER, attachment, GL_TEXTURE_2D, texture, 0);
+            if (aspect != VK_IMAGE_ASPECT_COLOR_BIT) { glDrawBuffer(GL_NONE); glReadBuffer(GL_NONE); }
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) throw new IllegalStateException("Shared game image FBO incomplete");
             checkGl("create shared game image FBO");
         } catch (Throwable failure) {
@@ -194,7 +212,7 @@ public final class SharedImage implements AutoCloseable {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             var barrier = VkImageMemoryBarrier.calloc(1, stack).sType$Default().image(image).oldLayout(oldLayout).newLayout(newLayout)
                     .srcAccessMask(srcAccess).dstAccessMask(dstAccess).srcQueueFamilyIndex(srcFamily).dstQueueFamilyIndex(dstFamily);
-            barrier.subresourceRange().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).levelCount(1).layerCount(1);
+            barrier.subresourceRange().aspectMask(aspect).levelCount(1).layerCount(1);
             vkCmdPipelineBarrier(command, srcStage, dstStage, 0, null, null, barrier);
         }
     }

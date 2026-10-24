@@ -169,3 +169,32 @@ macOSはVulkan実装とGL機能の制約を別に評価する。
   IrisのSodium依存描画／頂点形式／pass統合。
   起動制限だけを解除してIris対応と扱うことはしない。
 - 影・複数pass・各種pack・深度/MSAA等の完全互換テスト、他MOD/OS/GPUの範囲拡張は継続する。
+
+
+## 追加の完了条件（ユーザー指定、2026-10-24）
+
+- ハードウェアのVulkan対応/API/拡張に応じた安全な無効化・互換動作を実装・検証する。
+  未対応時の通常GL復帰を、IrisがVulkan上で動作した実績と混同しない。
+- Iris/Sodium等について、同じワールド・描画距離・解像度・shader pack・vsync条件で
+  FPSとframe timeを実測し、改善／悪化／未対応を区別して報告する。
+- `/mnt/hdd/MinecraftModpacks/DTFuel` を元に専用クライアントを用意し、実運用MOD構成で
+  起動・ワールド・描画・再読込等の正常を検証する。元の設定・セーブは保持する。
+- この追加条件と元のIris完全互換が確認できるまでゴールを完了扱いにしない。
+
+- 設定画面から自動/Vulkan/OpenGLを選択でき、起動時の判定理由を確認できるようにする。
+  backend切替に再起動が必要な場合は明示する。自動復帰をVulkan互換の達成と混同しない。
+
+
+### 2026-10-24: ワールド深度・通常描画・起動方式
+
+- ワールド色／深度／GL出力を別の外部共有画像にし、NeoForge AFTER_LEVELでGL passを実行。
+  手元とGUIはLOADで継続描画。D24S8の実depthサンプリングと小領域の数値照合が通過。
+- NeoForgeでJOMLのMixinが適用されない問題を、Vulkanへ渡す投影行列の変換へ置換。
+  通常VulkanとZink連携の両方で、HUD・照準・通知・手元をクライアント範囲で視認。
+- MOD設定へ自動／Vulkan／OpenGLを追加。Vulkan事前照会、Mixin全停止によるOpenGL復帰、
+  起動失敗の次回復旧、間接描画の実ハードウェア機能制限を実装。
+- Iris/Sodium/Embeddiumの同時導入は当面OpenGLを選択する。IrisのVulkan描画統合は未達。
+- 専用Xephyrセッション:97で検証。通常GLがllvmpipeとなるため、RTX 3060のVulkanと
+  数値を比べて高速化と主張しない。FPS/p95/p99計測には実rendererと条件を保存する。
+- DTFuel 0.1.10 / NeoForge 21.1.251の204 MODを独立コピーし、全JARのSHA-256を照合。
+  元の設定・MOD・ワールドは変更しない。実クライアントの検証は継続中。

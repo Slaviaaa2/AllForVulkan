@@ -20,6 +20,10 @@ import static org.lwjgl.opengl.GL11.*;
 @EventBusSubscriber(modid = "afvbaseline", value = Dist.CLIENT)
 public final class BaselineSmoke {
     private static int phase, stable, ticks;
+    private static int benchmarkUntil;
+    @SubscribeEvent public static void frame(net.neoforged.neoforge.client.event.RenderFrameEvent.Post event) {
+        dev.allforvulkan.validation.FrameBenchmark.frame();
+    }
     @SubscribeEvent public static void tick(net.neoforged.neoforge.client.event.ClientTickEvent.Post event) {
         Minecraft client = Minecraft.getInstance();
         if (++ticks > 6000) throw new IllegalStateException("AFV_IRIS_BASELINE_FAIL: timeout at phase " + phase);
@@ -38,7 +42,34 @@ public final class BaselineSmoke {
                     registries -> registries.registryOrThrow(Registries.WORLD_PRESET)
                             .getHolderOrThrow(WorldPresets.FLAT).value().createWorldDimensions(), client.screen);
         } else if (phase >= 1 && phase <= 3 && client.level != null && client.player != null && client.screen == null) {
+            if (phase == 1 && stable == 0 && benchmarkUntil == 0) {
+                client.player.moveTo(.5, -60, .5, 0, 0);
+            }
             if (++stable < 120) return;
+            int duration = Integer.getInteger("afv.benchmarkTicks", 0);
+            if (phase == 1 && duration > 0) {
+                if (benchmarkUntil == 0) {
+                    assertIrisPipeline();
+                    benchmarkUntil = ticks + duration;
+                    dev.allforvulkan.validation.FrameBenchmark.begin();
+                }
+                if (ticks < benchmarkUntil) return;
+                var conditions = new java.util.LinkedHashMap<String, Object>();
+                conditions.put("renderer", glGetString(GL_RENDERER));
+                conditions.put("glVersion", glGetString(GL_VERSION));
+                conditions.put("shaderPack", "AFV-Smoke");
+                for (String id : java.util.List.of("iris", "sodium", "neoforge"))
+                    conditions.put(id, net.neoforged.fml.ModList.get().getModContainerById(id).orElseThrow().getModInfo().getVersion().toString());
+                conditions.put("width", client.getWindow().getWidth());
+                conditions.put("height", client.getWindow().getHeight());
+                conditions.put("renderDistance", client.options.renderDistance().get());
+                conditions.put("simulationDistance", client.options.simulationDistance().get());
+                conditions.put("vsync", client.options.enableVsync().get());
+                conditions.put("frameLimit", client.options.framerateLimit().get());
+                conditions.put("camera", client.player.position().toString());
+                conditions.put("display", System.getenv("DISPLAY"));
+                dev.allforvulkan.validation.FrameBenchmark.finish(java.nio.file.Path.of("afv-benchmark.json"), conditions);
+            }
             stable = 0;
             assertIrisPipeline();
             if (phase == 1) {

@@ -28,5 +28,5 @@ config = instance / 'config'
 config.mkdir(exist_ok=True)
 (config / 'fml.toml').write_text('earlyWindowControl = false\n')
 (config / 'iris.properties').write_text('enableShaders=true\nshaderPack=AFV-Smoke\n')
-(instance / 'options.txt').write_text('onboardAccessibility:false\nrenderDistance:6\nsimulationDistance:5\n')
+(instance / 'options.txt').write_text('onboardAccessibility:false\npauseOnLostFocus:false\nrenderDistance:6\nsimulationDistance:5\nenableVsync:false\nmaxFps:260\n')
 shutil.copytree(root / 'tests/shaderpacks/AFV-Smoke', instance / 'shaderpacks/AFV-Smoke', dirs_exist_ok=True)

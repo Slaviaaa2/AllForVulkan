@@ -10,6 +10,10 @@ public interface MainPass {
 
     void end(VkCommandBuffer commandBuffer);
 
+    default void resume(VkCommandBuffer commandBuffer, MemoryStack stack) {
+        throw new UnsupportedOperationException("This main pass cannot resume after interop");
+    }
+
     void cleanUp();
 
     void onResize();

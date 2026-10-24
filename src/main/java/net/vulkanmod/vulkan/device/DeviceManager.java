@@ -250,6 +250,9 @@ public abstract class DeviceManager {
 
     private static boolean isDeviceSuitable(VkPhysicalDevice device) {
         try (MemoryStack stack = stackPush()) {
+            VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.malloc(stack);
+            vkGetPhysicalDeviceProperties(device, properties);
+            if (properties.apiVersion() < VK_API_VERSION_1_2) return false;
             Queue.QueueFamilyIndices indices = findQueueFamilies(device);
 
             VkExtensionProperties.Buffer availableExtensions = getAvailableExtension(stack, device);
@@ -269,7 +272,8 @@ public abstract class DeviceManager {
             vkGetPhysicalDeviceFeatures(device, supportedFeatures);
             boolean anisotropicFilterSupported = supportedFeatures.samplerAnisotropy();
 
-            return indices.isSuitable() && extensionsSupported && swapChainAdequate;
+            return indices.isSuitable() && extensionsSupported && swapChainAdequate
+                    && anisotropicFilterSupported && supportedFeatures.logicOp();
         }
     }
 

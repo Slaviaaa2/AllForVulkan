@@ -5,7 +5,8 @@ package dev.allforvulkan.bridge;
  * Write all output pixels, queue work on this context, and restore any additional
  * GL state beyond GlStateScope's documented set. No CPU image transport is required. */
 public interface GlFramePass extends AutoCloseable {
-    record Frame(int colorTexture, int outputFramebuffer, int width, int height, boolean srgb) {}
+    enum Stage { WORLD_END, FRAME_END }
+    record Frame(int colorTexture, int depthTexture, int outputFramebuffer, int width, int height, boolean srgb, Stage stage) {}
     void render(Frame frame);
     @Override void close();
 }

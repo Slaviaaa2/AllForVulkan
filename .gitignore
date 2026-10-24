@@ -39,3 +39,7 @@ crash-reports/
 
 # Isolated comparison instances
 /run-iris-baseline/
+
+# Python validation helpers
+**/__pycache__/
+*.pyc

@@ -199,7 +199,8 @@ public class SwapChain extends Framebuffer {
 
     private void createDepthResources() {
         this.depthAttachment = VulkanImage.createDepthImage(depthFormat, this.width, this.height,
-                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+                        | (net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0),
                 false, false);
     }
 

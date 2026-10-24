@@ -6,7 +6,9 @@ import net.vulkanmod.Initializer;
 
 @Mod(value = "allforvulkan", dist = Dist.CLIENT)
 public final class AllForVulkan {
-    public AllForVulkan() {
+    public AllForVulkan(net.neoforged.fml.ModContainer container) {
+        container.registerExtensionPoint(net.neoforged.neoforge.client.gui.IConfigScreenFactory.class,
+                (ignored, parent) -> new BackendScreen(parent));
         Initializer.LOGGER.info("NeoForge mod loading completed for All For Vulkan");
     }
 }

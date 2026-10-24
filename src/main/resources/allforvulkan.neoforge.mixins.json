@@ -2,7 +2,8 @@
   "required": true,
   "minVersion": "0.8",
   "package": "dev.allforvulkan.neoforge.mixin",
+  "plugin": "net.vulkanmod.mixin.MixinPlugin",
   "compatibilityLevel": "JAVA_21",
-  "client": ["NeoForgeWindowMixin"],
+  "client": ["NeoForgeWindowMixin", "EglValidationMixin", "PackValidationMixin"],
   "injectors": {"defaultRequire": 1}
 }

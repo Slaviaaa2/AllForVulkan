@@ -20,6 +20,7 @@ public final class GlStateScope implements AutoCloseable {
     private final IntBuffer viewport = stack.mallocInt(4), scissorBox = stack.mallocInt(4);
     private final ByteBuffer mask = stack.malloc(4);
     private final boolean scissor = glIsEnabled(GL_SCISSOR_TEST), blend = glIsEnabled(GL_BLEND), depth = glIsEnabled(GL_DEPTH_TEST);
+    private final boolean dither = glIsEnabled(GL_DITHER);
     private final boolean cull = glIsEnabled(GL_CULL_FACE), srgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
     private final java.nio.FloatBuffer clear = stack.mallocFloat(4);
     public GlStateScope() {
@@ -41,7 +42,7 @@ public final class GlStateScope implements AutoCloseable {
         glColorMask(mask.get(0) != 0, mask.get(1) != 0, mask.get(2) != 0, mask.get(3) != 0);
         glClearColor(clear.get(0), clear.get(1), clear.get(2), clear.get(3));
         enable(GL_SCISSOR_TEST, scissor); enable(GL_BLEND, blend); enable(GL_DEPTH_TEST, depth);
-        enable(GL_CULL_FACE, cull); enable(GL_FRAMEBUFFER_SRGB, srgb);
+        enable(GL_DITHER, dither); enable(GL_CULL_FACE, cull); enable(GL_FRAMEBUFFER_SRGB, srgb);
         stack.close();
     }
     private static void enable(int capability, boolean enabled) {

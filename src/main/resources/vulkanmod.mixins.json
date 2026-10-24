@@ -24,7 +24,6 @@
     "debug.DebugScreenOverlayM",
     "debug.GlDebugInfoM",
     "debug.KeyboardHandlerM",
-    "matrix.Matrix4fM",
     "matrix.PoseAccessor",
     "profiling.GuiMixin",
     "profiling.KeyboardHandlerM",

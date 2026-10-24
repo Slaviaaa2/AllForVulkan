@@ -98,7 +98,7 @@ public abstract class VRenderSystem {
     }
 
     public static void applyProjectionMatrix(Matrix4f mat) {
-        mat.get(projectionMatrix.buffer.asFloatBuffer());
+        net.vulkanmod.vulkan.util.ProjectionUtil.toVulkan(mat).get(projectionMatrix.buffer.asFloatBuffer());
     }
 
     public static void calculateMVP() {

@@ -11,13 +11,14 @@ public class MixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public void onLoad(String mixinPackage) {
-        if (Boolean.getBoolean("afv.zinkInterop"))
-            org.lwjgl.system.Configuration.OPENGL_EXPLICIT_INIT.set(true);
         // LWJGL 3.3.3 enumerates all device extensions on the thread-local stack.
         // Current drivers can exceed the default 64 KiB. Configure before Main
         // initializes its render-thread stack, including production launches.
         org.lwjgl.system.Configuration.STACK_SIZE.set(Math.max(1024,
                 org.lwjgl.system.Configuration.STACK_SIZE.get(64)));
+        dev.allforvulkan.neoforge.BackendBootstrap.initialize();
+        if (dev.allforvulkan.neoforge.BackendBootstrap.vulkan() && Boolean.getBoolean("afv.zinkInterop"))
+            org.lwjgl.system.Configuration.OPENGL_EXPLICIT_INIT.set(true);
     }
 
     @Override
@@ -27,7 +28,11 @@ public class MixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-        return true;
+        if (mixinClassName.endsWith(".EglValidationMixin"))
+            return !dev.allforvulkan.neoforge.BackendBootstrap.vulkan() && Boolean.getBoolean("afv.validationEgl");
+        if (mixinClassName.endsWith(".PackValidationMixin"))
+            return Boolean.getBoolean("afv.validationPack");
+        return dev.allforvulkan.neoforge.BackendBootstrap.vulkan();
     }
 
     @Override

@@ -15,12 +15,13 @@ python3 scripts/verify_artifact.py
 `runClient` prepares **only this repository's `run/config/fml.toml`** with
 `earlyWindowControl = false`. The NeoForge OpenGL splash window cannot be used
 as a Vulkan surface. For a separately installed client, set the same value in
-that instance's `config/fml.toml` before launch. AFV fails with a specific error
-if the splash is enabled, instead of attempting to use an OpenGL window.
+that instance's `config/fml.toml` before launch. If the splash is already enabled, startup selects OpenGL. Saving Auto or Vulkan
+in the AFV config screen disables the early GL splash for the next launch.
 
-Do not install the original VulkanMod, another VulkanMod port, Sodium, or Iris
-alongside this initial port. Iris/Zink integration is not implemented. There
-is no Mesa native distribution in this artifact.
+Do not install the original VulkanMod or another VulkanMod port alongside AFV.
+With Sodium, Iris or Embeddium installed, AFV currently selects OpenGL and skips
+both renderer mixin configurations. This is a safe coexistence path, not
+integrated Vulkan Iris rendering. No Mesa native distribution is bundled.
 
 ## Current source boundary
 
@@ -207,8 +208,8 @@ rendering integration remain required for full compatibility.
 `GlFramePass` is a loader-independent native-bridge contract. It receives the
 real input GL texture, output GL FBO, extent and sRGB flag. These names belong
 to the frame slot and must not be retained. The default `SceneColorPass` performs
-GLSL identity/invert over the entire framebuffer. This boundary follows GUI
-rendering today; it does not replace Iris's world, shadow or terrain hooks.
+GLSL identity/invert over the entire framebuffer. World frames now run before hand/GUI rendering (see World depth sharing below);
+this does not replace Iris's world, shadow or terrain hooks.
 
 AFV's first submission renders Minecraft, blits the swapchain color into a shared
 input image, releases input/output queue ownership, and signals two GL acquire
@@ -231,4 +232,78 @@ and linear-space inversion, but still needs its own surface-format runtime test.
 Smoke assertions currently require a viewport of at least 64x32.
 
 General GL buffers/FBO registries, arbitrary GPU-updated asset synchronization,
-depth/stencil, MSAA, MRT and Iris/Sodium integration are still outstanding.
+arbitrary depth/stencil render targets, MSAA, MRT and Iris/Sodium integration are still outstanding.
+
+
+## Renderer settings and startup recovery
+
+Open Mods → All For Vulkan → Config. Renderer offers Auto, Vulkan and OpenGL
+(Japanese: 自動 / Vulkan / OpenGL). Save and restart Minecraft. The active backend
+and selection reason are displayed. A requested Vulkan backend still selects
+OpenGL if mandatory capabilities or renderer integration are unavailable.
+
+`config/allforvulkan_backend.properties` stores `backend=AUTO|VULKAN|OPENGL`.
+A per-launch `-Dafv.backend=OPENGL` override is useful for recovery and does not
+rewrite that choice. Before selecting Vulkan, AFV checks the loader/device API
+(>=1.2), graphics queues, logicOp, anisotropy, swapchain extension and logical
+device creation. External FD extensions are additionally required for the
+experimental Zink route. Native device selection applies the same mandatory
+feature checks. Unsupported multi-draw uses AFV's direct draw path.
+
+`config/allforvulkan_renderer_starting` survives an abnormal startup, including
+native failures Java cannot catch. After 120 successfully presented frames it
+is removed. If it remains on the next launch, AFV selects OpenGL; saving a
+backend choice acknowledges recovery and permits another attempt after restart.
+This does not provide a live backend switch after renderer mixins are applied,
+nor guarantee protection from every driver fault after successful startup.
+
+## World depth sharing and projection
+
+`GlFramePass.Frame` exposes borrowed `colorTexture`, `depthTexture`, output FBO,
+extent, sRGB flag and WORLD_END / FRAME_END stage. NeoForge AFTER_LEVEL is before
+the hand clears depth. AFV submits the world, shares color/depth/output with GL
+using three acquire/release semaphore pairs, copies GL output back, and resumes
+the main pass with LOAD for the hand and GUI. The final UI submission owns the
+usual frame fence and presentation semaphore. Title frames use FRAME_END.
+
+Depth formats implemented: D16, X8_D24, D24S8, D32F, D32FS8. D24S8 was exercised
+on RTX 3060; the others still need device coverage. `-Dafv.zinkEffect=depth`
+samples depth in the GL pass. Test-only comparison uses a 32×32 scene region
+near the lower center, with at most one quantization step for depth visualization.
+The corner asset diagnostic remains a separate 32×32 region. No CPU transport
+of frame images is used in the product path. MRT, MSAA and Iris hooks remain work.
+
+JOML is in NeoForge's bootstrap layer. Projection conversion therefore occurs
+at VRenderSystem/ProjMat upload boundaries, not via a Matrix4f mixin. GL matrices
+remain unchanged for mods. `verifyProjection` checks near/far, GUI depth and
+input preservation.
+
+## Dedicated pack and benchmark runs
+
+```sh
+python3 scripts/prepare_modpack_client.py --source /mnt/hdd/MinecraftModpacks/DTFuel --destination "$PWD/build/compatibility/dtfuel-client"
+./gradlew -Pneo_version=21.1.251 -PafvGameDir="$PWD/build/compatibility/dtfuel-client" -PafvClientHeap=6G -Dafv.smokeTest=true -Dafv.smokeWorld=true runClient
+./gradlew -Dafv.benchmarkTicks=600 runIrisBaseline
+./gradlew -Dafv.benchmarkTicks=600 runIrisZinkBaseline
+```
+
+The copy command requires a new destination, resolves symlinks into independent
+files and verifies every mod's SHA-256. Original saves/configs/mods are not edited.
+A pack's fallback OpenGL result does not satisfy the separate Vulkan integration
+goal. The DTFuel copy pins the pack's own NeoForge/Iris/Sodium versions; the small
+Iris baseline uses its independent lock file.
+
+Opt-in benchmarks warm up the fixed-seed flat world, set a fixed camera and
+record RenderFrameEvent.Post intervals for the requested client ticks. JSON
+contains renderer, resolution, camera, render/simulation distances, vsync, frame
+limit, sample duration, average FPS and median/p95/p99 intervals. These include
+pacing/presentation, not GPU-only times. A single synthetic-pack run is not a
+DTFuel performance claim. Verify identical hardware/ICD and settings before
+comparing: Xephyr may expose llvmpipe to normal GL even while Vulkan uses the
+physical GPU. Such results cannot establish a Vulkan speedup.
+
+The current validation X session uses Xephyr on `:97`; its Xauthority file is
+`build/compatibility/xsession/Xauthority`. Export DISPLAY/XAUTHORITY only for the
+test subprocess. The client runs separately from the user's working desktop.
+Captures must still target the identified client window or a smaller region;
+virtual desktops do not authorize full-screen capture.

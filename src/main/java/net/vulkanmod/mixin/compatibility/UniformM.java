@@ -17,6 +17,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class UniformM {
 
     @Shadow @Final private Shader parent;
+    @Shadow @Final private String name;
+
+    @org.spongepowered.asm.mixin.injection.ModifyVariable(method = "set(Lorg/joml/Matrix4f;)V", at = @At("HEAD"), argsOnly = true)
+    private org.joml.Matrix4f vulkanProjection(org.joml.Matrix4f matrix) {
+        return this.name.equals("ProjMat") ? net.vulkanmod.vulkan.util.ProjectionUtil.toVulkan(matrix) : matrix;
+    }
 
     /**
      * @author
