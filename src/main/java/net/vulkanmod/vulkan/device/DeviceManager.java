@@ -171,6 +171,7 @@ public abstract class DeviceManager {
         try (MemoryStack stack = stackPush()) {
 
             net.vulkanmod.vulkan.queue.Queue.QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+            if (!indices.isSuitable()) throw new IllegalStateException("Selected Vulkan GPU no longer has the required surface/queue support");
 
             int[] uniqueQueueFamilies = indices.unique();
 

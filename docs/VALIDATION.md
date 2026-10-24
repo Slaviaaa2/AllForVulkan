@@ -668,3 +668,35 @@ layerはこの環境に未導入で、VUID／同期validationを通過したと�
 `734af2d364b0b4b502afc9a6e2e1dd522e92e6f2bae4811af4876ed4b0196261`。
 ローカル証跡は`transfer-reuse-build.log`、`minimal-transfer-reuse-{launch,client,preflight}.log`、
 `minimal-transfer-reuse-result.json`。元pack・既存save・提供shaderは変更していない。
+
+## surface対応を推測しないqueue選択（2026-10-24）
+
+従来のnative rendererには、present familyが見つからないとcompute familyで代用する
+分岐が残っていた。また、未対応GPUのqueue調査で例外を投げるため、複数GPU列挙の
+先頭が未対応だと、後続の対応GPUを調べる前に中断する可能性があった。
+
+`QueueSelection`へ選択処理を集約し、ゲーム本体とZinkのhidden WSI preflightが同じ
+実surface照会を使うようにした。combined graphics/presentを優先し、別present familyも
+許可する。present不可は推測で補わず、queue count 0は候補から除く。nativeで不足した
+graphics／present／computeはunsuitableとして返し、他GPUの検査を継続できるようにした。
+選択済みGPUでも論理device作成直前に適合性を確認する。AFVのGL client用VkDeviceには
+従来通りcompute／専用transferを要求せず、Zinkと同じGPU UUIDの制約を維持する。
+
+専用transferがなければ、[Vulkan仕様の暗黙の転送対応](https://docs.vulkan.org/refpages/latest/refpages/source/VkQueueFlagBits.html)
+を持つgraphics／computeを使用する。TRANSFER_BITを別途報告しないGPUも、不必要に
+拒否しない。従来の専用compute／transferの優先は保持する。
+
+CPU検査ではshared／split present、後続のcombined family、count 0、暗黙のtransfer、
+専用queue、present不可、compute／graphics不足、未対応GPUに続く対応候補を確認した。
+これらはcapability policyの検査で、実際に複数GPUを載せたPCの検証ではない。
+Gradle build／baselineコンパイル、配布JAR検査と差分空白検査も通過した。
+実RTX 3060では新しい共通queryを使うhidden WSI、GL状態、default drawable、compute、
+外部画像・双方向semaphoreのprobeがすべて通過した。
+
+さらにAFV単体のnative Vulkan rendererで新規worldを開き、1282 visible sectionと
+59210回のterrain draw、resize、resource reload、disconnectと正常終了を確認した。
+実Irisの描画全体やDTFuel一式は今回再試験していない。前節の描画／転送改善は保持する。
+配布JARのSHA-256は
+`e1860248e0d595fd17e13212573a00cd0099f0cb5438939768f2e61e675147e0`。
+ローカル証跡は`queue-selection-build.log`、`queue-selection-probe.log`、
+`native-queue-selection-client.log`。元pack・既存save・提供shaderは変更していない。

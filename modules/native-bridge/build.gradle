@@ -26,3 +26,9 @@ tasks.register('verifyPresentationSurface', JavaExec) {
     mainClass = 'dev.allforvulkan.bridge.PresentationSurfaceChecks'
 }
 tasks.named('check') { dependsOn 'verifyPresentationSurface' }
+tasks.register('verifyQueueSelection', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.bridge.QueueSelectionChecks'
+}
+tasks.named('check') { dependsOn 'verifyQueueSelection' }

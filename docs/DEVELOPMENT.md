@@ -67,6 +67,16 @@ rechecks capabilities and recreates the swapchain. Image acquisition uses a
 finite timeout, so a surface that stops making progress cannot block the render
 thread indefinitely. An out-of-date creation/acquisition is retried next frame.
 
+Surface queue selection is shared by the isolated preflight and the game. A
+combined graphics/present family is preferred, with separate present queues
+allowed. Present support is always queried on the actual surface; a compute
+queue is never guessed to support presentation. Zero-count families are ignored.
+Native rendering additionally requires compute support, prefers dedicated
+compute/transfer families, and accepts the transfer support implicit in graphics
+or compute capability. An unsuitable native GPU yields an unsuitable result so
+device enumeration can continue. The GL client needs only graphics/present queues
+on AFV's device, retaining the same Zink GPU UUID constraint.
+
 Steady-state presentation uses a narrow `GlBlitScope`: it saves only read/draw
 framebuffer bindings, the default read buffer, scissor enable at index 0 and
 framebuffer sRGB. It never changes viewport, masks, blending, shaders or texture

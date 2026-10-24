@@ -52,22 +52,9 @@ final class WsiSupportProbe {
                 if (java.util.Arrays.equals(actual, uuid) && properties.properties().apiVersion() >= VK_API_VERSION_1_2) { physical = candidate; break; }
             }
             if (physical == null) throw new IllegalStateException("No Vulkan 1.2 WSI GPU matches Zink's UUID");
-            vkGetPhysicalDeviceQueueFamilyProperties(physical, count, null);
-            var families = VkQueueFamilyProperties.calloc(count.get(0), stack);
-            vkGetPhysicalDeviceQueueFamilyProperties(physical, count, families);
-            int graphics = -1, present = -1;
-            var supported = stack.mallocInt(1);
-            for (int i = 0; i < families.capacity(); i++) {
-                if (families.get(i).queueCount() == 0) continue;
-                boolean draws = (families.get(i).queueFlags() & VK_QUEUE_GRAPHICS_BIT) != 0;
-                if (draws && graphics == -1) graphics = i;
-                check(vkGetPhysicalDeviceSurfaceSupportKHR(physical, i, surface, supported), "WSI probe queue surface support");
-                if (supported.get(0) != 0) {
-                    present = i;
-                    if (draws) { graphics = i; break; }
-                }
-            }
-            if (graphics < 0 || present < 0) throw new IllegalStateException("Zink GPU cannot draw/present to this window system");
+            var selectedQueues = QueueSelection.query(physical, surface, true);
+            if (!selectedQueues.suitable(true)) throw new IllegalStateException("Zink GPU cannot draw/present to this window system");
+            int graphics = selectedQueues.graphics(), present = selectedQueues.present();
             var capabilities = VkSurfaceCapabilitiesKHR.calloc(stack);
             check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, surface, capabilities), "WSI probe capabilities");
             if ((capabilities.supportedUsageFlags() & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0)

@@ -219,6 +219,7 @@ tasks.register('verifyProjection', JavaExec) {
 }
 tasks.named('check') { dependsOn 'verifyProjection' }
 tasks.named('check') { dependsOn ':native-bridge:verifyPresentationSurface' }
+tasks.named('check') { dependsOn ':native-bridge:verifyQueueSelection' }
 tasks.register('verifyMesaVendors', JavaExec) {
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
