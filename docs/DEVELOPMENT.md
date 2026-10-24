@@ -619,3 +619,28 @@ marker diagnostic reads the reflected marker position for exact-format copies.
 See [Vulkan image copies](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdCopyImage.html)
 for copy format/extent/usage constraints. No format conversion is attempted by
 the raw-copy strategy, and no performance gain is assumed without measurement.
+
+## Running AFV against a pinned alternate Iris/Sodium pair
+
+An existing checksum-pinned cache can provide a separate production profile;
+this does not install AFV into the original baseline directory:
+
+```sh
+python3 scripts/prepare_modpack_client.py \
+  --source run-iris-baseline \
+  --dependency-lock compatibility/iris-baseline.lock.json \
+  --neoforge 21.1.251 \
+  --destination build/compatibility/iris-1.8.12-sodium-0.6.13-client
+```
+
+The preparer selects only lock-listed filenames and verifies their SHA-512 values
+before creating the destination. It omits source configuration, overrides and
+saves, copies independent JARs, and records the exact lock and its checksum in a
+`locked-mods` profile. The optional runtime NeoForge override is explicit: the
+lock's original 21.1.228 and tested installed 21.1.251 are both retained in the
+manifest. It does not edit the lock, source cache or comparison environment.
+The normal production launcher rechecks copied JAR SHA-256 values and includes
+the lock provenance in the launch/benchmark metadata. Use its existing
+`--require-iris --iris-cycle --window-cycle` checks and the supplied shader pack;
+FPS samples must still use the same documented scene/settings and no final-output
+readback. A different dependency pair is a separate profile, not an AFV speedup.

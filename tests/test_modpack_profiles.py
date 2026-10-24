@@ -1,6 +1,7 @@
 import contextlib
 import importlib.util
 import io
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -20,6 +21,40 @@ verify = load('launch_modpack_client').verify_client_mods
 
 
 class ProfileChecks(unittest.TestCase):
+    def test_locked_profile_pins_dependencies_and_records_runtime_override(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, client = root / 'source', root / 'client'
+            (source / 'mods').mkdir(parents=True)
+            (source / 'mods/a.jar').write_bytes(b'pinned renderer')
+            (source / 'mods/unselected.jar').write_bytes(b'cache entry')
+            (source / 'overrides/config').mkdir(parents=True)
+            (source / 'overrides/config/unwanted.json').write_text('{}')
+            lock = root / 'renderer.lock.json'
+            contents = {'minecraft': '1.21.1', 'neoforge': '21.1.228', 'mods': [
+                {'filename': 'a.jar', 'version': 'fixture', 'sha512': hashlib.sha512(b'pinned renderer').hexdigest()}]}
+            lock.write_text(json.dumps(contents))
+            with contextlib.redirect_stdout(io.StringIO()):
+                prepare(source, client, dependency_lock=lock, neoforge='21.1.251')
+            manifest = json.loads((client / '.afv-validation-source.json').read_text())
+            self.assertEqual(manifest['profile'], 'locked-mods')
+            self.assertEqual(manifest['neoforge'], '21.1.251')
+            self.assertEqual(manifest['dependency_lock']['neoforge'], '21.1.228')
+            self.assertEqual(manifest['dependency_lock']['mods'], contents['mods'])
+            self.assertFalse(manifest['overrides_copied'])
+            self.assertFalse((client / 'config').exists())
+            self.assertEqual({p.name for p in (client / 'mods').iterdir()}, {'a.jar'})
+            verify(client, manifest)
+            (source / 'mods/a.jar').write_bytes(b'changed cache')
+            rejected = root / 'rejected'
+            with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                prepare(source, rejected, dependency_lock=lock)
+            self.assertFalse(rejected.exists())
+            with self.assertRaisesRegex(ValueError, 'do not combine'):
+                prepare(source, rejected, ['a.jar'], dependency_lock=lock)
+            with self.assertRaisesRegex(ValueError, 'requires a dependency lock'):
+                prepare(source, rejected, neoforge='21.1.251')
+
     def test_selected_profile_is_independent_and_excludes_pack_overrides(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

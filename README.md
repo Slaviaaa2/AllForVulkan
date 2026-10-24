@@ -21,6 +21,15 @@ MOD一覧のAFV設定から **「自動」「Vulkan」「OpenGL」** を選択�
 
 **Zinkクライアント経路**は、Minecraft・Iris・Sodiumの実OpenGL呼び出しをMesa/Zinkで実行し、最終default framebufferを外部メモリと双方向GPUセマフォでAFV所有のVulkanデバイスへ渡して表示します。画面全体のCPU転送は行いません。GL資源・MRT・影・シェーダーpassは既存のIris/Sodiumと実GLドライバーが管理します。この経路ではAFV独自の地形レンダラーを使用しません。Linuxとインストール済みMesa EGL/Zinkが必要です。別プロセスで実GL 4.6・compute・画像共有と、同じGPUの実surface／swapchain作成を検査し、検査の失敗・異常終了・タイムアウト時はOpenGLを選びます。ドライバー内部のクラッシュや全環境での無事故を保証するものではありません。
 
+実機検証したZinkクライアントの組合せ（Linux／RTX 3060／NeoForge 21.1.251／専用X、指定Complementary Reimagined r5.9.3）：
+
+| Iris | Sodium | MOD構成 | 確認したシナリオ |
+| --- | --- | --- | --- |
+| 1.8.12 | 0.6.13 | 最小2 MOD＋AFV | ワールド、Iris切替・再読込、リサイズ、ウィンドウ復帰、3ディメンション往復、GPU出力照合 |
+| 1.8.14-beta.1 | 0.8.13 | DTFuel 0.1.10全204 MOD＋AFV | ワールド、Iris切替・再読込、リサイズ、ウィンドウ復帰、GPU出力照合 |
+
+版・JARチェックサム・試験条件は[検証記録](docs/VALIDATION.md)に記載しています。
+
 Linux向け実験機能 `-Dafv.zinkInterop=true` は別の経路で、AFV独自の地形描画からワールドの色と深度をGPU共有画像でZinkへ渡し、GLSL後処理からVulkanへ戻します。処理位置はワールド描画後・手元の深度クリアとGUI描画の前です。`-Dafv.zinkEffect=invert` / `depth` で診断用の色反転／深度表示を選べます。こちらの経路にIrisの地形・影・複数passを統合する機能は開発中です。**Iris全機能・全シェーダーパック・全GPUの完全互換は未確認**です。
 
 - [ビルド・起動方法と現状](docs/DEVELOPMENT.md)

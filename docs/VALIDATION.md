@@ -948,3 +948,46 @@ FPSは測定していない。元pack・既存save・提供shaderは変更して
 更新画面と対象metadataは`dtfuel-direct-copy-update-prompt{.png,-target.json}`。
 同一形式copyによる実WSI表示、sRGB surfaceへのcopy、別GPU／別OSの動作と性能は
 今回のハードウェアでは未検証であり、全Iris環境の完全互換を示す結果ではない。
+
+## 別版のIris／Sodiumを使うAFV本体の検証（2026-10-25）
+
+これまでAFVなしの比較用だった固定済みIris 1.8.12／Sodium 0.6.13のJARを、
+`compatibility/iris-baseline.lock.json`のSHA-512と照合して独立コピーする準備経路を
+追加した。sourceの比較環境を編集せず、lockで選んだJARだけをコピーし、config、
+overrides、saveはコピーしない。ロックと明示したMOD名の併用、ロックなしのruntime
+上書きを拒否し、チェックサム不一致では専用clientを作成しない。lock本体のSHA-256、
+版情報とMODの固定値をsource manifest／起動manifest／benchmark metadataへ記録する。
+
+元lockのNeoForgeは21.1.228で、今回の実行runtimeは明示指定したインストール済み
+21.1.251。両方を記録し、21.1.228でproduction起動したという扱いにはしない。
+Pythonのprofileテスト3件、構文検査、差分空白検査が通過した。renderer Javaは変更
+しておらず、配布JARは前節のSHA-256 `f6456881ca338251ad35fb4f122a2ebd138a798360f28836cf068ae88cb96de5`
+を使用する。
+
+この組合せのproduction JAR起動はAUTO→Vulkanを選択し、指定Complementary Reimagined
+r5.9.3でworld、resize、shader off→on／shader-only reload（別の実pipelineを確認）、
+resource reload、実iconify／復帰、VSync切替／復帰、実surface再作成、同一GL context／
+VkDevice／有効Irisの維持、disconnectと正常終了を通過した。転送commandを5287回
+再利用し、42個を記録した。
+
+最小構成の同じ固定scene／視点、960×540、描画／simulation距離12、VSyncなし、
+追加600 ticks待機後400 ticks計測、最終出力readbackなしの約20秒試料は、平均52.98 FPS、
+median 18.31 ms、p95 22.77 ms、p99 24.00 ms（1059 frames／19.988秒）。これは別版の
+依存MOD構成の参考値で、前節からのAFVの改善／悪化率には使わない。
+起動・計測metadataにlockの版と実runtimeの両方が記録されたことも確認した。
+証跡はローカル`locked-iris-profile-checks.log`、
+`iris-1.8.12-fps-{launch.log,client.log,preflight.log,manifest.json,benchmark.json}`。
+
+同じ別版profileで、readback診断付きの2回目のproduction起動も実施した。地上→ネザー→
+エンド→ネザー→地上の実dimension移動、各stageで実client chunks・Irisのdimension／
+独立pipeline・同一GL context・120 ticksと実表示120回以上を確認し、元のworldへ戻って
+正常終了した。3種類のdimension pipelineを確認し、GPU共有画像の最終出力markerを
+1839回照合、転送commandを3657回再利用（記録24個）した。こちらはFPS測定とは別の
+診断実行で、どちらの起動も手動UI介入なしで通過した。
+
+source cacheとprivate copyの両JARがlockのSHA-512に一致し、元の提供shaderとprivate
+copyのZIPおよび9設定値も一致した。Iris 1.8.12／Sodium 0.6.13に対して今回のシナリオで
+描画本体の修正が必要になる問題は見つからなかった。AFVなしの比較環境は変更していない。
+証跡はローカル`iris-1.8.12-dimensions-{launch.log,client.log,preflight.log,manifest.json,
+source.json,result.json}`。この結果は2 MODのprofileであり、DTFuel全204 MODをこの旧版の
+組合せへ置換した検証や、全pack／全OS／全GPUの完全互換を示すものではない。

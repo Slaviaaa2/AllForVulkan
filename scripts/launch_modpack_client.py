@@ -240,6 +240,8 @@ def launch(args):
               'route': 'AFV Vulkan presentation with Zink GL client' if args.zink_client else 'OpenGL via Zink comparison' if args.zink else 'Auto; see AFV_BACKEND',
               'benchmarkTicks': args.benchmark_ticks, 'warmupTicks': args.warmup_ticks,
               'uncapped': args.uncapped, 'requireIris': args.require_iris, 'validationScene': args.scene}
+    if 'dependency_lock' in manifest:
+        record['dependencyLock'] = manifest['dependency_lock']
     record['debugGlErrors'] = args.debug_gl
     record['finalOutputProbe'] = args.final_output_probe
     record['irisCycle'] = args.iris_cycle
