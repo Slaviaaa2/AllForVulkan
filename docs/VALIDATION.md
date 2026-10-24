@@ -267,6 +267,81 @@ X11互換表示の回避設定を含む短い一回の測定で、通常GLと同
 改善率や実運用全般のFPSとして扱わない。Shaderの全効果・複数の通常地形・
 AFV本来のVulkan描画とのIris統合は未達。pack側の既知のモデル／レシピ警告も残る。
 
+## Iris GLクライアントとAFV Vulkan表示の接続（2026-10-24、f2e44ef）
+
+既存のIris/Sodium描画を実Zinkで動かし、その最終色画像をAFV所有のVkDeviceと
+swapchainへGPU共有する経路を追加した。`--zink`の通常GL/EGL比較とは異なり、
+この経路はAFVがVulkanのsurface・device・swapchain・表示と画像所有権を管理する。
+画面全体をCPUへ読み戻す経路は使用しない。AFV native地形描画とは別モードであり、
+native地形へ任意のIris passを差し込む実装の完成を意味しない。
+
+起動設定の「Vulkan」とIris/Sodiumの検出から選択する。配布JARの親ローダーにある
+GLFWと、子ローダーのVulkan binding間で生じた`VkInstance`のクラス解決失敗を修正し、
+surface生成時はネイティブhandleを渡す。表示専用経路はnative terrain/VMAを初期化せず、
+graphics/present queueのみを要求する。Vulkan feature照会のpNext終端もゼロ初期化した。
+
+起動前には独立したJVMで実Zink GL 4.6、computeの画素、GPU UUID一致、外部画像と
+双方向セマフォの実往復を検査する。無効なEGL vendorライブラリーを指定した負例は
+子JVMが終了コード1となり、親JVMは生存して非対応判定を返した
+（`AFV_ZINK_PREFLIGHT_FAILURE_ISOLATED`）。同じ無効vendorで実Minecraftクライアントも
+OpenGLを選び、アトラス・非黒のタイトル画像・`AFV_SMOKE_PASS`・終了コード0を確認した。
+タイムアウトもOpenGL選択へ戻す実装。
+これは起動前の検査であり、ゲーム中のドライバー障害を無事故と保証しない。
+
+### 指定ComplementaryとDTFuel
+
+元の204 MODを独立コピーした同じDTFuel、NeoForge 21.1.251、Iris 1.8.14-beta.1、
+Sodium 0.8.13、RTX 3060 / Mesa 25.2.8 / NVIDIA 595.99.02、専用Xephyr :97を使用。
+指定ZIPのSHA-256は上記と同一で、隣接TXTの9設定値も保持する。
+起動時のVulkan選択は、vanilla強制用`afv.zinkClient`を使用せず設定と同じ分岐を検証した。
+
+- 実`IrisRenderingPipeline`、pack有効、stored shader errorなしをワールド・リサイズ後・
+  リソース再読込後に確認。通常GLへのfallbackを合格にしない。
+- 元のflat worldに加え、新規の検証ワールドへ石の柱、ガラス、葉、水、発光ブロック、
+  cow、itemを配置。時刻1000、天候固定で確認する。
+- Minecraft viewportだけをキャプチャし、シェーダー付きのワールド、影、水、透過、
+  手元、HUD、ミニマップがAFVのVulkan表示に出ることを目視確認。
+- GPU共有フレーム120回以上を必須とし、先行シーン試験は8490回の実Vulkan表示と
+  world/resize/reload/disconnectを通過し終了コード0。最後の配布JARでは9093回の実Vulkan表示、
+  同じライフサイクル、クライアントと起動スクリプトの終了コード0を確認。
+- 元MOD204本とコピー204本のSHA-256計408件、指定ZIPの同一性、9設定の意味値を照合。
+
+起動中の`glTexSubImage2D(invalid texture level 0)`は、AFVのVulkan表示を無効にした
+通常Zink/EGL比較でも再現し、Railwaysの`PhantomSpriteManager.renderTick`から出ることを
+同期GL debugで確認した。producerが残したGL errorをAFVの外部画像転送失敗として
+扱っていた点を修正した。AFV自身の色転送・外部同期のエラー検査は残す。
+このpack側エラー、既存のモデル・レシピ・registry警告は未解消であり、全MOD機能が
+無警告で正常という判定にはしない。
+
+### 同じZink描画を使う表示経路の参考計測
+
+同じ配布JAR、scene、ZIP/TXT、960×540、描画距離7・simulation 6、VSync無効、
+frame limit 260（Minecraftの無制限設定）、focusあり。world安定120 tickに加え
+900 tick待機し、600 tickを計測。両方とも同じエラー限定GL debugを有効にした。
+frame間隔は`RenderFrameEvent.Post`で取得し、表示・待機を含む。
+
+| 表示経路 | frame数 / 秒 | 平均FPS | 中央値ms | p95 ms | p99 ms |
+| --- | --- | --- | --- | --- | --- |
+| 通常Zink/EGL、nested X11用`LIBGL_KOPPER_DRI2=true` | 1374 / 29.970 | 45.85 | 21.53 | 24.46 | 27.42 |
+| Zink GL client → AFV Vulkan WSI | 1373 / 29.979 | 45.80 | 21.44 | 26.40 | 29.10 |
+
+平均は約0.1%差でほぼ同程度。p95/p99はこのAFV試行の方が大きい。各30秒の単発試行で、
+実行時刻も異なるため有意な改善・悪化とは判断しない。これは表示経路の比較で、
+NVIDIAの通常OpenGLドライバーに対する高速化の証拠ではない。上記の38.76 FPSとは
+scene・VSync・待機条件が異なるため比較しない。Iris全機能、他shader pack、全GPU/OS、
+全context形式、native地形へのIris統合は引き続き未達。
+
+詳細ログ・JSON・スコープ限定画像はローカル`build/reports/afv-validation/`の
+`dtfuel-gl-scene-final*`、`dtfuel-afv-scene-final*`、`dtfuel-afv-complementary-scene.png`、
+`dtfuel-source-integrity-final.json`に保存する。DTFuelの第三者MOD JARと提供シェーダーZIPは
+ローカルの検証にのみ使用する。
+
+同じ最終JavaソースでAFV native描画も回帰確認した。NeoForge 21.1.228の開発クライアントで
+タイトル、60029回の地形draw、新規ワールド、960×540へのリサイズ、リソース再読込、
+切断を通過し、`AFV_SMOKE_PASS`と終了コード0を確認した
+（`native-regression-final.log`）。ビルド、投影変換、texture upload、baselineのコンパイル、
+配布JAR構造とPython構文の機械検証も通過している。
+
 ローカル証跡は `build/reports/afv-validation/dtfuel-complementary-final-*` と
 `dtfuel-complementary.png`。元のmodpack／shaderファイルは変更していない。
 
