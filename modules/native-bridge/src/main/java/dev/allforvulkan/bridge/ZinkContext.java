@@ -79,17 +79,15 @@ public final class ZinkContext implements AutoCloseable {
                 require(eglQuerySurface(display, next, EGL_HEIGHT, actualHeight), "query resized pbuffer height");
                 if (actualWidth.get(0) != width || actualHeight.get(0) != height)
                     throw new IllegalStateException("EGL did not create the requested drawable size");
-                var viewport = stack.mallocInt(4); var scissor = stack.mallocInt(4);
-                glGetIntegerv(GL_VIEWPORT, viewport); glGetIntegerv(GL_SCISSOR_BOX, scissor);
-                glFinish(); // Drawable replacement only, not the normal frame path.
-                require(eglMakeCurrent(display, next, next, context), "resize eglMakeCurrent");
-                long previous = surface;
-                surface = next;
-                this.width = width; this.height = height;
-                adopted = true;
-                glViewport(viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
-                glScissor(scissor.get(0), scissor.get(1), scissor.get(2), scissor.get(3));
-                require(eglDestroySurface(display, previous), "destroy previous pbuffer");
+                try (var state = new GlStateScope()) {
+                    glFinish(); // Drawable replacement only, not the normal frame path.
+                    require(eglMakeCurrent(display, next, next, context), "resize eglMakeCurrent");
+                    long previous = surface;
+                    surface = next;
+                    this.width = width; this.height = height;
+                    adopted = true;
+                    require(eglDestroySurface(display, previous), "destroy previous pbuffer");
+                }
             } finally { if (!adopted) eglDestroySurface(display, next); }
         }
     }

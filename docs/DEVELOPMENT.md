@@ -48,6 +48,14 @@ including Iris's final window pass and last direct GL output, rather than
 assuming the main color texture is the final screen. Minimized frames skip WSI;
 a completed frame can be scaled if the window size changes before presentation.
 
+Bridge state scopes preserve every draw buffer's independent color mask and
+blend enable, and every viewport's floating-point rectangle, scissor box and
+scissor enable. Restoring index zero using legacy `glColorMask`, `glViewport`,
+`glScissor` or non-indexed enables would overwrite other indices. Both normal
+presentation and EGL drawable replacement use indexed restoration. The isolated
+preflight draws into two MRT attachments with different masks/blending and
+requires exact output pixels after nested scopes, exception cleanup and resize.
+
 This route retains Iris/Sodium terrain, shadows, MRTs, buffers and frame hooks
 in the real GL implementation. AFV's native terrain renderer and its GL-wrapper
 mixins are disabled for this route; the native renderer remains the other mode.

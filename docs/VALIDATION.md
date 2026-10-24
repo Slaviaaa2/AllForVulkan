@@ -396,3 +396,34 @@ viewport限定画像で影・水・透過・葉・発光ブロック・手元・
 
 証跡はローカル`build/reports/afv-validation/`の`dtfuel-default-output-*`と
 `dtfuel-default-output.png`。提供MODやshaderのバイナリーを公開リポジトリーへ含めない。
+
+## Indexed GL状態の保持（2026-10-24）
+
+表示後の`GlStateScope`が、描画先0の色マスクとblend enableをlegacy APIで
+復元していたため、他の描画先の独立した設定を上書きする問題を修正した。
+viewportとscissorも全indexを保存し、小数座標を含めてindexed APIで復元する。
+EGL drawable変更時も同じ境界を使い、resizeで他indexを失わないようにした。
+これは独自の最適化ではなく、既存MODが設定したGL状態を保持するための修正。
+
+legacy APIが全indexへ影響する仕様は[Khronosの色マスク資料](https://wikis.khronos.org/opengl/Color_Mask)と
+[ARB_viewport_array仕様](https://registry.khronos.org/OpenGL/extensions/ARB/ARB_viewport_array.txt)を参照。
+
+起動前probeに、異なる色マスク・blend enableを持つ2つのMRT attachmentと、
+各indexで異なるfractional viewport／scissorを設定する実GPU検査を追加した。
+legacy APIによる全index上書き、入れ子scope、例外終了、2回のdrawable変更を経ても
+状態が維持され、MRTの結果がRGBA (255,0,255,255) と (0,64,191,255) に
+なることを確認する。単に保存値が一致するだけでなく、次の描画結果を検査する。
+この成功markerも、ゲームがZink経路を有効にする前の必須条件にした。
+
+実RTX 3060 / Mesa Zinkで、全描画先と16 viewport／scissor、MRTの画素検査、
+従来のdefault drawable／外部画像／WSI検査が通過した。ビルド、baselineのコンパイル、
+配布JAR構造検査と差分の空白検査も通過。ログはローカル
+`build/reports/afv-validation/indexed-state-build.log`と`indexed-state-probe.log`。
+
+修正後の配布JARを同じDTFuel独立コピーへ入れ、指定Complementaryを再確認した。
+`AUTO`選択から実Vulkan表示4516回、最終default出力のVulkan画像照合4513回を通過。
+ワールド、960×540→854×480のresize、リソース再読込後まで実Iris pipelineが有効で、
+切断・タイトル復帰・clientとlauncherの終了コード0を確認した。性能計測は行っていない。
+pack由来の既知のproducer GL警告は引き続き残る。証跡はローカル
+`build/reports/afv-validation/dtfuel-indexed-state-*`。全shader packや全MOD機能の
+完全互換を証明するものではなく、今回はこの状態保持の不具合と回帰を扱った。

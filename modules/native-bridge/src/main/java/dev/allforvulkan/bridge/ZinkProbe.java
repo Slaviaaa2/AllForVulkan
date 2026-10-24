@@ -34,6 +34,7 @@ public final class ZinkProbe {
                     }
                 }
             }
+            IndexedStateProbe.run(context);
             DefaultFramebufferProbe.run(context);
             computeRoundTrip();
             ExternalImageProbe.run();
