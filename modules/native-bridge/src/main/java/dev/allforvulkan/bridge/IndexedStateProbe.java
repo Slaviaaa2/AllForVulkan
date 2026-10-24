@@ -61,6 +61,7 @@ final class IndexedStateProbe {
                     glScissorIndexed(i, i, i + 1, i + 2, i + 3);
                     if ((i & 1) != 0) glEnablei(GL_SCISSOR_TEST, i); else glDisablei(GL_SCISSOR_TEST, i);
                 }
+                probeBlit(buffers, viewports, stack);
                 // Legacy APIs deliberately overwrite every index, as the old bridge did.
                 try (var saved = new GlStateScope()) {
                     overwrite();
@@ -81,7 +82,7 @@ final class IndexedStateProbe {
                 int error = glGetError();
                 if (error != GL_NO_ERROR) throw new IllegalStateException("Indexed state probe GL error 0x" + Integer.toHexString(error));
                 System.out.println("AFV_INDEXED_STATE_PASS: " + buffers + " color masks/blend enables, " + viewports
-                        + " fractional viewports/scissors, nested/exception scopes, resize, exact MRT pixels");
+                        + " fractional viewports/scissors, narrow blit/exception restore, nested scopes, resize, exact MRT pixels");
             } finally {
                 glBlendFuncSeparatei(1, srcRgb, dstRgb, srcAlpha, dstAlpha);
                 context.resize(oldWidth, oldHeight);
@@ -92,6 +93,58 @@ final class IndexedStateProbe {
                 if (fragment != 0) glDeleteShader(fragment);
                 glDeleteVertexArrays(vao);
             }
+        }
+    }
+    private static void probeBlit(int buffers, int viewports, MemoryStack stack) {
+        int framebuffer = glGenFramebuffers(), texture = glGenTextures();
+        int defaultReadBuffer;
+        try (var saved = new GlStateScope()) {
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            defaultReadBuffer = glGetInteger(GL_READ_BUFFER);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            glDisablei(GL_SCISSOR_TEST, 0); glDisable(GL_FRAMEBUFFER_SRGB);
+            glColorMask(true, true, true, true);
+            glClearColor(1, 0, 1, 1); glClear(GL_COLOR_BUFFER_BIT);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 4, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, (ByteBuffer)null);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+            if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+                throw new IllegalStateException("Blit state probe framebuffer incomplete");
+            // The scope must choose a real default read buffer and restore GL_NONE.
+            glReadBuffer(GL_NONE);
+        }
+        int read = glGetInteger(GL_READ_FRAMEBUFFER_BINDING), draw = glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING);
+        int readBuffer = glGetInteger(GL_READ_BUFFER);
+        boolean srgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+        try {
+            glEnablei(GL_SCISSOR_TEST, 0); glEnable(GL_FRAMEBUFFER_SRGB);
+            for (int attempt = 0; attempt < 2; attempt++) {
+                try {
+                    try (var saved = new GlBlitScope()) {
+                        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+                        glBlitFramebuffer(0, 0, 4, 4, 0, 0, 4, 4, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                        if (attempt == 1) throw new ExpectedFailure();
+                    }
+                } catch (ExpectedFailure expected) { /* The same restoration is required on failure. */ }
+                if (glGetInteger(GL_READ_FRAMEBUFFER_BINDING) != read || glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING) != draw
+                        || glGetInteger(GL_READ_BUFFER) != readBuffer || !glIsEnabledi(GL_SCISSOR_TEST, 0)
+                        || !glIsEnabled(GL_FRAMEBUFFER_SRGB)) throw new IllegalStateException("Blit state restore failed");
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+                if (glGetInteger(GL_READ_BUFFER) != GL_NONE) throw new IllegalStateException("Default read buffer lost");
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+                expectPixel(GL_COLOR_ATTACHMENT0, 255, 0, 255, stack);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
+                glDisablei(GL_SCISSOR_TEST, 0);
+                expectState(buffers, viewports);
+                glEnablei(GL_SCISSOR_TEST, 0);
+            }
+        } finally {
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0); glReadBuffer(defaultReadBuffer);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, read); glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
+            glDisablei(GL_SCISSOR_TEST, 0);
+            if (!srgb) glDisable(GL_FRAMEBUFFER_SRGB);
+            glDeleteFramebuffers(framebuffer); glDeleteTextures(texture);
         }
     }
     private static void overwrite() {

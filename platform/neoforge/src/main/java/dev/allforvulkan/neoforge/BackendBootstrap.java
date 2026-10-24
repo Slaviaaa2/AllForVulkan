@@ -54,19 +54,18 @@ public final class BackendBootstrap {
             // Also survives a native driver crash, which Java cannot catch.
             Files.writeString(pending, "Vulkan startup pending\n", StandardOpenOption.CREATE_NEW);
             if (clientBridge) {
-                Path vendor = Path.of(System.getProperty("afv.mesaEglVendor", "/usr/share/glvnd/egl_vendor.d/50_mesa.json"));
-                if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux") || !Files.isReadable(vendor)) {
+                if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux")) {
                     reason = "OpenGL fallback: Zink client bridge requires Linux and an installed Mesa EGL vendor";
                     Files.deleteIfExists(pending);
                     return;
                 }
-                var zink = ZinkPreflight.inspect(FMLLoader.getGamePath(), vendor);
-                if (!zink.supported()) {
-                    reason = "OpenGL fallback: " + zink.detail();
+                var selection = ZinkPreflight.select(FMLLoader.getGamePath(), MesaVendors.discover());
+                if (selection.vendor() == null) {
+                    reason = "OpenGL fallback: " + selection.result().detail();
                     Files.deleteIfExists(pending);
                     return;
                 }
-                MesaEnvironment.configure(vendor.toString());
+                MesaEnvironment.configure(selection.vendor().toString());
             }
             var result = VulkanSupport.probe(clientBridge || Boolean.getBoolean("afv.zinkInterop"), clientBridge);
             zinkClient = result.supported() && clientBridge;

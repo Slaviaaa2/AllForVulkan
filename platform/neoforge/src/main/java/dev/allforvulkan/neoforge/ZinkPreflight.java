@@ -4,14 +4,49 @@ import dev.allforvulkan.bridge.VulkanSupport;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.concurrent.TimeUnit;
+import java.util.List;
+import org.apache.logging.log4j.LogManager;
 
 /** Never load an unverified Mesa driver in the game merely to inspect capabilities. */
 final class ZinkPreflight {
+    record Selection(Path vendor, VulkanSupport.Result result) {}
+
+    static Selection select(Path game, List<Path> vendors) throws IOException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(45);
+        Path directory = game.resolve(".allforvulkan/preflight");
+        Files.createDirectories(directory);
+        Files.writeString(directory.resolve("zink-probe.log"), "No Zink vendor has passed this launch\n");
+        for (int i = 1; i <= 4; i++) Files.deleteIfExists(directory.resolve("zink-probe-" + i + ".log"));
+        VulkanSupport.Result result = new VulkanSupport.Result(false, "No readable Mesa EGL vendor metadata was found");
+        int attempt = 0;
+        for (Path vendor : vendors) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0 || Thread.currentThread().isInterrupted()) break;
+            int index = ++attempt;
+            LogManager.getLogger("AllForVulkan").info("AFV_ZINK_VENDOR_PROBE: attempt={}, vendor={}", index, vendor);
+            result = inspect(game, vendor, remaining, "zink-probe-" + index + ".log");
+            Path log = game.resolve(".allforvulkan/preflight/zink-probe-" + index + ".log");
+            if (Files.isRegularFile(log)) Files.copy(log, log.resolveSibling("zink-probe.log"), StandardCopyOption.REPLACE_EXISTING);
+            if (result.supported()) {
+                LogManager.getLogger("AllForVulkan").info("AFV_ZINK_VENDOR_SELECTED: attempt={}, vendor={}", index, vendor);
+                return new Selection(vendor, result);
+            }
+            LogManager.getLogger("AllForVulkan").warn("AFV_ZINK_VENDOR_REJECTED: attempt={}, {}", index, result.detail());
+        }
+        return new Selection(null, result);
+    }
+
     static VulkanSupport.Result inspect(Path game, Path vendor) throws IOException {
+        return inspect(game, vendor, TimeUnit.SECONDS.toNanos(45), "zink-probe.log");
+    }
+
+    private static VulkanSupport.Result inspect(Path game, Path vendor, long timeout, String logName) throws IOException {
+        long deadline = System.nanoTime() + timeout;
         Path directory = game.resolve(".allforvulkan/preflight");
         Files.createDirectories(directory);
         Path helper = Files.createTempFile(directory, "zink-probe-", ".jar");
-        Path log = directory.resolve("zink-probe.log");
+        Path log = directory.resolve(logName);
+        Files.writeString(log, "Zink preflight has not started: " + vendor + "\n");
         Process process = null;
         try {
             try (var resource = ZinkPreflight.class.getResourceAsStream("/META-INF/afv/zink-probe.jar")) {
@@ -27,7 +62,7 @@ final class ZinkPreflight {
             builder.environment().put("GALLIUM_DRIVER", "zink");
             builder.environment().put("__EGL_VENDOR_LIBRARY_FILENAMES", vendor.toAbsolutePath().toString());
             process = builder.start();
-            if (!process.waitFor(45, TimeUnit.SECONDS)) {
+            if (!process.waitFor(Math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)) {
                 process.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
                 return new VulkanSupport.Result(false, "Zink driver preflight timed out; see " + log);
             }

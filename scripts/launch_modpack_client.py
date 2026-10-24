@@ -202,6 +202,8 @@ def launch(args):
         command += ['-Dafv.smokeFinalOutput=true']
     if args.debug_gl:
         command += ['-Dafv.debugGlClient=true']
+    if args.mesa_egl_vendor:
+        command += ['-Dafv.mesaEglVendor=' + args.mesa_egl_vendor]
     environment = os.environ.copy()
     if args.local_xim:
         environment['XMODIFIERS'] = '@im=none'
@@ -211,12 +213,11 @@ def launch(args):
         # Explicit GL comparison route; do not call this AFV's native renderer.
         command += ['-Dafv.backend=OPENGL', '-Dafv.validationEgl=true', '-Dafv.expectZink=true']
         environment.update(MESA_LOADER_DRIVER_OVERRIDE='zink', GALLIUM_DRIVER='zink',
-                           __EGL_VENDOR_LIBRARY_FILENAMES=args.mesa_egl_vendor)
+                           __EGL_VENDOR_LIBRARY_FILENAMES=args.mesa_egl_vendor or '/usr/share/glvnd/egl_vendor.d/50_mesa.json')
     if args.zink_client:
         if args.backend == 'OPENGL':
             raise ValueError('--zink-client cannot use OpenGL selection')
-        command += ['-Dafv.backend=' + (args.backend or 'VULKAN'), '-Dafv.expectZinkClient=true', '-Dafv.expectZink=true',
-                    '-Dafv.mesaEglVendor=' + args.mesa_egl_vendor]
+        command += ['-Dafv.backend=' + (args.backend or 'VULKAN'), '-Dafv.expectZinkClient=true', '-Dafv.expectZink=true']
         # With Iris installed, exercise the same selection as the Vulkan setting.
         # The force flag remains useful for an otherwise vanilla GL client.
         if not args.require_iris:
@@ -244,6 +245,8 @@ def launch(args):
     record['windowCycle'] = args.window_cycle
     record['dimensionCycle'] = args.dimension_cycle
     record['dimensionInspectTicks'] = args.dimension_inspect_ticks
+    record['mesaEglVendorOverride'] = args.mesa_egl_vendor
+    record['expectedBackend'] = args.expect_backend
     record['requestedBackend'] = args.backend or ('VULKAN' if args.zink_client else 'OPENGL' if args.zink else 'saved setting')
     record['x11NoModifiers'] = args.x11_no_modifiers
     if shader_source:
@@ -279,6 +282,8 @@ def launch(args):
         passed = passed and 'AFV_WINDOW_CYCLE_PASS' in text
     if args.dimension_cycle:
         passed = passed and 'AFV_DIMENSION_CYCLE_PASS' in text
+    if args.expect_backend:
+        passed = passed and bool(re.search(r'AFV_BACKEND: requested=[A-Z]+, active=' + args.expect_backend + r',', text))
     print(('AFV_PRODUCTION_PASS' if passed else 'AFV_PRODUCTION_FAIL') + f': exit={code} log={log}', flush=True)
     return 0 if passed else 1
 
@@ -312,6 +317,7 @@ if __name__ == '__main__':
     renderer.add_argument('--zink', action='store_true', help='OpenGL comparison through real Zink, AFV native renderer disabled')
     renderer.add_argument('--zink-client', action='store_true', help='Zink GL frontend with AFV-owned Vulkan presentation')
     parser.add_argument('--x11-no-modifiers', action='store_true', help='Zink presentation fallback for nested X11 servers without explicit modifiers')
-    parser.add_argument('--mesa-egl-vendor', default='/usr/share/glvnd/egl_vendor.d/50_mesa.json')
+    parser.add_argument('--mesa-egl-vendor', help='Override the EGL vendor; otherwise AFV discovers installed Mesa metadata')
+    parser.add_argument('--expect-backend', choices=['Vulkan', 'OpenGL'], help='Require the actual selected backend, including explicit fallback tests')
     parser.add_argument('--backend', choices=['AUTO', 'VULKAN', 'OPENGL'], help='Exercise an explicit AFV backend selection')
     raise SystemExit(launch(parser.parse_args()))

@@ -57,13 +57,16 @@ rechecks capabilities and recreates the swapchain. Image acquisition uses a
 finite timeout, so a surface that stops making progress cannot block the render
 thread indefinitely. An out-of-date creation/acquisition is retried next frame.
 
-Bridge state scopes preserve every draw buffer's independent color mask and
-blend enable, and every viewport's floating-point rectangle, scissor box and
-scissor enable. Restoring index zero using legacy `glColorMask`, `glViewport`,
-`glScissor` or non-indexed enables would overwrite other indices. Both normal
-presentation and EGL drawable replacement use indexed restoration. The isolated
-preflight draws into two MRT attachments with different masks/blending and
-requires exact output pixels after nested scopes, exception cleanup and resize.
+Steady-state presentation uses a narrow `GlBlitScope`: it saves only read/draw
+framebuffer bindings, the default read buffer, scissor enable at index 0 and
+framebuffer sRGB. It never changes viewport, masks, blending, shaders or texture
+bindings. A copy destination therefore binds only the draw framebuffer and does
+not set a viewport. The broader state scope is retained for shared-image
+creation, EGL drawable replacement and rendering diagnostics; it preserves all
+indexed color masks/blend enables and fractional viewport/scissor state.
+Restoring index zero with legacy APIs would overwrite other indices. The
+isolated preflight verifies exact color-blit pixels and normal/exception cleanup
+under adversarial indexed state, then checks MRT output, nested scopes and resize.
 
 This route retains Iris/Sodium terrain, shadows, MRTs, buffers and frame hooks
 in the real GL implementation. AFV's native terrain renderer and its GL-wrapper
@@ -80,14 +83,22 @@ NO_API GLFW window, checks the actual surface's graphics/present queues,
 transfer/blit formats and same-GPU shared-format import, and creates a real
 swapchain on that surface. GLFW is bundled only inside the isolated probe JAR;
 the game continues to use its own GLFW. Failure, driver-process death or a
-45-second timeout selects OpenGL. Logs are under `.allforvulkan/preflight/` in
+45-second total probe budget selects OpenGL. Logs are under `.allforvulkan/preflight/` in
 the instance. This isolates preflight driver failures; runtime driver failures
 still use the existing next-launch recovery marker. A successful preflight does
 not prove every shader pack or WSI configuration works.
 
 For a vanilla client, `-Dafv.zinkClient=true` forces this route for testing.
-`-Dafv.mesaEglVendor=/path/to/vendor.json` selects a different installed Mesa
-vendor. The Zink environment changes affect only the launched game process.
+`-Dafv.mesaEglVendor=/path/to/vendor.json` selects a particular installed Mesa
+vendor. Otherwise metadata discovery honors GLVND's explicit filenames, then
+explicit directories, then standard EGL vendor directories; an explicitly empty
+selection remains empty. Up to four Mesa candidates are tested in isolated
+children within the shared budget, so a broken installation does not hide a
+later working candidate. Candidate logs are `zink-probe-N.log`; `zink-probe.log`
+contains the last attempt. JSON metadata is inspected without loading drivers in
+the game. The Zink environment changes affect only the launched game process.
+The private-client launcher accepts `--mesa-egl-vendor` for a manual override and
+`--expect-backend Vulkan` or `OpenGL` to assert the actual startup decision.
 
 For a verified private DTFuel copy (see preparation commands later in this file):
 

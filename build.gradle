@@ -101,6 +101,7 @@ dependencies {
     testImplementation "org.lwjgl:lwjgl:${lwjglVersion}"
     testImplementation "org.lwjgl:lwjgl-opengl:${lwjglVersion}"
     testRuntimeOnly "org.lwjgl:lwjgl:${lwjglVersion}:${devNatives}"
+    testRuntimeOnly "com.google.code.gson:gson:2.10.1"
     implementation project(':core-api')
     jarJar project(':core-api')
     implementation project(':native-bridge')
@@ -218,3 +219,9 @@ tasks.register('verifyProjection', JavaExec) {
 }
 tasks.named('check') { dependsOn 'verifyProjection' }
 tasks.named('check') { dependsOn ':native-bridge:verifyPresentationSurface' }
+tasks.register('verifyMesaVendors', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.neoforge.MesaVendorChecks'
+}
+tasks.named('check') { dependsOn 'verifyMesaVendors' }

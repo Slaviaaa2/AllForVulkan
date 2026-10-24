@@ -1,6 +1,7 @@
 package net.vulkanmod.vulkan.interop;
 
 import dev.allforvulkan.bridge.GlStateScope;
+import dev.allforvulkan.bridge.GlBlitScope;
 import dev.allforvulkan.bridge.PresentationSurface;
 import dev.allforvulkan.bridge.SharedImage;
 import dev.allforvulkan.bridge.ZinkContext;
@@ -66,7 +67,7 @@ public final class ZinkPresenter implements AutoCloseable {
         for (int error, n = 0; n < 16 && (error = glGetError()) != GL_NO_ERROR; n++) {
             if (++producerErrors <= 8) Initializer.LOGGER.warn("AFV_ZINK_CLIENT_PRODUCER_ERROR: GL 0x{} before presentation", Integer.toHexString(error));
         }
-        try (var stack = MemoryStack.stackPush(); var state = new GlStateScope()) {
+        try (var stack = MemoryStack.stackPush()) {
             var w = stack.mallocInt(1); var h = stack.mallocInt(1);
             org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window, w, h);
             if (w.get(0) == 0 || h.get(0) == 0 || org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(window, org.lwjgl.glfw.GLFW.GLFW_ICONIFIED) != 0) {
@@ -86,19 +87,15 @@ public final class ZinkPresenter implements AutoCloseable {
             var shared = frames[frame];
             boolean checkOutput = outputChecks != null && width == context.width() && height == context.height() && width >= 32 && height >= 32;
             if (checkOutput) drawFinalMarker();
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-            int previousReadBuffer = glGetInteger(GL_READ_BUFFER);
-            shared.beginGlWrite();
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-            glReadBuffer(glGetBoolean(GL_DOUBLEBUFFER) ? GL_BACK : GL_FRONT);
-            if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-                throw new IllegalStateException("Client default framebuffer is incomplete");
-            glDisable(GL_SCISSOR_TEST); glDisable(GL_FRAMEBUFFER_SRGB);
-            glBlitFramebuffer(0, 0, context.width(), context.height(), 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-            glReadBuffer(previousReadBuffer);
-            int blitError = glGetError();
-            if (blitError != GL_NO_ERROR) throw new IllegalStateException("Client color transfer: GL error 0x" + Integer.toHexString(blitError));
-            shared.endGlWrite();
+            try (var state = new GlBlitScope()) {
+                shared.beginGlCopy();
+                if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+                    throw new IllegalStateException("Client default framebuffer is incomplete");
+                glBlitFramebuffer(0, 0, context.width(), context.height(), 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                int blitError = glGetError();
+                if (blitError != GL_NO_ERROR) throw new IllegalStateException("Client color transfer: GL error 0x" + Integer.toHexString(blitError));
+                shared.endGlWrite();
+            }
 
             var command = commands[frame];
             check(vkResetCommandBuffer(command, 0), "reset presentation command");
@@ -138,7 +135,7 @@ public final class ZinkPresenter implements AutoCloseable {
     }
 
     private boolean recreate(int requestedWidth, int requestedHeight) {
-        try (var stack = MemoryStack.stackPush()) {
+        try (var stack = MemoryStack.stackPush(); var state = new GlStateScope()) {
             var surface = DeviceManager.querySurfaceProperties(DeviceManager.physicalDevice, stack);
             var caps = surface.capabilities;
             var extent = PresentationSurface.extent(caps, requestedWidth, requestedHeight);

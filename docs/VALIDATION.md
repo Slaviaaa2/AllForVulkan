@@ -591,3 +591,46 @@ launcherの終了コード0を確認した。2 MODの最小構成と204 MODのfu
 `dtfuel-dimension-capture.log`。capture待機中にログのtruncateを検知できない問題が
 見つかり、取得補助だけを修正して同じ実行中クライアントへ再接続した。ゲームを
 再起動して合格にしたものではない。元pack・既存save・提供shaderは変更していない。
+
+## 表示時のGL状態処理の削減（2026-10-24）
+
+互換検証を追加し続ける段階から、既存描画の意味を保つ基本的な改善へ移った。
+通常の`ZinkPresenter.present`から全状態の`GlStateScope`を外し、色blitで実際に触る
+read/draw FBO、default read buffer、scissor index 0、framebuffer sRGBだけを扱う
+`GlBlitScope`を導入した。共有画像のcopy開始はdraw FBOだけをbindし、viewportを
+変更しない。画像再作成・EGL resize・診断描画には従来の広いscopeを残す。
+
+今回のGPUの8 draw buffer／16 viewport構成では、scopeの状態照会を1 frameあたり
+78呼出しから6呼出しへ減らした。indexed配列の確保、未変更のshader・texture・
+viewport・mask・blendの復元も通常表示から取り除いた。これは呼出し数の削減であり、
+FPSの改善幅を測定した結果ではない。GPUコピー、所有権移譲、セマフォ同期は維持する。
+
+[OpenGLのblit仕様](https://wikis.khronos.org/opengl/Framebuffer)に従い、viewportや
+write maskには触れず、blitに効くscissor index 0だけを一時無効化する。実GPU probeで
+異なる全indexed状態を残したまま、default framebufferからprivate FBOへの正確な
+RGBAを確認した。default read bufferを`GL_NONE`にした状態、通常終了と例外終了、
+scissor／sRGB enableの復元、後続MRT描画の画素一致も通過した。
+
+併せて固定パスだったMesa EGL metadataを自動検出へ変更した。GLVND環境の明示的な
+filenames／directoriesを優先し、JSONだけを調べてMesa候補を最大4件選ぶ。親でdriverを
+loadせず、共通45秒budget内で子process検査を順に行い、失敗した候補の後も試す。
+読めないmetadataや全候補失敗は既存のOpenGL fallbackへ進む。手動vendor指定も残す。
+環境変数の空指定・優先順位・順序・重複・不正JSON・非Mesa・候補数制限の検査を追加した。
+
+Gradle build／baselineコンパイル、実Zinkのindexed状態・drawable resize・compute・
+外部画像同期・hidden WSI probe、launcher構文、2本のprofile unittest、配布JARの
+新class包含検査が通過した。ローカル証跡は`blit-optimization-build.log`と
+`blit-optimization-probe.log`。FPS測定は実施していない。
+
+改善後の配布JAR（SHA-256
+`7ac108c8d5360cfab4a555f57a2cf9fdd698ac5e6583e98cc3393192dbc717bb`）を、
+専用X上のIris／Sodium最小構成と指定Complementaryで1回起動した。
+異なるmetadata directoryを明示し、先頭の壊れたMesa候補を子processが拒否した後、
+2番目の有効な候補でAUTO→Vulkanが選ばれることも同じ実行で確認した。
+world／resize／shader off→on／shader-only reload／resource reload／disconnectが
+通過し、実Vulkan共有画像で最終出力markerを2022回照合して正常終了した。
+証跡はローカル`minimal-blit-optimization-launch.log`とprivate instanceの
+`afv-production-client.log`、`.allforvulkan/preflight/zink-probe-{1,2}.log`。
+全GPU・全MODへ検証範囲を広げることを改善開始の条件にはせず、追加のDTFuel一式や
+ディメンション試験は今回は反復していない。以前のDTFuel通過結果は上記の版に対する
+証跡として扱い、今回のJARで全packを再確認したという意味にはしない。
