@@ -48,6 +48,15 @@ including Iris's final window pass and last direct GL output, rather than
 assuming the main color texture is the final screen. Minimized frames skip WSI;
 a completed frame can be scaled if the window size changes before presentation.
 
+The preflight and presenter share the same surface format/extent policy. They
+search for an available 8-bit RGBA/BGRA destination with blit support and a
+matching exportable shared source; an unusable first format does not rule out
+other valid pairs. Iconified/zero-size surfaces suspend presentation without
+destroying the current images or creating zero-sized swapchains. Restoration
+rechecks capabilities and recreates the swapchain. Image acquisition uses a
+finite timeout, so a surface that stops making progress cannot block the render
+thread indefinitely. An out-of-date creation/acquisition is retried next frame.
+
 Bridge state scopes preserve every draw buffer's independent color mask and
 blend enable, and every viewport's floating-point rectangle, scissor box and
 scissor enable. Restoring index zero using legacy `glColorMask`, `glViewport`,
@@ -114,6 +123,14 @@ pipelines after enabling/reloading, unchanged selected pack and nonblack color
 samples. The production launcher requires `AFV_IRIS_CYCLE_PASS`; it cannot pass
 merely because the client exits cleanly. This explicit diagnostic requires
 `--smoke --require-iris` and changes only the verified private instance.
+
+With a real window manager on the dedicated display, add `--window-cycle`
+to check actual iconification/restoration and two VSync changes. The client must
+remain responsive while iconified with no AFV Vulkan presentations, then render
+at least 60 frames in each resumed mode, retaining the same EGL context and active
+Iris pipeline. The launcher requires `AFV_WINDOW_CYCLE_PASS`. It requires
+`--smoke --zink-client`; a missing window manager is an explicit test failure,
+not a simulated minimize. No screenshot is needed for these state assertions.
 
 For a matched Zink/EGL presentation comparison, replace `--zink-client` with
 `--zink --x11-no-modifiers` when that fallback is required by the nested X server.

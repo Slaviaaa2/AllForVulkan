@@ -1,6 +1,7 @@
 package net.vulkanmod.vulkan.interop;
 
 import dev.allforvulkan.bridge.GlStateScope;
+import dev.allforvulkan.bridge.PresentationSurface;
 import dev.allforvulkan.bridge.SharedImage;
 import dev.allforvulkan.bridge.ZinkContext;
 import net.vulkanmod.Initializer;
@@ -68,12 +69,16 @@ public final class ZinkPresenter implements AutoCloseable {
         try (var stack = MemoryStack.stackPush(); var state = new GlStateScope()) {
             var w = stack.mallocInt(1); var h = stack.mallocInt(1);
             org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window, w, h);
-            if (w.get(0) == 0 || h.get(0) == 0) return;
-            if (dirty || windowWidth != w.get(0) || windowHeight != h.get(0)) recreate(w.get(0), h.get(0));
+            if (w.get(0) == 0 || h.get(0) == 0 || org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(window, org.lwjgl.glfw.GLFW.GLFW_ICONIFIED) != 0) {
+                dirty = true; return;
+            }
+            if ((dirty || windowWidth != w.get(0) || windowHeight != h.get(0)) && !recreate(w.get(0), h.get(0))) return;
             check(vkWaitForFences(device, fences[frame], true, -1L), "wait presentation slot");
             if (outputChecks != null && outputChecks[frame].verify()) verifiedOutput++;
             var index = stack.mallocInt(1);
-            int acquired = vkAcquireNextImageKHR(device, swapchain, -1L, available[frame], 0, index);
+            // Keep event processing alive if an occluded/minimized surface stops making progress.
+            int acquired = vkAcquireNextImageKHR(device, swapchain, 100_000_000L, available[frame], 0, index);
+            if (acquired == VK_TIMEOUT || acquired == VK_NOT_READY) return;
             if (acquired == VK_ERROR_OUT_OF_DATE_KHR) { dirty = true; return; }
             if (acquired != VK_SUBOPTIMAL_KHR) check(acquired, "acquire presentation image");
             else dirty = true;
@@ -132,30 +137,20 @@ public final class ZinkPresenter implements AutoCloseable {
         }
     }
 
-    private void recreate(int requestedWidth, int requestedHeight) {
-        glFinish(); // Resize/teardown only; steady-state synchronization uses GPU semaphores.
-        check(vkDeviceWaitIdle(device), "drain presentation before resize");
-        destroySwapchain();
+    private boolean recreate(int requestedWidth, int requestedHeight) {
         try (var stack = MemoryStack.stackPush()) {
             var surface = DeviceManager.querySurfaceProperties(DeviceManager.physicalDevice, stack);
             var caps = surface.capabilities;
+            var extent = PresentationSurface.extent(caps, requestedWidth, requestedHeight);
+            if (!extent.drawable()) { dirty = true; return false; }
             if ((caps.supportedUsageFlags() & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0)
                 throw new IllegalStateException("Surface cannot receive the shared client image");
-            int format = 0, colorSpace = 0;
-            for (var candidate : surface.formats) {
-                if (candidate.colorSpace() != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) continue;
-                int f = candidate.format();
-                if (f == VK_FORMAT_UNDEFINED) { format = VK_FORMAT_B8G8R8A8_UNORM; colorSpace = candidate.colorSpace(); break; }
-                if (f == VK_FORMAT_B8G8R8A8_UNORM || f == VK_FORMAT_R8G8B8A8_UNORM) { format = f; colorSpace = candidate.colorSpace(); break; }
-                if (f == VK_FORMAT_B8G8R8A8_SRGB || f == VK_FORMAT_R8G8B8A8_SRGB) { format = f; colorSpace = candidate.colorSpace(); }
-            }
-            if (format == 0) throw new IllegalStateException("Surface lacks a supported RGBA/BGRA 8-bit format");
-            boolean srgb = format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
-            int sharedFormat = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-            requireBlit(sharedFormat, VK_FORMAT_FEATURE_BLIT_SRC_BIT, stack);
-            requireBlit(format, VK_FORMAT_FEATURE_BLIT_DST_BIT, stack);
-            width = caps.currentExtent().width() == -1 ? Math.clamp(requestedWidth, caps.minImageExtent().width(), caps.maxImageExtent().width()) : caps.currentExtent().width();
-            height = caps.currentExtent().height() == -1 ? Math.clamp(requestedHeight, caps.minImageExtent().height(), caps.maxImageExtent().height()) : caps.currentExtent().height();
+            var color = PresentationSurface.colorFormat(DeviceManager.physicalDevice, surface.formats);
+            int format = color.surface(), sharedFormat = color.shared();
+            glFinish(); // Resize/teardown only; no work or destruction for a suspended surface.
+            check(vkDeviceWaitIdle(device), "drain presentation before resize");
+            destroySwapchain();
+            width = extent.width(); height = extent.height();
             int count = caps.minImageCount() + 1;
             if (caps.maxImageCount() > 0) count = Math.min(count, caps.maxImageCount());
             int mode = VK_PRESENT_MODE_FIFO_KHR;
@@ -166,7 +161,7 @@ public final class ZinkPresenter implements AutoCloseable {
             }
             int alpha = Integer.lowestOneBit(caps.supportedCompositeAlpha());
             var info = VkSwapchainCreateInfoKHR.calloc(stack).sType$Default().surface(Vulkan.getSurface())
-                    .minImageCount(count).imageFormat(format).imageColorSpace(colorSpace).imageArrayLayers(1)
+                    .minImageCount(count).imageFormat(format).imageColorSpace(color.colorSpace()).imageArrayLayers(1)
                     .imageUsage(VK_IMAGE_USAGE_TRANSFER_DST_BIT).preTransform(caps.currentTransform())
                     .compositeAlpha(alpha).presentMode(mode).clipped(true);
             info.imageExtent().set(width, height);
@@ -175,7 +170,9 @@ public final class ZinkPresenter implements AutoCloseable {
                 info.imageSharingMode(VK_SHARING_MODE_CONCURRENT).pQueueFamilyIndices(stack.ints(families.graphicsFamily, families.presentFamily));
             else info.imageSharingMode(VK_SHARING_MODE_EXCLUSIVE);
             var handle = stack.mallocLong(1);
-            check(vkCreateSwapchainKHR(device, info, null, handle), "create client swapchain");
+            int created = vkCreateSwapchainKHR(device, info, null, handle);
+            if (created == VK_ERROR_OUT_OF_DATE_KHR) { dirty = true; return false; }
+            check(created, "create client swapchain");
             swapchain = handle.get(0);
             var n = stack.mallocInt(1);
             check(vkGetSwapchainImagesKHR(device, swapchain, n, null), "count client swapchain images");
@@ -201,6 +198,7 @@ public final class ZinkPresenter implements AutoCloseable {
             dirty = false;
             windowWidth = requestedWidth; windowHeight = requestedHeight;
             Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}", width, height, format, images.length, vsync);
+            return true;
         }
     }
 
@@ -219,11 +217,6 @@ public final class ZinkPresenter implements AutoCloseable {
             glClearColor(1, 0, 1, 1);
             glClear(GL_COLOR_BUFFER_BIT);
         }
-    }
-    private static void requireBlit(int format, int flag, MemoryStack stack) {
-        var properties = VkFormatProperties.calloc(stack);
-        vkGetPhysicalDeviceFormatProperties(DeviceManager.physicalDevice, format, properties);
-        if ((properties.optimalTilingFeatures() & flag) == 0) throw new IllegalStateException("Client blit unsupported for format " + format);
     }
     private static void imageBarrier(VkCommandBuffer command, long image, int oldLayout, int newLayout,
                                      int srcAccess, int dstAccess, int srcStage, int dstStage, MemoryStack stack) {

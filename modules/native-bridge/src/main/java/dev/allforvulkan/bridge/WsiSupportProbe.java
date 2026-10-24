@@ -75,21 +75,8 @@ final class WsiSupportProbe {
             check(vkGetPhysicalDeviceSurfaceFormatsKHR(physical, surface, count, null), "WSI probe format count");
             var formats = VkSurfaceFormatKHR.calloc(count.get(0), stack);
             check(vkGetPhysicalDeviceSurfaceFormatsKHR(physical, surface, count, formats), "WSI probe formats");
-            int format = 0;
-            for (var candidate : formats) {
-                if (candidate.colorSpace() != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) continue;
-                int f = candidate.format();
-                if (f == VK_FORMAT_UNDEFINED) { format = VK_FORMAT_B8G8R8A8_UNORM; break; }
-                if (f == VK_FORMAT_B8G8R8A8_UNORM || f == VK_FORMAT_R8G8B8A8_UNORM) { format = f; break; }
-                if (f == VK_FORMAT_B8G8R8A8_SRGB || f == VK_FORMAT_R8G8B8A8_SRGB) format = f;
-            }
-            if (format == 0) throw new IllegalStateException("WSI lacks an RGBA/BGRA 8-bit surface format");
-            int sharedFormat = format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-            var properties = VkFormatProperties.calloc(stack);
-            vkGetPhysicalDeviceFormatProperties(physical, format, properties);
-            if ((properties.optimalTilingFeatures() & VK_FORMAT_FEATURE_BLIT_DST_BIT) == 0) throw new IllegalStateException("WSI format cannot receive a blit");
-            vkGetPhysicalDeviceFormatProperties(physical, sharedFormat, properties);
-            if ((properties.optimalTilingFeatures() & VK_FORMAT_FEATURE_BLIT_SRC_BIT) == 0) throw new IllegalStateException("Shared color format cannot supply a blit");
+            var color = PresentationSurface.colorFormat(physical, formats);
+            int format = color.surface(), sharedFormat = color.shared();
             var queues = VkDeviceQueueCreateInfo.calloc(graphics == present ? 1 : 2, stack);
             queues.get(0).sType$Default().queueFamilyIndex(graphics).pQueuePriorities(stack.floats(1));
             if (graphics != present) queues.get(1).sType$Default().queueFamilyIndex(present).pQueuePriorities(stack.floats(1));
@@ -102,15 +89,15 @@ final class WsiSupportProbe {
             try (var state = new GlStateScope(); var shared = new SharedImage(physical, device, 8, 8, sharedFormat)) {
                 org.lwjgl.opengl.GL11.glFinish();
             }
-            int width = capabilities.currentExtent().width() == -1 ? Math.clamp(32, capabilities.minImageExtent().width(), capabilities.maxImageExtent().width()) : capabilities.currentExtent().width();
-            int height = capabilities.currentExtent().height() == -1 ? Math.clamp(32, capabilities.minImageExtent().height(), capabilities.maxImageExtent().height()) : capabilities.currentExtent().height();
+            var extent = PresentationSurface.extent(capabilities, 32, 32);
+            if (!extent.drawable()) throw new IllegalStateException("Capability window surface is temporarily suspended");
             int imageCount = capabilities.minImageCount() + 1;
             if (capabilities.maxImageCount() > 0) imageCount = Math.min(imageCount, capabilities.maxImageCount());
             var info = VkSwapchainCreateInfoKHR.calloc(stack).sType$Default().surface(surface).minImageCount(imageCount)
-                    .imageFormat(format).imageColorSpace(VK_COLOR_SPACE_SRGB_NONLINEAR_KHR).imageArrayLayers(1)
+                    .imageFormat(format).imageColorSpace(color.colorSpace()).imageArrayLayers(1)
                     .imageUsage(VK_IMAGE_USAGE_TRANSFER_DST_BIT).preTransform(capabilities.currentTransform())
                     .compositeAlpha(Integer.lowestOneBit(capabilities.supportedCompositeAlpha())).presentMode(VK_PRESENT_MODE_FIFO_KHR).clipped(true);
-            info.imageExtent().set(width, height);
+            info.imageExtent().set(extent.width(), extent.height());
             if (graphics != present) info.imageSharingMode(VK_SHARING_MODE_CONCURRENT).pQueueFamilyIndices(stack.ints(graphics, present));
             else info.imageSharingMode(VK_SHARING_MODE_EXCLUSIVE);
             check(vkCreateSwapchainKHR(device, info, null, handle), "WSI probe swapchain");

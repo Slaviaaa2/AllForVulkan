@@ -457,3 +457,48 @@ pack由来の既知のproducer GL警告は残り、他のpack・全設定・全M
 証明するものではない。ビルド、baselineのコンパイル、配布JAR構造とPython構文の
 機械検査も通過。証跡はローカル`build/reports/afv-validation/`の
 `iris-cycle-build.log`と`dtfuel-iris-cycle-*`。元のmodpack・提供shaderは変更していない。
+
+## 表示面の休止・復帰と対応形式の選択（2026-10-24）
+
+IrisのGL frontendを保持する表示経路で、hardware／window system差に関わる基礎を修正した。
+最初の8-bit surface formatを選んだ後でblit非対応として失敗する処理を、全候補から
+blit先・外部共有元の両方が使える組を選ぶ共通policyへ置き換えた。UNORMを優先し、
+sRGBが必要な場合は共有元もsRGBにそろえる。色空間の解釈を変更する機能は追加しない。
+起動前の子JVM検査と本番のpresenterで同じ`PresentationSurface`を使用する。
+
+GLFWのサイズが非0でも、最小化時にsurfaceのcurrent/max extentが0になる場合がある
+（[Vulkan仕様のswapchain条件](https://docs.vulkan.org/refpages/latest/refpages/source/VkSwapchainCreateInfoKHR.html)）。
+この場合は既存画像を破棄せず表示を休止し、復帰後に再照会してswapchainを作り直す。
+GLFWのiconified状態も明示的に休止対象にした。image acquireの無期限待ちを100 msの
+上限へ変更し、TIMEOUT／NOT_READYなら同期objectを再利用できる状態のまま次のframeへ
+戻る。作成・取得時のOUT_OF_DATEも次のframeで再試行する。
+
+CPU検査では、GLFWサイズとsurfaceの不一致、current/max extentが0、復帰後の正サイズ、
+可変サイズのclamp、非正当なlimits、最初の形式のblit非対応、外部共有非対応、
+sRGB形式への代替、未対応の色空間を扱った。`AFV_PRESENTATION_SURFACE_PASS`を
+通常のcheckへ接続し、ビルド・baselineコンパイルとともに通過した。実RTX 3060の
+外部画像・WSIを含む従来5種類のGPU probe、配布JARとPython構文検査も通過。
+ログはローカル`build/reports/afv-validation/surface-lifecycle-build.log`と
+`surface-lifecycle-probe.log`。他GPUのcapability組合せの検査はCPUでのpolicy検査であり、
+未所有GPUの実機確認とは区別する。
+
+専用クライアントに`--window-cycle`を追加した。実window managerへ最小化を要求し、
+実iconified状態を検出した後、20 client tickにわたりAFVのVulkan表示回数が増えない
+ことを確認する。復帰とVSyncの切替・復元の各段階で60 tick／60 frame以上の描画、
+同じEGL context、非黒の画像と実Iris pipelineを要求する。window managerがない場合は
+試験失敗とし、最小化を模擬して合格にはしない。launcherにも成功markerを必須にした。
+
+実運用packの独立コピー（元204 MOD、NeoForge 21.1.251、Iris 1.8.14-beta.1、
+Sodium 0.8.13）と指定Complementaryを、専用Xephyr :97＋Metacity（compositing無効）で
+起動した。AUTO→Vulkanを確認し、Irisの無効化／再有効化／shader-only reload、
+2回のresize、リソース再読込を通過。実iconify中に20 tick処理でき、Vulkan表示回数が
+増えないことを確認した。復帰後とVSync false→true→falseの各段階で実Iris pipelineと
+非黒画像、Vulkan表示再開、同じEGL contextを確認し、`AFV_WINDOW_CYCLE_PASS`を通過。
+実機の最小化はiconified分岐を検証し、surface extentが0になる条件は上記CPU検査で
+扱った。この区別を保ち、全window systemで0 extentを実測したとはしない。
+
+最終的に4582回の実Vulkan表示、4578回の最終default出力のVulkan画像照合、
+切断・タイトル復帰・clientとlauncherの終了コード0を確認した。FPSは測定していない。
+pack由来の既知のproducer GL警告は残る。証跡はローカル
+`build/reports/afv-validation/dtfuel-surface-lifecycle-*`に保存した。
+元のmodpackと提供shaderは変更せず、第三者のバイナリーは公開しない。

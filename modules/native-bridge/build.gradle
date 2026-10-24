@@ -20,3 +20,9 @@ tasks.named('run', JavaExec) {
     environment 'GALLIUM_DRIVER', 'zink'
     environment '__EGL_VENDOR_LIBRARY_FILENAMES', providers.gradleProperty('mesaEglVendor').getOrElse('/usr/share/glvnd/egl_vendor.d/50_mesa.json')
 }
+tasks.register('verifyPresentationSurface', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.bridge.PresentationSurfaceChecks'
+}
+tasks.named('check') { dependsOn 'verifyPresentationSurface' }
