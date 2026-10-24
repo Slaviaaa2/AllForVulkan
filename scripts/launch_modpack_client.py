@@ -47,6 +47,8 @@ def expand(items, values):
 
 
 def launch(args):
+    if args.iris_cycle and not (args.smoke and args.require_iris):
+        raise ValueError('--iris-cycle requires --smoke --require-iris')
     game, install = args.instance.resolve(), args.install.resolve()
     manifest_file = game / '.afv-validation-source.json'
     manifest = json.loads(manifest_file.read_text())
@@ -160,6 +162,8 @@ def launch(args):
     command += [f'-Dafv.benchmarkWarmupTicks={args.warmup_ticks}']
     if args.require_iris:
         command += ['-Dafv.smokeIris=true']
+    if args.iris_cycle:
+        command += ['-Dafv.smokeIrisCycle=true']
     if args.scene:
         command += ['-Dafv.smokeScene=true']
     if args.final_output_probe:
@@ -202,6 +206,7 @@ def launch(args):
               'uncapped': args.uncapped, 'requireIris': args.require_iris, 'validationScene': args.scene}
     record['debugGlErrors'] = args.debug_gl
     record['finalOutputProbe'] = args.final_output_probe
+    record['irisCycle'] = args.iris_cycle
     record['requestedBackend'] = args.backend or ('VULKAN' if args.zink_client else 'OPENGL' if args.zink else 'saved setting')
     record['x11NoModifiers'] = args.x11_no_modifiers
     if shader_source:
@@ -231,6 +236,8 @@ def launch(args):
     passed = passed and 'Caught error loading resourcepacks' not in text and 'AFV_SMOKE_FAIL' not in text
     if args.zink_client:
         passed = passed and 'AFV_ZINK_CLIENT_PRESENT_PASS' in text
+    if args.iris_cycle:
+        passed = passed and 'AFV_IRIS_CYCLE_PASS' in text
     print(('AFV_PRODUCTION_PASS' if passed else 'AFV_PRODUCTION_FAIL') + f': exit={code} log={log}', flush=True)
     return 0 if passed else 1
 
@@ -249,6 +256,7 @@ if __name__ == '__main__':
     parser.add_argument('--warmup-ticks', type=int, default=900)
     parser.add_argument('--uncapped', action='store_true', help='Disable VSync and the frame cap in this private smoke client')
     parser.add_argument('--require-iris', action='store_true')
+    parser.add_argument('--iris-cycle', action='store_true', help='Disable/re-enable/reload real Iris shaders with an additional resize in the same world')
     parser.add_argument('--scene', action='store_true', help='Build a shader validation scene in the new smoke world')
     parser.add_argument('--final-output-probe', action='store_true', help='Verify a last default-framebuffer draw reaches the Vulkan shared image')
     parser.add_argument('--debug-gl', action='store_true', help='Log bounded synchronous GL errors for client-bridge diagnosis')

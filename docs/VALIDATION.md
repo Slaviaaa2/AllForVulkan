@@ -427,3 +427,33 @@ legacy APIによる全index上書き、入れ子scope、例外終了、2回のdr
 pack由来の既知のproducer GL警告は引き続き残る。証跡はローカル
 `build/reports/afv-validation/dtfuel-indexed-state-*`。全shader packや全MOD機能の
 完全互換を証明するものではなく、今回はこの状態保持の不具合と回帰を扱った。
+
+## Irisの有効・無効切替とpipeline再生成（2026-10-24）
+
+同じワールド内のIris再構築を継続的に検査できるよう、明示的な`--iris-cycle`を
+専用クライアントのハーネスへ追加した。通常起動では実行しない。Irisの公開
+`IrisApiConfig.setShadersEnabledAndApply`を使い、実際の保存・再構築を通す。
+その後のshader-only reloadは実`Iris.reload`を呼ぶ。
+
+- シェーダーを無効化し、同じワールドで854×480→960×540へ再リサイズする。
+- 60 client tickと60以上の実表示frameを待ち、実`VanillaRenderingPipeline`、
+  pack無効、stored errorなし、非黒の画像を確認する。
+- 同じpackを再有効化し、再び実描画を待つ。実`IrisRenderingPipeline`が初回の
+  objectとは異なり、選択packが維持され、stored errorがないことを確認する。
+- shader-only reload後も別の実pipelineと非黒画像を確認する。成功markerは
+  `AFV_IRIS_CYCLE_PASS`で、launcherもこのmarkerを必須にする。
+- 続けて既存のリソースpack再読込・切断・タイトル復帰まで確認する。
+
+DTFuelの独立コピー、元の204 MOD、指定Complementary ZIPと9設定値を使い、
+AUTOからAFV所有のVulkan表示へ入る同じ構成で実施した。Iris 1.8.14-beta.1 /
+Sodium 0.8.13 / NeoForge 21.1.251 / RTX 3060 / 専用Xephyr環境。
+シェーダー切替・再リサイズ・再有効化・shader-only reloadは通過し、
+提供ZIPの同一性と9設定値の保持も確認した。FPSは測定していない。
+
+最後のリソース再読込後も実Iris pipelineが有効で、4333回の実Vulkan表示と
+4329回の最終default出力のVulkan画像照合、切断・タイトル復帰・clientとlauncherの
+終了コード0を確認した。今回の再構築シーケンスでは追加のrenderer不具合は再現しなかった。
+pack由来の既知のproducer GL警告は残り、他のpack・全設定・全MOD機能の完全互換を
+証明するものではない。ビルド、baselineのコンパイル、配布JAR構造とPython構文の
+機械検査も通過。証跡はローカル`build/reports/afv-validation/`の
+`iris-cycle-build.log`と`dtfuel-iris-cycle-*`。元のmodpack・提供shaderは変更していない。

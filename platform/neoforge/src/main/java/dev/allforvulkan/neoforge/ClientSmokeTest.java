@@ -32,8 +32,11 @@ public final class ClientSmokeTest {
     private static long drawBaseline;
     private static CompletableFuture<Void> reload;
     private static CompletableFuture<Void> scene;
+    private static dev.allforvulkan.validation.IrisLifecycle irisCycle;
+    private static long renderedFrames;
 
     @SubscribeEvent public static void frame(net.neoforged.neoforge.client.event.RenderFrameEvent.Post event) {
+        if (ENABLED) renderedFrames++;
         if (ENABLED && !BackendBootstrap.vulkan()) dev.allforvulkan.validation.GlDebugTrace.installIfRequested();
         if (ENABLED) dev.allforvulkan.validation.FrameBenchmark.frame();
     }
@@ -65,6 +68,15 @@ public final class ClientSmokeTest {
                     new WorldOptions(123456789L, false, false),
                     registries -> registries.registryOrThrow(Registries.WORLD_PRESET)
                             .getHolderOrThrow(WorldPresets.FLAT).value().createWorldDimensions(), client.screen);
+            return;
+        }
+        if (phase == 11 && client.level != null && client.player != null && client.screen == null) {
+            if (!irisCycle.tick(ticks, cycleFrames(), client.getMainRenderTarget().getColorTextureId())) return;
+            if (client.getWindow().getWidth() != resizeWidth || client.getWindow().getHeight() != resizeHeight)
+                throw new IllegalStateException("AFV_SMOKE_FAIL: shader-off resize did not reach expected framebuffer size");
+            stableTicks = 0;
+            reload = client.reloadResourcePacks();
+            phase = 3;
             return;
         }
         if (phase >= 1 && phase <= 3 && client.level != null && client.player != null && client.screen == null) {
@@ -130,6 +142,15 @@ public final class ClientSmokeTest {
                 if (client.getWindow().getWidth() != resizeWidth || client.getWindow().getHeight() != resizeHeight)
                     throw new IllegalStateException("AFV_SMOKE_FAIL: resize did not reach expected framebuffer size");
                 Initializer.LOGGER.info("AFV_SMOKE_RESIZE: framebuffer {}x{}", resizeWidth, resizeHeight);
+                if (Boolean.getBoolean("afv.smokeIrisCycle")) {
+                    if (!Boolean.getBoolean("afv.smokeIris")) throw new IllegalStateException("Iris cycle requires Iris validation");
+                    resizeWidth = resizeWidth == 960 ? 854 : 960;
+                    resizeHeight = resizeHeight == 540 ? 480 : 540;
+                    irisCycle = new dev.allforvulkan.validation.IrisLifecycle(ticks, cycleFrames(),
+                            () -> GLFW.glfwSetWindowSize(client.getWindow().getWindow(), resizeWidth, resizeHeight));
+                    phase = 11;
+                    return;
+                }
                 reload = client.reloadResourcePacks();
                 phase = 3;
             } else if (reload.isDone()) {
@@ -145,6 +166,10 @@ public final class ClientSmokeTest {
             Initializer.LOGGER.info("AFV_SMOKE_SETTINGS_PASS: config screen remained active");
             pass(client);
         }
+    }
+
+    private static long cycleFrames() {
+        return BackendBootstrap.zinkClient() ? ZinkClientSession.presentedFrames() : renderedFrames;
     }
 
     private static void verifyAtlas(Minecraft client) {

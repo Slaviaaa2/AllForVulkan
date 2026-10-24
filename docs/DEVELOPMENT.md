@@ -105,6 +105,16 @@ framebuffer and verifies its pixels in AFV's actual Vulkan shared image after
 the slot fence. No main texture is changed. `--backend AUTO --zink-client
 --require-iris` checks automatic selection without the vanilla force flag.
 
+Add `--iris-cycle` to the private-client command to disable shaders through
+Iris's public config API, resize once more while shaders are off, re-enable the
+same pack, and call Iris's shader-only reload before the resource-pack reload.
+Each mode must render at least 60 frames and remain active for 60 client ticks.
+The test checks a real vanilla pipeline while disabled, distinct real Iris
+pipelines after enabling/reloading, unchanged selected pack and nonblack color
+samples. The production launcher requires `AFV_IRIS_CYCLE_PASS`; it cannot pass
+merely because the client exits cleanly. This explicit diagnostic requires
+`--smoke --require-iris` and changes only the verified private instance.
+
 For a matched Zink/EGL presentation comparison, replace `--zink-client` with
 `--zink --x11-no-modifiers` when that fallback is required by the nested X server.
 Keep scene, shader options, warmup, resolution and game settings identical. This
