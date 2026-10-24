@@ -191,10 +191,9 @@ public final class SharedImage implements AutoCloseable {
         glViewport(0, 0, width, height);
         return framebuffer;
     }
-    /** Copy destination only: a blit needs no viewport or read-framebuffer change. */
+    /** Wait and return the destination for a named blit, without binding any FBO. */
     public int beginGlCopy() {
         beginGlRead();
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
         return framebuffer;
     }
     public void endGlRead() { endGlWrite(); }

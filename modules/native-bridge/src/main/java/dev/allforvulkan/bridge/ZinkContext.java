@@ -10,6 +10,8 @@ import static org.lwjgl.egl.EGL12.*;
 import static org.lwjgl.egl.EGL14.*;
 import static org.lwjgl.egl.EGL15.*;
 import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.opengl.GL30.*;
+import static org.lwjgl.opengl.GL45.glCheckNamedFramebufferStatus;
 
 /** An independent, thread-confined Mesa desktop GL context on a hidden pbuffer. */
 public final class ZinkContext implements AutoCloseable {
@@ -17,6 +19,7 @@ public final class ZinkContext implements AutoCloseable {
     private long display, config, surface, context;
     private boolean glCreated, closed;
     private int width, height;
+    private int defaultReadBuffer;
 
     public ZinkContext(int width, int height) {
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Invalid pbuffer size");
@@ -52,6 +55,8 @@ public final class ZinkContext implements AutoCloseable {
             GL.create(org.lwjgl.egl.EGL10::eglGetProcAddress);
             glCreated = true;
             GL.createCapabilities();
+            defaultReadBuffer = glGetBoolean(GL_DOUBLEBUFFER) ? GL_BACK : GL_FRONT;
+            validateDefaultFramebuffer();
             String renderer = glGetString(GL_RENDERER);
             if (renderer == null || !renderer.toLowerCase(java.util.Locale.ROOT).contains("zink"))
                 throw new IllegalStateException("Expected real Zink, got " + renderer);
@@ -63,6 +68,8 @@ public final class ZinkContext implements AutoCloseable {
 
     public int width() { return width; }
     public int height() { return height; }
+    /** The same EGL config is retained for every drawable in this context. */
+    public int defaultReadBuffer() { return defaultReadBuffer; }
     /** Replace only the drawable, retaining the context, objects and driver state.
      * Call before drawing a new game frame, never after its default-buffer output. */
     public void resize(int width, int height) {
@@ -87,9 +94,14 @@ public final class ZinkContext implements AutoCloseable {
                     this.width = width; this.height = height;
                     adopted = true;
                     require(eglDestroySurface(display, previous), "destroy previous pbuffer");
+                    validateDefaultFramebuffer();
                 }
             } finally { if (!adopted) eglDestroySurface(display, next); }
         }
+    }
+    private static void validateDefaultFramebuffer() {
+        if (glCheckNamedFramebufferStatus(0, GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            throw new IllegalStateException("Zink default framebuffer is incomplete");
     }
     public void assertCurrentThread() {
         if (closed || Thread.currentThread() != owner) throw new IllegalStateException("Zink context is closed or used from another thread");

@@ -77,11 +77,16 @@ or compute capability. An unsuitable native GPU yields an unsuitable result so
 device enumeration can continue. The GL client needs only graphics/present queues
 on AFV's device, retaining the same Zink GPU UUID constraint.
 
-Steady-state presentation uses a narrow `GlBlitScope`: it saves only read/draw
-framebuffer bindings, the default read buffer, scissor enable at index 0 and
-framebuffer sRGB. It never changes viewport, masks, blending, shaders or texture
-bindings. A copy destination therefore binds only the draw framebuffer and does
-not set a viewport. The broader state scope is retained for shared-image
+Steady-state presentation uses a named framebuffer blit and a narrow
+`GlBlitScope`. The draw framebuffer binding is never changed. The read binding
+is changed temporarily only if needed to query the default read buffer (OpenGL
+has no named query for that state), and is restored before the actual copy.
+The default read selector is changed only if necessary. Scissor index 0 and
+framebuffer sRGB are temporarily disabled when enabled; viewport, masks,
+blending, shaders and texture bindings are untouched. The default front/back
+choice is cached for the context's fixed EGL config, and default completeness
+is checked at drawable creation/replacement, rather than every frame.
+The broader state scope is retained for shared-image
 creation, EGL drawable replacement and rendering diagnostics; it preserves all
 indexed color masks/blend enables and fractional viewport/scissor state.
 Restoring index zero with legacy APIs would overwrite other indices. The

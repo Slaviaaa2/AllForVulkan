@@ -35,6 +35,7 @@ final class DefaultFramebufferProbe {
                     expectPixel(0, 0, 0, 255, 0, stack);
                     glBindFramebuffer(GL_FRAMEBUFFER, 0);
                     int output = glGetBoolean(GL_DOUBLEBUFFER) ? GL_BACK : GL_FRONT;
+                    if (context.defaultReadBuffer() != output) throw new IllegalStateException("Cached default read buffer changed across resize");
                     glDrawBuffer(output); glReadBuffer(output);
                     int depth = glGetFramebufferAttachmentParameteri(GL_FRAMEBUFFER, GL_DEPTH, GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE);
                     int stencil = glGetFramebufferAttachmentParameteri(GL_FRAMEBUFFER, GL_STENCIL, GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE);

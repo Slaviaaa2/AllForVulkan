@@ -14,6 +14,7 @@ import org.lwjgl.vulkan.*;
 import static dev.allforvulkan.bridge.SharedImage.check;
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL30.*;
+import static org.lwjgl.opengl.GL45.glBlitNamedFramebuffer;
 import static org.lwjgl.vulkan.VK10.*;
 import static org.lwjgl.vulkan.KHRSurface.*;
 import static org.lwjgl.vulkan.KHRSwapchain.*;
@@ -97,11 +98,9 @@ public final class ZinkPresenter implements AutoCloseable {
             boolean checkOutput = outputChecks != null && (presented & 1) == 0
                     && width == context.width() && height == context.height() && width >= 32 && height >= 32;
             if (checkOutput) drawFinalMarker();
-            try (var state = new GlBlitScope()) {
-                shared.beginGlCopy();
-                if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-                    throw new IllegalStateException("Client default framebuffer is incomplete");
-                glBlitFramebuffer(0, 0, context.width(), context.height(), 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            try (var state = new GlBlitScope(context.defaultReadBuffer())) {
+                int destination = shared.beginGlCopy();
+                glBlitNamedFramebuffer(0, destination, 0, 0, context.width(), context.height(), 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
                 int blitError = glGetError();
                 if (blitError != GL_NO_ERROR) throw new IllegalStateException("Client color transfer: GL error 0x" + Integer.toHexString(blitError));
                 shared.endGlWrite();

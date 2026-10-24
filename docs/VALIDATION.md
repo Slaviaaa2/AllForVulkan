@@ -700,3 +700,40 @@ Gradle build／baselineコンパイル、配布JAR検査と差分空白検査も
 `e1860248e0d595fd17e13212573a00cd0099f0cb5438939768f2e61e675147e0`。
 ローカル証跡は`queue-selection-build.log`、`queue-selection-probe.log`、
 `native-queue-selection-client.log`。元pack・既存save・提供shaderは変更していない。
+
+## 描画先をbindしないGL転送（2026-10-24）
+
+通常のdefault→共有画像コピーを`glBlitNamedFramebuffer`に変更した。転送先FBOを
+draw targetへbindせず、MODのdraw bindingはコピー処理中も変更しない。
+`GL_READ_BUFFER`にはnamed queryがないため、read targetが既に0ならそのまま照会し、
+別FBOなら照会の間だけ0へ切り替えて即時復元する。default read selectorも、必要な
+場合だけnamed APIで変更・復元する。変更前に毎frame5回あったFBO bind呼出しは、
+read targetが0なら0回、別FBOなら2回になった。
+
+defaultのfront／back選択はcontext作成時に1度調べ、同じEGL configを使うdrawableの
+生存期間中は保持する。default framebufferの完全性確認は作成・resize時に移し、
+毎frameの確認をなくした。scopeの状態照会も6回から4回へ削減した。
+コピー範囲・色変換・向き・GPU ownership／semaphore・Vulkan command再利用は維持する。
+
+[KhronosのDSA仕様](https://raw.githubusercontent.com/KhronosGroup/OpenGL-Registry/main/extensions/ARB/ARB_direct_state_access.txt)
+に従い、framebuffer 0をnamed blit／read selector／completeness queryに使用する。
+起動前の実GPU検査は、producer read targetが0／別FBOの両方、default read selectorが
+`GL_NONE`／使用可能bufferの両方、通常・例外時の復元、転送中のread／draw binding不変、
+正確なRGBAと後続MRTの画素一致を確認した。resize後もキャッシュしたfront／back選択が
+driverの実際の値と一致した。Gradle build、baselineコンパイル、配布JAR、GL状態・
+drawable・compute・外部画像同期・hidden WSI probeが通過した。
+
+上記のGL状態処理・Vulkan command再利用・queue選択をすべて含む同じ配布JARで、
+DTFuelの独立コピー（元204 MODを起動前照合、NeoForge 21.1.251、Iris 1.8.14-beta.1、
+Sodium 0.8.13）と指定Complementaryを1回起動した。AUTO→実Vulkan表示、実Iris
+pipeline有効、新規world、resize、resource reload、disconnect、タイトル復帰と
+client／launcherの終了コード0を確認した。4278回のVulkan表示、4266回のcommand
+再利用（記録は2 generation計24個）、2138回の最終出力markerのVulkan画像照合が通過した。
+配布JARに埋めた起動前helperからも新しいnamed blit検査の成功markerを確認した。
+元shader ZIPのSHA-256と9つの設定値はprivate copyと一致した。FPS測定やdimension／
+shader切替cycleの反復は行っていない。
+
+ローカル証跡は`named-blit-{build,probe}.log`、`dtfuel-named-blit-{launch,client,preflight}.log`、
+`dtfuel-named-blit-result.json`。元pack・既存save・提供shaderは変更していない。
+配布JARのSHA-256は
+`85dbb429ae925eeb586539a27fcc867a004d4fe6c05342a01797c92cf21d81cb`。
