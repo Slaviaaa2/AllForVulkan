@@ -51,7 +51,7 @@ public class Device {
         this.availableFeatures = VkPhysicalDeviceFeatures2.calloc();
         this.availableFeatures.sType$Default();
 
-        this.availableFeatures11 = VkPhysicalDeviceVulkan11Features.malloc();
+        this.availableFeatures11 = VkPhysicalDeviceVulkan11Features.calloc();
         this.availableFeatures11.sType$Default();
         this.availableFeatures.pNext(this.availableFeatures11);
 

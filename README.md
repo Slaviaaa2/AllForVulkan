@@ -17,9 +17,11 @@ VulkanMod由来のVulkan描画本体に、OpenGL互換機能とMOD連携を組�
 
 VulkanModタグ `0.5.5`（`f23855f2675f1efb52fb8aa2c26bc23dccfb5543`）からNeoForge **21.1.228** へ移植し、タイトル・ワールド・地形／流体・リサイズ・リソース再読込・切断を実機で検証しています。NeoForgeでは効かないJOMLのMixin依存を廃し、投影行列をVulkanへ渡す境界で深度範囲を変換しました。Linux / RTX 3060ではホットバー・照準・通知・手元の表示もクライアント範囲の画像で確認しています。描画全体の画素一致や、全GPUでの動作確認を意味しません。
 
-MOD一覧のAFV設定から **「自動」「Vulkan」「OpenGL」** を選択できます。変更は再起動後に適用します。起動前にVulkan 1.2・必要な機能／拡張・論理デバイス作成を調べ、使えない場合はAFVの描画Mixinを適用せずOpenGLで起動します。起動途中の異常終了時も次回はOpenGLで復旧します。Iris/Sodium/Embeddiumがある場合も現在はOpenGLを選びます。これは**Vulkan上でのIris対応を意味しません**。ドライバー内部のクラッシュや全環境での無事故を保証するものではありません。
+MOD一覧のAFV設定から **「自動」「Vulkan」「OpenGL」** を選択できます。変更は再起動後に適用します。起動前にVulkan 1.2・必要な機能／拡張・論理デバイス作成を調べ、使えない場合はAFVの描画Mixinを適用せずOpenGLで起動します。起動途中の異常終了時も次回はOpenGLで復旧します。Iris/Sodium/Embeddiumがある場合、「自動」はOpenGLを選び、「Vulkan」は下記のLinux向けZinkクライアント経路を試します。
 
-Linux向け実験機能 `-Dafv.zinkInterop=true` は、ワールドの色と深度をGPU共有画像でZinkへ渡し、GLSL後処理からVulkanへ戻します。処理位置はワールド描画後・手元の深度クリアとGUI描画の前です。`-Dafv.zinkEffect=invert` / `depth` で診断用の色反転／深度表示を選べます。CPU assetのテクスチャIDも実GL名で共有します。通常は無効です。汎用GLのbuffer／FBO／MRT・GPU更新資源の同期・Irisの地形／影／複数pass統合は開発中です。AFVなしのIris＋Sodium比較環境では実IrisRenderingPipelineの起動と再読込を確認していますが、**AFVのVulkan描画とIrisを同時に動かす実装は未完了**です。
+**Zinkクライアント経路**は、Minecraft・Iris・Sodiumの実OpenGL呼び出しをMesa/Zinkで実行し、最終画像を外部メモリと双方向GPUセマフォでAFV所有のVulkanデバイスへ渡して表示します。画面全体のCPU転送は行いません。GL資源・MRT・影・シェーダーpassは既存のIris/Sodiumと実GLドライバーが管理します。この経路ではAFV独自の地形レンダラーを使用しません。Linuxとインストール済みMesa EGL/Zinkが必要です。別プロセスで実GL 4.6・compute・画像共有を検査し、検査の失敗・異常終了・タイムアウト時はOpenGLを選びます。ドライバー内部のクラッシュや全環境での無事故を保証するものではありません。
+
+Linux向け実験機能 `-Dafv.zinkInterop=true` は別の経路で、AFV独自の地形描画からワールドの色と深度をGPU共有画像でZinkへ渡し、GLSL後処理からVulkanへ戻します。処理位置はワールド描画後・手元の深度クリアとGUI描画の前です。`-Dafv.zinkEffect=invert` / `depth` で診断用の色反転／深度表示を選べます。こちらの経路にIrisの地形・影・複数passを統合する機能は開発中です。**Iris全機能・全シェーダーパック・全GPUの完全互換は未確認**です。
 
 - [ビルド・起動方法と現状](docs/DEVELOPMENT.md)
 - [検証記録](docs/VALIDATION.md)

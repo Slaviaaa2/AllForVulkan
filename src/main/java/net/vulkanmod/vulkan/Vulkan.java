@@ -24,7 +24,7 @@ import java.util.*;
 import static java.util.stream.Collectors.toSet;
 import static net.vulkanmod.vulkan.queue.Queue.getQueueFamilies;
 import static net.vulkanmod.vulkan.util.VUtil.asPointerBuffer;
-import static org.lwjgl.glfw.GLFWVulkan.glfwCreateWindowSurface;
+import static org.lwjgl.glfw.GLFWVulkan.nglfwCreateWindowSurface;
 import static org.lwjgl.glfw.GLFWVulkan.glfwGetRequiredInstanceExtensions;
 import static org.lwjgl.system.MemoryStack.*;
 import static org.lwjgl.system.MemoryUtil.NULL;
@@ -138,6 +138,7 @@ public class Vulkan {
     private static StagingBuffer[] stagingBuffers;
 
     public static boolean use24BitsDepthFormat = true;
+    private static boolean presentationOnly;
     private static int DEFAULT_DEPTH_FORMAT = 0;
 
     public static void initVulkan(long window) {
@@ -154,6 +155,29 @@ public class Vulkan {
 
         setupDepthFormat();
         Renderer.initRenderer();
+    }
+
+    /** GL clients retain their own renderer; AFV owns the Vulkan device and WSI. */
+    public static void initPresentation(long window, byte[] deviceUuid) {
+        presentationOnly = true;
+        REQUIRED_EXTENSION.add(org.lwjgl.vulkan.KHRExternalMemoryFd.VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+        REQUIRED_EXTENSION.add(org.lwjgl.vulkan.KHRExternalSemaphoreFd.VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
+        createInstance();
+        setupDebugMessenger();
+        createSurface(window);
+        DeviceManager.init(instance, deviceUuid);
+        createCommandPool();
+    }
+
+    public static boolean isPresentationOnly() { return presentationOnly; }
+
+    public static void cleanUpPresentation() {
+        waitIdle();
+        vkDestroyCommandPool(DeviceManager.vkDevice, commandPool, null);
+        DeviceManager.destroy();
+        if (debugMessenger != 0) destroyDebugUtilsMessengerEXT(instance, debugMessenger, null);
+        KHRSurface.vkDestroySurfaceKHR(instance, surface, null);
+        vkDestroyInstance(instance, null);
     }
 
     static void createStagingBuffers() {
@@ -318,7 +342,9 @@ public class Vulkan {
 
             LongBuffer pSurface = stack.longs(VK_NULL_HANDLE);
 
-            checkResult(glfwCreateWindowSurface(instance, window, null, pSurface),
+            // GLFW is in FML's parent layer, while the bundled Vulkan binding
+            // lives in the game layer. Pass native handles across that boundary.
+            checkResult(nglfwCreateWindowSurface(instance.address(), window, NULL, org.lwjgl.system.MemoryUtil.memAddress(pSurface)),
                     "Failed to create window surface");
 
             surface = pSurface.get(0);

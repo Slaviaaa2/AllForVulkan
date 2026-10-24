@@ -142,6 +142,9 @@ def launch(args):
         options = game / 'options.txt'
         lines = options.read_text().splitlines() if options.exists() else []
         lines = [line for line in lines if not line.startswith(('onboardAccessibility:', 'pauseOnLostFocus:'))]
+        if args.uncapped:
+            lines = [line for line in lines if not line.startswith(('enableVsync:', 'maxFps:'))]
+            lines += ['enableVsync:false', 'maxFps:260']
         options.write_text('\n'.join(lines + ['onboardAccessibility:false', 'pauseOnLostFocus:false']) + '\n')
     values = dict(auth_player_name='AFV_QA', version_name=profile_name,
                   game_directory=game, assets_root=assets, assets_index_name=index,
@@ -154,8 +157,13 @@ def launch(args):
     if args.smoke:
         command += ['-Dafv.smokeTest=true', '-Dafv.smokeWorld=true']
     command += [f'-Dafv.smokeInspectTicks={args.inspect_ticks}', f'-Dafv.benchmarkTicks={args.benchmark_ticks}']
+    command += [f'-Dafv.benchmarkWarmupTicks={args.warmup_ticks}']
     if args.require_iris:
         command += ['-Dafv.smokeIris=true']
+    if args.scene:
+        command += ['-Dafv.smokeScene=true']
+    if args.debug_gl:
+        command += ['-Dafv.debugGlClient=true']
     environment = os.environ.copy()
     if args.local_xim:
         environment['XMODIFIERS'] = '@im=none'
@@ -164,6 +172,13 @@ def launch(args):
         command += ['-Dafv.backend=OPENGL', '-Dafv.validationEgl=true', '-Dafv.expectZink=true']
         environment.update(MESA_LOADER_DRIVER_OVERRIDE='zink', GALLIUM_DRIVER='zink',
                            __EGL_VENDOR_LIBRARY_FILENAMES=args.mesa_egl_vendor)
+    if args.zink_client:
+        command += ['-Dafv.backend=VULKAN', '-Dafv.expectZinkClient=true', '-Dafv.expectZink=true',
+                    '-Dafv.mesaEglVendor=' + args.mesa_egl_vendor]
+        # With Iris installed, exercise the same selection as the Vulkan setting.
+        # The force flag remains useful for an otherwise vanilla GL client.
+        if not args.require_iris:
+            command += ['-Dafv.zinkClient=true']
     if args.x11_no_modifiers:
         if not args.zink:
             raise ValueError('--x11-no-modifiers requires --zink')
@@ -174,8 +189,10 @@ def launch(args):
     record = {'instance': str(game), 'packVersion': manifest['pack_version'],
               'neoforge': neoforge, 'minecraft': minecraft, 'sourceMods': manifest['jar_count'],
               'afvSha256': hashlib.sha256(jar.read_bytes()).hexdigest(),
-              'route': 'OpenGL via Zink comparison' if args.zink else 'Auto; see AFV_BACKEND',
-              'benchmarkTicks': args.benchmark_ticks, 'requireIris': args.require_iris}
+              'route': 'AFV Vulkan presentation with Zink GL client' if args.zink_client else 'OpenGL via Zink comparison' if args.zink else 'Auto; see AFV_BACKEND',
+              'benchmarkTicks': args.benchmark_ticks, 'warmupTicks': args.warmup_ticks,
+              'uncapped': args.uncapped, 'requireIris': args.require_iris, 'validationScene': args.scene}
+    record['debugGlErrors'] = args.debug_gl
     record['x11NoModifiers'] = args.x11_no_modifiers
     if shader_source:
         record['shaderPack'] = fixture.name
@@ -202,6 +219,8 @@ def launch(args):
     text = log.read_text(errors='replace')
     passed = code == 0 and (not args.smoke or 'AFV_SMOKE_PASS' in text)
     passed = passed and 'Caught error loading resourcepacks' not in text and 'AFV_SMOKE_FAIL' not in text
+    if args.zink_client:
+        passed = passed and 'AFV_ZINK_CLIENT_PRESENT_PASS' in text
     print(('AFV_PRODUCTION_PASS' if passed else 'AFV_PRODUCTION_FAIL') + f': exit={code} log={log}', flush=True)
     return 0 if passed else 1
 
@@ -217,12 +236,18 @@ if __name__ == '__main__':
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--inspect-ticks', type=int, default=0)
     parser.add_argument('--benchmark-ticks', type=int, default=0)
+    parser.add_argument('--warmup-ticks', type=int, default=900)
+    parser.add_argument('--uncapped', action='store_true', help='Disable VSync and the frame cap in this private smoke client')
     parser.add_argument('--require-iris', action='store_true')
+    parser.add_argument('--scene', action='store_true', help='Build a shader validation scene in the new smoke world')
+    parser.add_argument('--debug-gl', action='store_true', help='Log bounded synchronous GL errors for client-bridge diagnosis')
     shader = parser.add_mutually_exclusive_group()
     shader.add_argument('--shader-fixture', type=Path)
     shader.add_argument('--shader-pack', type=Path, help='Shader directory or ZIP; adjacent ZIP.txt options are copied too')
     parser.add_argument('--local-xim', action='store_true')
-    parser.add_argument('--zink', action='store_true', help='OpenGL comparison through real Zink, AFV native renderer disabled')
+    renderer = parser.add_mutually_exclusive_group()
+    renderer.add_argument('--zink', action='store_true', help='OpenGL comparison through real Zink, AFV native renderer disabled')
+    renderer.add_argument('--zink-client', action='store_true', help='Zink GL frontend with AFV-owned Vulkan presentation')
     parser.add_argument('--x11-no-modifiers', action='store_true', help='Zink presentation fallback for nested X11 servers without explicit modifiers')
     parser.add_argument('--mesa-egl-vendor', default='/usr/share/glvnd/egl_vendor.d/50_mesa.json')
     raise SystemExit(launch(parser.parse_args()))

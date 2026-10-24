@@ -1,0 +1,236 @@
+package net.vulkanmod.vulkan.interop;
+
+import dev.allforvulkan.bridge.GlStateScope;
+import dev.allforvulkan.bridge.SharedImage;
+import dev.allforvulkan.bridge.ZinkContext;
+import net.vulkanmod.Initializer;
+import net.vulkanmod.vulkan.Vulkan;
+import net.vulkanmod.vulkan.device.DeviceManager;
+import net.vulkanmod.vulkan.queue.Queue;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.vulkan.*;
+import static dev.allforvulkan.bridge.SharedImage.check;
+import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.opengl.GL30.*;
+import static org.lwjgl.vulkan.VK10.*;
+import static org.lwjgl.vulkan.KHRSurface.*;
+import static org.lwjgl.vulkan.KHRSwapchain.*;
+
+/** Real GL producer -> exported GPU image -> AFV Vulkan WSI. No frame readback.
+ * Binary external semaphores transfer image ownership in both directions. */
+public final class ZinkPresenter implements AutoCloseable {
+    private static final int FRAMES = 2;
+    private final ZinkContext context;
+    private final long window;
+    private final VkDevice device = Vulkan.getVkDevice();
+    private final int family = Queue.getQueueFamilies().graphicsFamily;
+    private final SharedImage[] frames = new SharedImage[FRAMES];
+    private final VkCommandBuffer[] commands = new VkCommandBuffer[FRAMES];
+    private final long[] available = new long[FRAMES], fences = new long[FRAMES];
+    private long swapchain;
+    private long[] images, presentReady;
+    private int width, height, frame, readFramebuffer;
+    private int windowWidth, windowHeight;
+    private boolean vsync = true, dirty = true, closed;
+    private long presented;
+    private int producerErrors;
+
+    public ZinkPresenter(ZinkContext context, long window) {
+        this.context = context;
+        this.window = window;
+        try (var stack = MemoryStack.stackPush()) {
+            var pointers = stack.mallocPointer(FRAMES);
+            check(vkAllocateCommandBuffers(device, VkCommandBufferAllocateInfo.calloc(stack).sType$Default()
+                    .commandPool(Vulkan.getCommandPool()).level(VK_COMMAND_BUFFER_LEVEL_PRIMARY).commandBufferCount(FRAMES), pointers), "allocate presentation commands");
+            var handle = stack.mallocLong(1);
+            for (int i = 0; i < FRAMES; i++) {
+                commands[i] = new VkCommandBuffer(pointers.get(i), device);
+                available[i] = semaphore(stack);
+                check(vkCreateFence(device, VkFenceCreateInfo.calloc(stack).sType$Default().flags(VK_FENCE_CREATE_SIGNALED_BIT), null, handle), "presentation fence");
+                fences[i] = handle.get(0);
+            }
+            readFramebuffer = glGenFramebuffers();
+        } catch (Throwable failure) { close(); throw failure; }
+    }
+
+    public void setVsync(boolean enabled) { if (vsync != enabled) { vsync = enabled; dirty = true; } }
+    public long presentedFrames() { return presented; }
+
+    public void present(int sourceTexture) {
+        context.assertCurrentThread();
+        if (sourceTexture <= 0) return;
+        // A producer's sticky GL error must not be attributed to FD import or
+        // semaphore submission. Report it separately, with bounded logging.
+        for (int error, n = 0; n < 16 && (error = glGetError()) != GL_NO_ERROR; n++) {
+            if (++producerErrors <= 8) Initializer.LOGGER.warn("AFV_ZINK_CLIENT_PRODUCER_ERROR: GL 0x{} before presentation", Integer.toHexString(error));
+        }
+        try (var stack = MemoryStack.stackPush(); var state = new GlStateScope()) {
+            var w = stack.mallocInt(1); var h = stack.mallocInt(1);
+            org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window, w, h);
+            if (w.get(0) == 0 || h.get(0) == 0) return;
+            if (dirty || windowWidth != w.get(0) || windowHeight != h.get(0)) recreate(w.get(0), h.get(0));
+            check(vkWaitForFences(device, fences[frame], true, -1L), "wait presentation slot");
+            var index = stack.mallocInt(1);
+            int acquired = vkAcquireNextImageKHR(device, swapchain, -1L, available[frame], 0, index);
+            if (acquired == VK_ERROR_OUT_OF_DATE_KHR) { dirty = true; return; }
+            if (acquired != VK_SUBOPTIMAL_KHR) check(acquired, "acquire presentation image");
+            else dirty = true;
+            int imageIndex = index.get(0);
+            var shared = frames[frame];
+            shared.beginGlWrite();
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, readFramebuffer);
+            glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sourceTexture, 0);
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+                throw new IllegalStateException("Client color framebuffer is incomplete");
+            int sourceWidth = org.lwjgl.opengl.GL45.glGetTextureLevelParameteri(sourceTexture, 0, GL_TEXTURE_WIDTH);
+            int sourceHeight = org.lwjgl.opengl.GL45.glGetTextureLevelParameteri(sourceTexture, 0, GL_TEXTURE_HEIGHT);
+            glDisable(GL_SCISSOR_TEST); glDisable(GL_FRAMEBUFFER_SRGB);
+            glBlitFramebuffer(0, 0, sourceWidth, sourceHeight, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            int blitError = glGetError();
+            if (blitError != GL_NO_ERROR) throw new IllegalStateException("Client color transfer: GL error 0x" + Integer.toHexString(blitError));
+            shared.endGlWrite();
+
+            var command = commands[frame];
+            check(vkResetCommandBuffer(command, 0), "reset presentation command");
+            check(vkBeginCommandBuffer(command, VkCommandBufferBeginInfo.calloc(stack).sType$Default()
+                    .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)), "begin presentation command");
+            shared.acquire(command, family);
+            imageBarrier(command, images[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, stack);
+            var blit = VkImageBlit.calloc(1, stack);
+            blit.srcSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
+            blit.dstSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
+            // GL texture rows start at the bottom; Vulkan WSI rows start at the top.
+            blit.srcOffsets(0).set(0, height, 0); blit.srcOffsets(1).set(width, 0, 1);
+            blit.dstOffsets(1).set(width, height, 1);
+            vkCmdBlitImage(command, shared.image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, blit, VK_FILTER_NEAREST);
+            imageBarrier(command, images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, stack);
+            shared.release(command, family);
+            check(vkEndCommandBuffer(command), "end presentation command");
+            check(vkResetFences(device, fences[frame]), "reset presentation fence");
+            check(vkQueueSubmit(DeviceManager.getGraphicsQueue().queue(), VkSubmitInfo.calloc(stack).sType$Default()
+                    .waitSemaphoreCount(2).pWaitSemaphores(stack.longs(available[frame], shared.readyForVulkan()))
+                    .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT))
+                    .pCommandBuffers(stack.pointers(command))
+                    .pSignalSemaphores(stack.longs(presentReady[imageIndex], shared.readyForGl())), fences[frame]), "submit client Vulkan presentation");
+            int result = vkQueuePresentKHR(DeviceManager.getPresentQueue().queue(), VkPresentInfoKHR.calloc(stack).sType$Default()
+                    .pWaitSemaphores(stack.longs(presentReady[imageIndex])).swapchainCount(1)
+                    .pSwapchains(stack.longs(swapchain)).pImageIndices(index));
+            if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) dirty = true;
+            else check(result, "present client Vulkan image");
+            if (++presented == 120) Initializer.LOGGER.info("AFV_ZINK_CLIENT_PRESENT_PASS: 120 real GL -> shared GPU image -> AFV Vulkan WSI frames, {}x{}", width, height);
+            frame = (frame + 1) % FRAMES;
+        }
+    }
+
+    private void recreate(int requestedWidth, int requestedHeight) {
+        glFinish(); // Resize/teardown only; steady-state synchronization uses GPU semaphores.
+        check(vkDeviceWaitIdle(device), "drain presentation before resize");
+        destroySwapchain();
+        try (var stack = MemoryStack.stackPush()) {
+            var surface = DeviceManager.querySurfaceProperties(DeviceManager.physicalDevice, stack);
+            var caps = surface.capabilities;
+            if ((caps.supportedUsageFlags() & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0)
+                throw new IllegalStateException("Surface cannot receive the shared client image");
+            int format = 0, colorSpace = 0;
+            for (var candidate : surface.formats) {
+                if (candidate.colorSpace() != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) continue;
+                int f = candidate.format();
+                if (f == VK_FORMAT_UNDEFINED) { format = VK_FORMAT_B8G8R8A8_UNORM; colorSpace = candidate.colorSpace(); break; }
+                if (f == VK_FORMAT_B8G8R8A8_UNORM || f == VK_FORMAT_R8G8B8A8_UNORM) { format = f; colorSpace = candidate.colorSpace(); break; }
+                if (f == VK_FORMAT_B8G8R8A8_SRGB || f == VK_FORMAT_R8G8B8A8_SRGB) { format = f; colorSpace = candidate.colorSpace(); }
+            }
+            if (format == 0) throw new IllegalStateException("Surface lacks a supported RGBA/BGRA 8-bit format");
+            boolean srgb = format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
+            int sharedFormat = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+            requireBlit(sharedFormat, VK_FORMAT_FEATURE_BLIT_SRC_BIT, stack);
+            requireBlit(format, VK_FORMAT_FEATURE_BLIT_DST_BIT, stack);
+            width = caps.currentExtent().width() == -1 ? Math.clamp(requestedWidth, caps.minImageExtent().width(), caps.maxImageExtent().width()) : caps.currentExtent().width();
+            height = caps.currentExtent().height() == -1 ? Math.clamp(requestedHeight, caps.minImageExtent().height(), caps.maxImageExtent().height()) : caps.currentExtent().height();
+            int count = caps.minImageCount() + 1;
+            if (caps.maxImageCount() > 0) count = Math.min(count, caps.maxImageCount());
+            int mode = VK_PRESENT_MODE_FIFO_KHR;
+            if (!vsync) for (int i = 0; i < surface.presentModes.remaining(); i++) {
+                int candidate = surface.presentModes.get(i);
+                if (candidate == VK_PRESENT_MODE_MAILBOX_KHR) { mode = candidate; break; }
+                if (candidate == VK_PRESENT_MODE_IMMEDIATE_KHR) mode = candidate;
+            }
+            int alpha = Integer.lowestOneBit(caps.supportedCompositeAlpha());
+            var info = VkSwapchainCreateInfoKHR.calloc(stack).sType$Default().surface(Vulkan.getSurface())
+                    .minImageCount(count).imageFormat(format).imageColorSpace(colorSpace).imageArrayLayers(1)
+                    .imageUsage(VK_IMAGE_USAGE_TRANSFER_DST_BIT).preTransform(caps.currentTransform())
+                    .compositeAlpha(alpha).presentMode(mode).clipped(true);
+            info.imageExtent().set(width, height);
+            var families = Queue.getQueueFamilies();
+            if (families.graphicsFamily != families.presentFamily)
+                info.imageSharingMode(VK_SHARING_MODE_CONCURRENT).pQueueFamilyIndices(stack.ints(families.graphicsFamily, families.presentFamily));
+            else info.imageSharingMode(VK_SHARING_MODE_EXCLUSIVE);
+            var handle = stack.mallocLong(1);
+            check(vkCreateSwapchainKHR(device, info, null, handle), "create client swapchain");
+            swapchain = handle.get(0);
+            var n = stack.mallocInt(1);
+            check(vkGetSwapchainImagesKHR(device, swapchain, n, null), "count client swapchain images");
+            var handles = stack.mallocLong(n.get(0));
+            check(vkGetSwapchainImagesKHR(device, swapchain, n, handles), "get client swapchain images");
+            images = new long[n.get(0)]; handles.get(images);
+            // Per-image semaphores are reused only after WSI reacquires that image.
+            presentReady = new long[images.length];
+            for (int i = 0; i < images.length; i++) presentReady[i] = semaphore(stack);
+            for (int i = 0; i < FRAMES; i++) frames[i] = new SharedImage(DeviceManager.physicalDevice, device, width, height, sharedFormat);
+            var command = commands[0];
+            check(vkResetCommandBuffer(command, 0), "reset initial ownership command");
+            check(vkBeginCommandBuffer(command, VkCommandBufferBeginInfo.calloc(stack).sType$Default()
+                    .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)), "begin initial ownership");
+            for (var image : frames) image.release(command, family);
+            check(vkEndCommandBuffer(command), "end initial ownership");
+            check(vkQueueSubmit(DeviceManager.getGraphicsQueue().queue(), VkSubmitInfo.calloc(stack).sType$Default()
+                    .pCommandBuffers(stack.pointers(command)).pSignalSemaphores(stack.longs(frames[0].readyForGl(), frames[1].readyForGl())), 0), "release initial client images");
+            check(vkQueueWaitIdle(DeviceManager.getGraphicsQueue().queue()), "complete initial ownership");
+            dirty = false;
+            windowWidth = requestedWidth; windowHeight = requestedHeight;
+            Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}", width, height, format, images.length, vsync);
+        }
+    }
+
+    private long semaphore(MemoryStack stack) {
+        var handle = stack.mallocLong(1);
+        check(vkCreateSemaphore(device, VkSemaphoreCreateInfo.calloc(stack).sType$Default(), null, handle), "client presentation semaphore");
+        return handle.get(0);
+    }
+    private static void requireBlit(int format, int flag, MemoryStack stack) {
+        var properties = VkFormatProperties.calloc(stack);
+        vkGetPhysicalDeviceFormatProperties(DeviceManager.physicalDevice, format, properties);
+        if ((properties.optimalTilingFeatures() & flag) == 0) throw new IllegalStateException("Client blit unsupported for format " + format);
+    }
+    private static void imageBarrier(VkCommandBuffer command, long image, int oldLayout, int newLayout,
+                                     int srcAccess, int dstAccess, int srcStage, int dstStage, MemoryStack stack) {
+        var barrier = VkImageMemoryBarrier.calloc(1, stack).sType$Default().image(image).oldLayout(oldLayout).newLayout(newLayout)
+                .srcAccessMask(srcAccess).dstAccessMask(dstAccess).srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED).dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
+        barrier.subresourceRange().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).levelCount(1).layerCount(1);
+        vkCmdPipelineBarrier(command, srcStage, dstStage, 0, null, null, barrier);
+    }
+    private void destroySwapchain() {
+        for (int i = 0; i < FRAMES; i++) if (frames[i] != null) { frames[i].close(); frames[i] = null; }
+        if (presentReady != null) for (long semaphore : presentReady) if (semaphore != 0) vkDestroySemaphore(device, semaphore, null);
+        presentReady = null;
+        if (swapchain != 0) vkDestroySwapchainKHR(device, swapchain, null);
+        swapchain = 0;
+    }
+    @Override public void close() {
+        if (closed) return;
+        context.assertCurrentThread();
+        glFinish();
+        vkDeviceWaitIdle(device);
+        closed = true;
+        destroySwapchain();
+        for (int i = 0; i < FRAMES; i++) {
+            if (available[i] != 0) vkDestroySemaphore(device, available[i], null);
+            if (fences[i] != 0) vkDestroyFence(device, fences[i], null);
+        }
+        if (readFramebuffer != 0) glDeleteFramebuffers(readFramebuffer);
+        // Commands belong to Vulkan's presentation pool and are freed with it.
+    }
+}

@@ -1,6 +1,6 @@
 # All For Vulkan 開発計画
 
-更新: 2026-10-24。状態: M0初期実装。NeoForge移植のJavaビルド・RTX 3060でのタイトル画面スモークテストが通過。AFVのワールド・リサイズ・再読込・切断と、通常GL/Zinkの独立したIris比較を検証済み。M1のAFVフレーム接続は実描画→GL後処理→Vulkan表示の色画像往復まで実装。M0の描画全体のピクセル比較と、Irisとの同時動作は未達。
+更新: 2026-10-24。状態: NeoForge移植とM1接続を実装中。AFV native描画はワールド・色/深度のGL往復・リサイズ・再読込・切断を検証。加えてZink上の既存Iris/Sodium描画からAFV所有VkDevice・WSIへ最終画像をGPU共有するクライアント経路を実装し、DTFuel＋指定Complementaryで実画面と同じライフサイクルを確認した。この経路ではAFV native地形描画を使用しない。全GL機能・全GPU・全Iris packの互換、native地形への任意Iris pass統合、共通コアへの分離は引き続き開発対象。M0/M1全体の合格宣言ではない。
 
 ## 目的と対象
 
@@ -34,6 +34,7 @@ ZinkはMesaのGalliumドライバーであり、Java用の小さな変換ライ�
 | ANGLEのVulkanバックエンド | 既存の変換・シェーダー技術を利用可能 | 主対象はOpenGL ES。Desktop GLを使うMOD全体への直接互換層にはならない | 汎用基盤の第一候補にはしない |
 | 通常のOpenGLドライバーとVulkanModを併用 | 個別MODを既存GLで動かす実験がしやすい | GL→Vulkan化という目的と異なる。資源共有の問題も残る | 比較・切り分け用 |
 | Minecraft全体をZinkで動かす | Iris/SodiumとZinkの基準動作を確認できる | VulkanModへの統合を満たさない | テスト用対照構成 |
+| Zinkの既存GLクライアント出力をAFV VkDevice・WSIへGPU共有 | 既存Iris/Sodiumの資源管理・複数passを維持し、AFV側が表示と同期を所有できる | AFV native地形描画とは別モード。OS別Mesa配布・GL context形式・他GPUの検証が必要 | Linux実装とDTFuel実機接続を追加。完全互換の判定は継続 |
 | Iris互換シェーダーパックをVulkanで再実装 | 描画経路を最適化しやすい | Iris自体や他MODのGL呼び出しへの汎用対応にはならない | Iris対応での補助手段 |
 
 ANGLEの対象は[公式README](https://chromium.googlesource.com/angle/angle/+/main/README.md)を参照。既存の限定的なシェーダーエンジンとの違いは[調査記録](RESEARCH.md)に記載。

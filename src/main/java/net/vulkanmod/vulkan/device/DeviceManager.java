@@ -44,9 +44,13 @@ public abstract class DeviceManager {
     static ComputeQueue computeQueue;
 
     public static void init(VkInstance instance) {
+        init(instance, null);
+    }
+
+    public static void init(VkInstance instance, byte[] deviceUuid) {
         try {
             DeviceManager.getSuitableDevices(instance);
-            DeviceManager.pickPhysicalDevice();
+            DeviceManager.pickPhysicalDevice(deviceUuid);
             DeviceManager.createLogicalDevice();
         } catch (Exception e) {
             Initializer.LOGGER.info(getAvailableDevicesInfo());
@@ -96,10 +100,22 @@ public abstract class DeviceManager {
     }
 
     public static void pickPhysicalDevice() {
+        pickPhysicalDevice(null);
+    }
+
+    private static void pickPhysicalDevice(byte[] deviceUuid) {
         try (MemoryStack stack = stackPush()) {
 
             int deviceIdx = Initializer.CONFIG.device;
-            if (deviceIdx >= 0 && deviceIdx < suitableDevices.size())
+            if (deviceUuid != null) {
+                DeviceManager.device = suitableDevices.stream().filter(candidate -> {
+                    var id = VkPhysicalDeviceIDProperties.calloc(stack).sType$Default();
+                    org.lwjgl.vulkan.VK11.vkGetPhysicalDeviceProperties2(candidate.physicalDevice,
+                            VkPhysicalDeviceProperties2.calloc(stack).sType$Default().pNext(id.address()));
+                    for (int i = 0; i < deviceUuid.length; i++) if (id.deviceUUID(i) != deviceUuid[i]) return false;
+                    return true;
+                }).findFirst().orElseThrow(() -> new IllegalStateException("No present-capable Vulkan device matches Zink's UUID"));
+            } else if (deviceIdx >= 0 && deviceIdx < suitableDevices.size())
                 DeviceManager.device = suitableDevices.get(deviceIdx);
             else {
                 DeviceManager.device = autoPickDevice();
@@ -181,7 +197,7 @@ public abstract class DeviceManager {
             // Must not set line width to anything other than 1.0 if this is not supported
             if (device.availableFeatures.features().wideLines()) {
                 deviceFeatures.features().wideLines(true);
-                VRenderSystem.canSetLineWidth = true;
+                if (!Vulkan.isPresentationOnly()) VRenderSystem.canSetLineWidth = true;
             }
 
             VkDeviceCreateInfo createInfo = VkDeviceCreateInfo.calloc(stack);
@@ -223,9 +239,11 @@ public abstract class DeviceManager {
             vkDevice = new VkDevice(pDevice.get(0), physicalDevice, createInfo, VK_API_VERSION_1_2);
 
             graphicsQueue = new GraphicsQueue(stack, indices.graphicsFamily);
-            transferQueue = new TransferQueue(stack, indices.transferFamily);
             presentQueue = new PresentQueue(stack, indices.presentFamily);
-            computeQueue = new ComputeQueue(stack, indices.computeFamily);
+            if (!Vulkan.isPresentationOnly()) {
+                transferQueue = new TransferQueue(stack, indices.transferFamily);
+                computeQueue = new ComputeQueue(stack, indices.computeFamily);
+            }
         }
     }
 
@@ -273,7 +291,7 @@ public abstract class DeviceManager {
             boolean anisotropicFilterSupported = supportedFeatures.samplerAnisotropy();
 
             return indices.isSuitable() && extensionsSupported && swapChainAdequate
-                    && anisotropicFilterSupported && supportedFeatures.logicOp();
+                    && (Vulkan.isPresentationOnly() || (anisotropicFilterSupported && supportedFeatures.logicOp()));
         }
     }
 
@@ -353,8 +371,8 @@ public abstract class DeviceManager {
 
     public static void destroy() {
         graphicsQueue.cleanUp();
-        transferQueue.cleanUp();
-        computeQueue.cleanUp();
+        if (transferQueue != null) transferQueue.cleanUp();
+        if (computeQueue != null) computeQueue.cleanUp();
 
         vkDestroyDevice(vkDevice, null);
     }

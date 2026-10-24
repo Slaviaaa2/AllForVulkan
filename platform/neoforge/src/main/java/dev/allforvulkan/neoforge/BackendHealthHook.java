@@ -9,7 +9,8 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 public final class BackendHealthHook {
     private static boolean marked;
     @SubscribeEvent public static void afterTick(ClientTickEvent.Post event) {
-        if (!marked && BackendBootstrap.vulkan() && net.vulkanmod.vulkan.Renderer.getInstance().presentedFrames() >= 120) {
+        if (!marked && BackendBootstrap.usesVulkan() && (BackendBootstrap.zinkClient()
+                ? ZinkClientSession.presentedFrames() : net.vulkanmod.vulkan.Renderer.getInstance().presentedFrames()) >= 120) {
             BackendBootstrap.renderingStable();
             marked = true;
         }

@@ -51,13 +51,19 @@ neoForge {
             systemProperty 'afv.smokeInspectTicks', System.getProperty('afv.smokeInspectTicks', '0')
             systemProperty 'afv.smokeSettings', System.getProperty('afv.smokeSettings', 'false')
             systemProperty 'afv.smokeIris', System.getProperty('afv.smokeIris', 'false')
+            systemProperty 'afv.smokeScene', System.getProperty('afv.smokeScene', 'false')
+            systemProperty 'afv.debugGlClient', System.getProperty('afv.debugGlClient', 'false')
             systemProperty 'afv.validationEgl', System.getProperty('afv.validationEgl', 'false')
             systemProperty 'afv.validationPack', System.getProperty('afv.validationPack', 'false')
             systemProperty 'afv.expectZink', System.getProperty('afv.expectZink', 'false')
             systemProperty 'afv.benchmarkTicks', System.getProperty('afv.benchmarkTicks', '0')
             if (System.getProperty('afv.backend') != null) systemProperty 'afv.backend', System.getProperty('afv.backend')
+            systemProperty 'afv.benchmarkWarmupTicks', System.getProperty('afv.benchmarkWarmupTicks', '900')
             if (project.hasProperty('afvVulkanLibrary')) systemProperty 'org.lwjgl.vulkan.libname', project.property('afvVulkanLibrary')
             systemProperty 'afv.zinkInterop', System.getProperty('afv.zinkInterop', 'false')
+            systemProperty 'afv.zinkClient', System.getProperty('afv.zinkClient', 'false')
+            systemProperty 'afv.expectZinkClient', System.getProperty('afv.expectZinkClient', 'false')
+            if (System.getProperty('afv.mesaEglVendor') != null) systemProperty 'afv.mesaEglVendor', System.getProperty('afv.mesaEglVendor')
             systemProperty 'afv.zinkEffect', System.getProperty('afv.zinkEffect', 'identity')
             if (Boolean.getBoolean('afv.zinkInterop')) {
                 environment 'MESA_LOADER_DRIVER_OVERRIDE', 'zink'
@@ -115,7 +121,19 @@ configurations.jarJar {
     exclude group: 'org.lwjgl', module: 'lwjgl-stb'
 }
 tasks.withType(JavaCompile).configureEach { options.release = 21 }
+// A standalone helper isolates unsupported Mesa/native-driver failures from Minecraft.
+def zinkProbeJar = tasks.register('zinkProbeJar', Jar) {
+    dependsOn ':native-bridge:classes', ':core-api:jar'
+    archiveFileName = 'zink-probe.jar'
+    destinationDirectory = layout.buildDirectory.dir('probe')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest { attributes 'Main-Class': 'dev.allforvulkan.bridge.ZinkProbe' }
+    from project(':native-bridge').sourceSets.main.output
+    from { project(':native-bridge').configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    exclude 'module-info.class', 'META-INF/versions/**/module-info.class', 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
+}
 processResources {
+    from(zinkProbeJar) { into 'META-INF/afv' }
     inputs.property 'version', project.version
     filesMatching('META-INF/neoforge.mods.toml') { expand version: project.version }
 }

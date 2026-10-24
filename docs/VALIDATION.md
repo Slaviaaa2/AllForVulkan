@@ -2,6 +2,9 @@
 
 日付: 2026-10-24。対象: AFV 0.1.0-alpha.1 / Minecraft 1.21.1 / NeoForge 21.1.228。
 
+実装の進行順に追記した記録。各節の「未実装／未達」はその時点の状態を示す。
+最新のZink GLクライアントとAFV Vulkan表示の接続結果は末尾を参照。
+
 ## ビルドと配布構造
 
 完全なEclipse Temurin JDK 21で `./gradlew build` が通過。

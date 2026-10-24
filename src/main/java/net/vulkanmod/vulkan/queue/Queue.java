@@ -101,6 +101,20 @@ public abstract class Queue {
 
             IntBuffer presentSupport = stack.ints(VK_FALSE);
 
+            if (Vulkan.isPresentationOnly()) {
+                for (int i = 0; i < queueFamilies.capacity(); i++) {
+                    if (queueFamilies.get(i).queueCount() == 0) continue;
+                    boolean graphics = (queueFamilies.get(i).queueFlags() & VK_QUEUE_GRAPHICS_BIT) != 0;
+                    if (graphics && indices.graphicsFamily == -1) indices.graphicsFamily = i;
+                    int result = vkGetPhysicalDeviceSurfaceSupportKHR(device, i, Vulkan.getSurface(), presentSupport);
+                    if (result == VK_SUCCESS && presentSupport.get(0) == VK_TRUE) {
+                        indices.presentFamily = i;
+                        if (graphics) { indices.graphicsFamily = i; break; }
+                    }
+                }
+                return indices;
+            }
+
             for (int i = 0; i < queueFamilies.capacity(); i++) {
                 int queueFlags = queueFamilies.get(i).queueFlags();
 
@@ -206,6 +220,7 @@ public abstract class Queue {
         }
 
         public int[] unique() {
+            if (Vulkan.isPresentationOnly()) return IntStream.of(graphicsFamily, presentFamily).distinct().toArray();
             return IntStream.of(graphicsFamily, presentFamily, transferFamily, computeFamily).distinct().toArray();
         }
 

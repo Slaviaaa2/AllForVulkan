@@ -2,6 +2,15 @@
 
 更新: 2026-10-24。設計方針。`core-api`（`PlatformServices`）、NeoForgeアダプター、`native-bridge`のMesa/Zink・外部画像共有と、AFV VkDeviceへのフレーム合成診断を追加。以下の全体構成への移行は進行中で、描画本体はまだMinecraft依存を含む。CPUアップロード資源の実GL名登録と、リサイズをまたぐGL context寿命も実装。実装済み境界は[開発手順](docs/DEVELOPMENT.md)に記録する。
 
+## 現在の実装経路
+
+1. **AFV native renderer**: VulkanMod由来の地形・GUI描画。任意のIris passの統合は引き続き開発対象。
+2. **Zink GL client / AFV Vulkan presentation**: Minecraft・Iris・Sodiumの既存GL描画を実Zinkで動かし、最終色画像をAFVのVkDeviceとWSIへ外部メモリ・セマフォで渡す。GLのMRT・影・資源管理はIrisとドライバーが担当する。この経路ではAFV native地形描画を使用しない。
+
+2の接続はNeoForgeのウィンドウ／フレームMixinと`ZinkClientSession`、Vulkan側の`ZinkPresenter`、共通`native-bridge`の`ZinkContext`・`SharedImage`で構成する。Vulkanの初期化を表示用とnative描画用に分け、表示専用経路でnative terrain・VMA・シェーダーパイプラインを初期化しない。配布起動時のGLFW親ローダーとVulkan子ローダーの境界は、WSI生成へネイティブhandleを渡すことで越える。別プロセスの起動前検査で、未対応Zinkをゲームへ読み込む前にOpenGLへ戻す。
+
+GLクライアント経路の導入は、下記の共通API化・全GL入口／コンテキスト形式・全OS対応の完了を意味しない。
+
 ## 目的
 
 初期対象はMinecraft 1.21.1 / NeoForge。将来のFabric版と、過去のMinecraftに対応したForge版で描画・GL互換処理を共有する。

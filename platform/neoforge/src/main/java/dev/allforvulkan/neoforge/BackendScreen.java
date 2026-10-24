@@ -17,7 +17,7 @@ public final class BackendScreen extends Screen {
     public BackendScreen(Screen parent) {
         super(Component.translatable("afv.backend.title"));
         this.parent = parent;
-        status = Component.translatable("afv.backend.active", BackendBootstrap.vulkan() ? "Vulkan" : "OpenGL");
+        status = Component.translatable("afv.backend.active", BackendBootstrap.usesVulkan() ? "Vulkan" : "OpenGL");
     }
 
     private static Component label(BackendBootstrap.Mode mode) {

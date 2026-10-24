@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 /** Decides before either mixin configuration changes Minecraft's renderer. */
 public final class BackendBootstrap {
     public enum Mode { AUTO, VULKAN, OPENGL }
-    private static boolean initialized, vulkan;
+    private static boolean initialized, vulkan, zinkClient;
     private static Mode requested = Mode.AUTO;
     private static String reason = "Not initialized";
     private static Path config, pending;
@@ -36,8 +36,10 @@ public final class BackendBootstrap {
             requested = Mode.valueOf(value.trim().toUpperCase(Locale.ROOT));
             if (requested == Mode.OPENGL) { reason = "OpenGL selected in settings"; return; }
             Set<String> mods = FMLLoader.getLoadingModList().getMods().stream().map(mod -> mod.getModId()).collect(Collectors.toSet());
-            if (mods.contains("sodium") || mods.contains("iris") || mods.contains("embeddium")) {
-                reason = "OpenGL selected: installed terrain/shader renderer needs the pending Vulkan integration";
+            boolean glRenderer = mods.contains("sodium") || mods.contains("iris") || mods.contains("embeddium");
+            boolean clientBridge = Boolean.getBoolean("afv.zinkClient") || (requested == Mode.VULKAN && glRenderer);
+            if (!clientBridge && glRenderer) {
+                reason = "OpenGL selected automatically for the installed renderer; select Vulkan to try the Linux Zink client bridge";
                 return;
             }
             if (net.neoforged.fml.loading.FMLConfig.getBoolConfigValue(net.neoforged.fml.loading.FMLConfig.ConfigValue.EARLY_WINDOW_CONTROL)) {
@@ -51,19 +53,38 @@ public final class BackendBootstrap {
             Files.createDirectories(directory);
             // Also survives a native driver crash, which Java cannot catch.
             Files.writeString(pending, "Vulkan startup pending\n", StandardOpenOption.CREATE_NEW);
-            var result = VulkanSupport.probe(Boolean.getBoolean("afv.zinkInterop"));
-            vulkan = result.supported();
-            reason = (vulkan ? "Vulkan preflight passed: " : "OpenGL fallback: ") + result.detail();
-            if (!vulkan) Files.deleteIfExists(pending);
+            if (clientBridge) {
+                Path vendor = Path.of(System.getProperty("afv.mesaEglVendor", "/usr/share/glvnd/egl_vendor.d/50_mesa.json"));
+                if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux") || !Files.isReadable(vendor)) {
+                    reason = "OpenGL fallback: Zink client bridge requires Linux and an installed Mesa EGL vendor";
+                    Files.deleteIfExists(pending);
+                    return;
+                }
+                var zink = ZinkPreflight.inspect(FMLLoader.getGamePath(), vendor);
+                if (!zink.supported()) {
+                    reason = "OpenGL fallback: " + zink.detail();
+                    Files.deleteIfExists(pending);
+                    return;
+                }
+                MesaEnvironment.configure(vendor.toString());
+            }
+            var result = VulkanSupport.probe(clientBridge || Boolean.getBoolean("afv.zinkInterop"), clientBridge);
+            zinkClient = result.supported() && clientBridge;
+            vulkan = result.supported() && !clientBridge;
+            reason = (zinkClient ? "Vulkan presentation with Zink client: " : vulkan ? "Vulkan preflight passed: " : "OpenGL fallback: ") + result.detail();
+            if (!result.supported()) { MesaEnvironment.restore(); Files.deleteIfExists(pending); }
         } catch (IOException | RuntimeException | LinkageError failure) {
-            vulkan = false;
+            vulkan = zinkClient = false;
+            MesaEnvironment.restore();
             reason = "OpenGL fallback: " + failure.getClass().getSimpleName() + ": " + failure.getMessage();
         } finally {
-            LogManager.getLogger("AllForVulkan").info("AFV_BACKEND: requested={}, active={}, reason={}", requested, vulkan ? "Vulkan" : "OpenGL", reason);
+            LogManager.getLogger("AllForVulkan").info("AFV_BACKEND: requested={}, active={}, reason={}", requested, vulkan || zinkClient ? "Vulkan" : "OpenGL", reason);
         }
     }
 
     public static boolean vulkan() { initialize(); return vulkan; }
+    public static boolean zinkClient() { initialize(); return zinkClient; }
+    public static boolean usesVulkan() { initialize(); return vulkan || zinkClient; }
     public static Mode requested() { initialize(); return requested; }
     public static String reason() { initialize(); return reason; }
 
@@ -84,7 +105,7 @@ public final class BackendBootstrap {
     }
 
     public static void renderingStable() {
-        if (!vulkan) return;
+        if (!vulkan && !zinkClient) return;
         try { Files.deleteIfExists(pending); }
         catch (IOException failure) { LogManager.getLogger("AllForVulkan").warn("Cannot clear Vulkan startup recovery marker", failure); }
     }

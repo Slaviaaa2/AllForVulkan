@@ -31,8 +31,10 @@ public final class ClientSmokeTest {
     private static boolean benchmarkFinished;
     private static long drawBaseline;
     private static CompletableFuture<Void> reload;
+    private static CompletableFuture<Void> scene;
 
     @SubscribeEvent public static void frame(net.neoforged.neoforge.client.event.RenderFrameEvent.Post event) {
+        if (ENABLED && !BackendBootstrap.vulkan()) dev.allforvulkan.validation.GlDebugTrace.installIfRequested();
         if (ENABLED) dev.allforvulkan.validation.FrameBenchmark.frame();
     }
 
@@ -66,12 +68,21 @@ public final class ClientSmokeTest {
             return;
         }
         if (phase >= 1 && phase <= 3 && client.level != null && client.player != null && client.screen == null) {
+            if (phase == 1 && Boolean.getBoolean("afv.smokeScene")) {
+                if (scene == null) scene = dev.allforvulkan.validation.ValidationScene.create(client.getSingleplayerServer());
+                if (!scene.isDone()) return;
+                scene.join();
+            }
             if (phase == 1 && stableTicks == 0 && benchmarkUntil == 0 && Integer.getInteger("afv.benchmarkTicks", 0) > 0)
-                client.player.moveTo(.5, -60, .5, 0, 0);
+                client.player.moveTo(.5, -60, .5, 0, Boolean.getBoolean("afv.smokeScene") ? 8 : 0);
             if (++stableTicks < 120) return;
             int duration = Integer.getInteger("afv.benchmarkTicks", 0);
             if (phase == 1 && duration > 0 && !benchmarkFinished) {
+                int warmup = Math.max(0, Integer.getInteger("afv.benchmarkWarmupTicks", 900));
+                if (stableTicks == 120) Initializer.LOGGER.info("AFV_BENCHMARK_WARMUP: {} extra world ticks before measurement", warmup);
+                if (stableTicks < 120 + warmup) return;
                 if (benchmarkUntil == 0) {
+                    if (Boolean.getBoolean("afv.smokeIris")) dev.allforvulkan.validation.IrisAssertions.requireActive();
                     benchmarkUntil = ticks + duration;
                     dev.allforvulkan.validation.FrameBenchmark.begin();
                 }
@@ -79,6 +90,9 @@ public final class ClientSmokeTest {
                 var conditions = new java.util.LinkedHashMap<String, Object>();
                 conditions.put("renderer", BackendBootstrap.vulkan() ? "AFV Vulkan" : org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_RENDERER));
                 conditions.put("backendReason", BackendBootstrap.reason());
+                conditions.put("zinkClient", BackendBootstrap.zinkClient());
+                conditions.put("validationScene", Boolean.getBoolean("afv.smokeScene"));
+                conditions.put("warmupTicks", warmup);
                 conditions.put("width", client.getWindow().getWidth());
                 conditions.put("height", client.getWindow().getHeight());
                 conditions.put("renderDistance", client.options.renderDistance().get());
@@ -87,6 +101,7 @@ public final class ClientSmokeTest {
                 conditions.put("frameLimit", client.options.framerateLimit().get());
                 conditions.put("camera", client.player.position().toString());
                 conditions.put("display", System.getenv("DISPLAY"));
+                conditions.put("focused", GLFW.glfwGetWindowAttrib(client.getWindow().getWindow(), GLFW.GLFW_FOCUSED) == GLFW.GLFW_TRUE);
                 dev.allforvulkan.validation.FrameBenchmark.finish(java.nio.file.Path.of("afv-benchmark.json"), conditions);
                 benchmarkFinished = true;
             }
@@ -104,6 +119,7 @@ public final class ClientSmokeTest {
             if (phase == 1) {
                 if (BackendBootstrap.vulkan()) Initializer.LOGGER.info("AFV_SMOKE_WORLD: visible sections={}, submitted terrain draws={}",
                         WorldRenderer.getInstance().getVisibleSectionsCount(), DrawBuffers.getSubmittedDraws() - drawBaseline);
+                else if (BackendBootstrap.zinkClient()) Initializer.LOGGER.info("AFV_SMOKE_ZINK_CLIENT_WORLD: player and world active, {} Vulkan presentations", ZinkClientSession.presentedFrames());
                 else Initializer.LOGGER.info("AFV_SMOKE_OPENGL_WORLD: player and world active");
                 boolean alreadyTarget = client.getWindow().getWidth() == 960 && client.getWindow().getHeight() == 540;
                 resizeWidth = alreadyTarget ? 854 : 960;
@@ -158,6 +174,11 @@ public final class ClientSmokeTest {
     }
 
     private static void pass(Minecraft client) {
+        if (Boolean.getBoolean("afv.expectZinkClient")) {
+            if (!BackendBootstrap.zinkClient() || ZinkClientSession.presentedFrames() < 120)
+                throw new IllegalStateException("AFV_SMOKE_FAIL: Zink client did not present through AFV Vulkan");
+            Initializer.LOGGER.info("AFV_ZINK_CLIENT_SMOKE_PASS: {} real Vulkan presentations", ZinkClientSession.presentedFrames());
+        }
         if (BackendBootstrap.vulkan() && net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED) {
             var bridge = net.vulkanmod.vulkan.Renderer.getInstance().getZinkBridge();
             if (bridge == null || bridge.verifiedFrames() < 120 || bridge.verifiedScenes() < 120)
@@ -169,6 +190,7 @@ public final class ClientSmokeTest {
                     net.vulkanmod.vulkan.interop.ZinkFrameBridge.effectName());
         }
         Initializer.LOGGER.info("AFV_SMOKE_PASS: scenario={}", WORLD ? "world-resize-reload-disconnect" : "title");
+        if (!BackendBootstrap.vulkan()) dev.allforvulkan.validation.GlDebugTrace.close();
         phase = 5;
         client.stop();
     }

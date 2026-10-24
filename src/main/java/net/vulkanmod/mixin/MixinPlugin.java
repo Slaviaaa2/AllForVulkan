@@ -18,7 +18,7 @@ public class MixinPlugin implements IMixinConfigPlugin {
                 org.lwjgl.system.Configuration.STACK_SIZE.get(64)));
         dev.allforvulkan.neoforge.BackendBootstrap.initialize();
         if ((dev.allforvulkan.neoforge.BackendBootstrap.vulkan() && Boolean.getBoolean("afv.zinkInterop"))
-                || Boolean.getBoolean("afv.validationEgl"))
+                || dev.allforvulkan.neoforge.BackendBootstrap.zinkClient() || Boolean.getBoolean("afv.validationEgl"))
             org.lwjgl.system.Configuration.OPENGL_EXPLICIT_INIT.set(true);
     }
 
@@ -29,8 +29,10 @@ public class MixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.endsWith(".ZinkClientWindowMixin") || mixinClassName.endsWith(".ZinkClientFrameMixin"))
+            return dev.allforvulkan.neoforge.BackendBootstrap.zinkClient();
         if (mixinClassName.endsWith(".EglValidationMixin"))
-            return !dev.allforvulkan.neoforge.BackendBootstrap.vulkan() && Boolean.getBoolean("afv.validationEgl");
+            return !dev.allforvulkan.neoforge.BackendBootstrap.usesVulkan() && Boolean.getBoolean("afv.validationEgl");
         if (mixinClassName.endsWith(".PackValidationMixin"))
             return Boolean.getBoolean("afv.validationPack");
         return dev.allforvulkan.neoforge.BackendBootstrap.vulkan();

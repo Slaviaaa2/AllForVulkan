@@ -19,9 +19,69 @@ that instance's `config/fml.toml` before launch. If the splash is already enable
 in the AFV config screen disables the early GL splash for the next launch.
 
 Do not install the original VulkanMod or another VulkanMod port alongside AFV.
-With Sodium, Iris or Embeddium installed, AFV currently selects OpenGL and skips
-both renderer mixin configurations. This is a safe coexistence path, not
-integrated Vulkan Iris rendering. No Mesa native distribution is bundled.
+With Sodium, Iris or Embeddium installed, Auto selects OpenGL. Selecting Vulkan
+instead enables the Linux Zink client route below, after a real driver preflight.
+No Mesa native distribution is bundled.
+
+## Zink GL client with AFV Vulkan presentation
+
+Choose **Vulkan** in AFV's mod-list configuration and restart. When Iris, Sodium
+or Embeddium is present, the unmodified GL frontend runs on a surfaceless Zink
+context. AFV creates the visible NO_API GLFW window, its own Vulkan device and
+swapchain. It matches Zink's GPU UUID, imports dedicated color images using
+opaque FDs, and transfers ownership with two external binary semaphores per
+frame slot. GL blits the actual main render target to the shared image; Vulkan
+blits it, including the GL/WSI vertical coordinate conversion, into the acquired
+swapchain image. There is no CPU frame-image transport. Present completion
+semaphores belong to individual swapchain images, not frame slots. Resize drains
+both queues and recreates shared images/WSI; the GL context and game resources
+survive. VSync changes follow the same recreation path.
+
+This route retains Iris/Sodium terrain, shadows, MRTs, buffers and frame hooks
+in the real GL implementation. AFV's native terrain renderer and its GL-wrapper
+mixins are disabled for this route; the native renderer remains the other mode.
+It is distinct from both the `--zink` GL/EGL comparison and the native renderer's
+`afv.zinkInterop` post-processing diagnostic.
+
+Linux and an installed Mesa EGL/Zink driver are required. `zinkProbeJar` embeds a
+standalone preflight helper, including its own LWJGL dependencies, in the mod.
+Before changing the game's native environment or applying client mixins, a child
+JVM tests real GL 4.6, compute pixels, matching Vulkan GPU UUIDs, opaque FD images
+and bidirectional semaphore synchronization. Failure, driver-process death or a
+45-second timeout selects OpenGL. Logs are under `.allforvulkan/preflight/` in
+the instance. This isolates preflight driver failures; runtime driver failures
+still use the existing next-launch recovery marker. A successful preflight does
+not prove every shader pack or WSI configuration works.
+
+For a vanilla client, `-Dafv.zinkClient=true` forces this route for testing.
+`-Dafv.mesaEglVendor=/path/to/vendor.json` selects a different installed Mesa
+vendor. The Zink environment changes affect only the launched game process.
+
+For a verified private DTFuel copy (see preparation commands later in this file):
+
+```sh
+python3 scripts/launch_modpack_client.py \
+  --instance /path/to/private-client --install /path/to/CurseForge/Install \
+  --java-home /path/to/jdk21 --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.1.jar \
+  --smoke --local-xim --zink-client --require-iris \
+  --shader-pack /path/to/ComplementaryReimagined_r5.9.3.zip \
+  --scene --uncapped --benchmark-ticks 600 --warmup-ticks 900 --inspect-ticks 300
+```
+
+With `--require-iris`, this exercises the same Vulkan selection as the setting,
+without the vanilla force flag. `--scene` builds stone, glass, leaves, water,
+an emissive block and entities only in the newly created smoke world. The extra
+900 world ticks allow background mod initialization to settle before measuring.
+`--uncapped` changes VSync/frame cap only in the private client's options.
+The smoke test requires 120 real AFV Vulkan presentations, an actual active Iris
+pipeline, nonblack bounded GL color samples, resize, reload, disconnect and exit.
+Use `--debug-gl` only for bounded synchronous GL error diagnosis.
+
+For a matched Zink/EGL presentation comparison, replace `--zink-client` with
+`--zink --x11-no-modifiers` when that fallback is required by the nested X server.
+Keep scene, shader options, warmup, resolution and game settings identical. This
+compares presentation routes with the same Zink frontend; it does not establish
+an FPS gain over the GPU vendor's native OpenGL driver.
 
 ## Current source boundary
 

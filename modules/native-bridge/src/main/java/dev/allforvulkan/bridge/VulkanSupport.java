@@ -14,14 +14,17 @@ public final class VulkanSupport {
     private VulkanSupport() {}
 
     public static Result probe(boolean externalImages) {
+        return probe(externalImages, false);
+    }
+    public static Result probe(boolean externalImages, boolean presentationOnly) {
         try {
-            return inspect(externalImages);
+            return inspect(externalImages, presentationOnly);
         } catch (RuntimeException | LinkageError failure) {
             return new Result(false, failure.getClass().getSimpleName() + ": " + failure.getMessage());
         }
     }
 
-    private static Result inspect(boolean externalImages) {
+    private static Result inspect(boolean externalImages, boolean presentationOnly) {
         if (VK.getInstanceVersionSupported() < VK_API_VERSION_1_2)
             return new Result(false, "Vulkan 1.2 loader is unavailable");
         if (externalImages && !System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("linux"))
@@ -55,7 +58,7 @@ public final class VulkanSupport {
                         if (props.apiVersion() < VK_API_VERSION_1_2) continue;
                         VkPhysicalDeviceFeatures features = VkPhysicalDeviceFeatures.calloc(deviceStack);
                         vkGetPhysicalDeviceFeatures(device, features);
-                        if (!features.logicOp() || !features.samplerAnisotropy()) continue;
+                        if (!presentationOnly && (!features.logicOp() || !features.samplerAnisotropy())) continue;
                         var n = deviceStack.ints(0);
                         if (vkEnumerateDeviceExtensionProperties(device, (String) null, n, null) != VK_SUCCESS) continue;
                         VkExtensionProperties.Buffer extensions = VkExtensionProperties.malloc(n.get(0), deviceStack);
@@ -75,7 +78,7 @@ public final class VulkanSupport {
                             names.flip();
                             VkDeviceCreateInfo create = VkDeviceCreateInfo.calloc(deviceStack).sType$Default()
                                     .pQueueCreateInfos(queue).ppEnabledExtensionNames(names)
-                                    .pEnabledFeatures(VkPhysicalDeviceFeatures.calloc(deviceStack).logicOp(true).samplerAnisotropy(true));
+                                    .pEnabledFeatures(VkPhysicalDeviceFeatures.calloc(deviceStack).logicOp(features.logicOp()).samplerAnisotropy(features.samplerAnisotropy()));
                             status = vkCreateDevice(device, create, null, pointer);
                             if (status == VK_SUCCESS) {
                                 vkDestroyDevice(new VkDevice(pointer.get(0), device, create), null);
@@ -84,7 +87,8 @@ public final class VulkanSupport {
                         }
                     }
                 }
-                return new Result(false, "No Vulkan 1.2 graphics device with logicOp, anisotropy, required extensions and a creatable logical device");
+                return new Result(false, "No Vulkan 1.2 graphics device with " + (presentationOnly ? "" : "logicOp, anisotropy, ")
+                        + "required extensions and a creatable logical device");
             } finally {
                 vkDestroyInstance(instance, null);
             }
