@@ -256,7 +256,7 @@ public final class ZinkPresenter implements AutoCloseable {
             }
         }
         recordedTransfers += count;
-        Initializer.LOGGER.info("AFV_ZINK_TRANSFER_COMMANDS: generation={}, recorded={}, variants={}", ++transferGenerations, count, commandVariants);
+        Initializer.LOGGER.info("AFV_ZINK_TRANSFER_COMMANDS: generation={}, recorded={}, variants={}, imageDependencyCommands=2", ++transferGenerations, count, commandVariants);
     }
 
     private void recordTransferCommand(VkCommandBuffer command, int slot, int imageIndex, boolean checkOutput) {
@@ -264,10 +264,11 @@ public final class ZinkPresenter implements AutoCloseable {
             // No ONE_TIME_SUBMIT flag: the slot fence permits sequential reuse.
             check(vkBeginCommandBuffer(command, VkCommandBufferBeginInfo.calloc(stack).sType$Default()), "begin reusable presentation command");
             var shared = frames[slot];
-            shared.acquire(command, family);
+            // Both images enter TRANSFER from TOP_OF_PIPE. Preserve each image's
+            // access/layout/ownership contract in one dependency command.
+            shared.acquire(command, family, imageBarrier(images[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT, stack));
             if (checkOutput) outputChecks[slot].record(command, shared.image(), width, height, stack);
-            imageBarrier(command, images[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, stack);
             var blit = VkImageBlit.calloc(1, stack);
             blit.srcSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
             blit.dstSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
@@ -276,9 +277,8 @@ public final class ZinkPresenter implements AutoCloseable {
             blit.dstOffsets(1).set(width, height, 1);
             vkCmdBlitImage(command, shared.image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                     images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, blit, VK_FILTER_NEAREST);
-            imageBarrier(command, images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                    VK_ACCESS_TRANSFER_WRITE_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, stack);
-            shared.release(command, family);
+            shared.release(command, family, imageBarrier(images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0, stack));
             check(vkEndCommandBuffer(command), "end reusable presentation command");
         }
     }
@@ -299,12 +299,12 @@ public final class ZinkPresenter implements AutoCloseable {
             glClear(GL_COLOR_BUFFER_BIT);
         }
     }
-    private static void imageBarrier(VkCommandBuffer command, long image, int oldLayout, int newLayout,
-                                     int srcAccess, int dstAccess, int srcStage, int dstStage, MemoryStack stack) {
-        var barrier = VkImageMemoryBarrier.calloc(1, stack).sType$Default().image(image).oldLayout(oldLayout).newLayout(newLayout)
+    private static VkImageMemoryBarrier imageBarrier(long image, int oldLayout, int newLayout,
+                                                     int srcAccess, int dstAccess, MemoryStack stack) {
+        var barrier = VkImageMemoryBarrier.calloc(stack).sType$Default().image(image).oldLayout(oldLayout).newLayout(newLayout)
                 .srcAccessMask(srcAccess).dstAccessMask(dstAccess).srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED).dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
         barrier.subresourceRange().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).levelCount(1).layerCount(1);
-        vkCmdPipelineBarrier(command, srcStage, dstStage, 0, null, null, barrier);
+        return barrier;
     }
     private void destroySwapchain() {
         // Caller has drained the device. Free executable references before their

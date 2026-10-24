@@ -832,3 +832,59 @@ shader ZIPのSHA-256と9設定値は元ファイルとprivate copyで一致す�
 ローカル証跡は`surface-recovery-{baseline,after}-{benchmark.json,client.log,launch.log}`、
 `surface-recovery-after-preflight.log`と`surface-recovery-build.log`。
 元pack・既存save・提供shaderは変更していない。
+
+## 転送前後の画像同期のまとめ（2026-10-25）
+
+共有画像のEXTERNAL acquireと表示画像のTRANSFER_DST準備を1回の
+TOP_OF_PIPE→TRANSFER依存にまとめ、共有画像のEXTERNAL releaseと表示画像の
+PRESENT遷移を1回のTRANSFER→BOTTOM_OF_PIPE依存にまとめた。各画像のaccess mask、
+layout、queue family、subresource rangeを保ち、通常転送のimage依存commandを
+4回から2回にする。初期所有権移譲と既存native経路の単独barrierはそのまま使う。
+Iris pass、外部semaphore、fence、present semaphore、画像内容は変更しない。
+これは記録済みcommandのGPU側同期表現の削減であり、毎frameのJava記録呼出しを
+削減したという意味ではない。
+
+[Vulkanのpipeline barrier仕様](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdPipelineBarrier.html)
+に従い、同じ実行scopeの異なる画像を配列で指定する。診断readback variantも同じ
+まとめた依存を使用する。
+
+ビルド／baselineコンパイル、配布JAR検査、差分空白検査が通過。同じIris／Sodium最小
+構成・指定Complementary・9設定値、960×540、距離12、固定scene／視点、VSyncなし、
+追加600 ticks待機後400 ticks計測、最終出力readbackなしで短いFPS試料を取得した。
+前節の変更後試料（`0b9054a`）とJSONのrenderer、world待機ticks、解像度、距離、
+VSync、frame制限、カメラ、display、focus、計測方式は一致した。
+
+| 最小構成・約20秒の単発測定 | 平均FPS | median frame ms | p95 frame ms | p99 frame ms |
+| --- | ---: | ---: | ---: | ---: |
+| 変更前 `0b9054a` | 51.35 | 19.55 | 22.83 | 25.61 |
+| 同期commandをまとめた版 | 53.64 | 18.10 | 21.91 | 24.74 |
+
+今回は1071 frames／19.966秒。専用Xを同じ1280×720設定で再起動しており、時間帯も
+異なる単発試料なので、差をこの変更だけの改善率とは扱わない。実DTFuelの普段の
+FPSとの直接比較にも使わない。最小構成ではworld、resize、resource reload、実iconify、
+VSync切替、実surface再作成、同一context／device／Iris維持、disconnectと正常終了も
+通過し、5093回の転送command再利用（6 generation計36個）を確認した。
+
+配布JAR SHA-256は
+`36add41ceb369beaf7495fe9e00bfb01b87d0699f222b4b0b7eee8cb82d8bece`。
+証跡はローカル`batched-barriers-build.log`、
+`minimal-batched-barriers-{benchmark.json,launch.log,client.log,preflight.log}`。
+
+続いて同じJARをDTFuel 0.1.10の全204 MOD・NeoForge 21.1.251の専用コピーで検証した。
+指定Complementaryを有効にしてAUTO→Vulkan、実world／resize、shader off→on／
+shader-only reload（それぞれ異なる実pipeline）、resource reload、実iconify／復帰、
+VSync変更／復帰、実surface再作成と同一GL context／VkDevice／Iris維持、disconnect、
+正常終了を通過。Vulkan共有画像の最終出力markerを7383回照合し、まとめた依存を使う
+通常／readback両variantで転送commandを14684回再利用した（記録84個）。shader ZIPの
+SHA-256と元の9設定値の一致も確認した。この実行はreadback診断を有効にしているため
+FPS試料には使用していない。
+
+起動後はDTFuelの更新確認画面がTitleScreenへの移行を待たせていた。実プロセスの
+thread dump、専用Xのwindow ID／PID／boundsと単一clientのstackingを確認し、
+Minecraft client領域960×540だけを取得して原因を確認した。同じ専用clientで
+「Not now」を押して継続し、pack更新は行っていない。この介入を記録し、自動試験が
+最初から無人で通ったとは扱わない。見えていた停止はJava deadlockやGL→Vulkan転送
+停止ではなかった。ローカル証跡は`dtfuel-batched-barriers-{launch.log,client.log,
+preflight.log,manifest.json,result.json,thread-dump.txt}`、更新画面は
+`dtfuel-update-prompt.png`と`dtfuel-update-prompt-target.json`。
+元pack・既存save・提供shaderは変更していない。

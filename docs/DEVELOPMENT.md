@@ -575,3 +575,24 @@ The adjacent `.zip.txt` is copied automatically, with input hashes stored in
 compare option values separately from whole-file hashes. Never edit the original
 user shader/options file. The smoke harness requests a different size even if the
 client initially launches at 960×540.
+
+## Batched presentation image dependencies
+
+The reusable client presentation command records two image-dependency commands
+instead of four. At entry, the shared-image EXTERNAL acquire and the WSI image's
+UNDEFINED -> TRANSFER_DST transition share TOP_OF_PIPE -> TRANSFER. At exit, the
+shared-image EXTERNAL release and the WSI image's TRANSFER_DST -> PRESENT
+transition share TRANSFER -> BOTTOM_OF_PIPE. Each image retains its original
+layout, access masks, queue-family indices and subresource range. Binary external
+semaphores, per-slot fences and per-image present semaphores are unchanged.
+
+`SharedImage.acquire/release` accept an optional distinct companion image barrier
+for those exact execution scopes. Initial ownership and general/native callers
+keep the standalone path. The final-output diagnostic uses the same batched
+commands, with its existing readback operation between acquire and release.
+This reduces dependency commands submitted to the driver; it does not remove
+synchronization or alter Iris passes. Transfer commands are already cached, so
+there is no claim of four fewer per-frame Java recording calls.
+
+See the [Vulkan pipeline-barrier specification](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdPipelineBarrier.html)
+for the common execution scope and per-image memory barriers.

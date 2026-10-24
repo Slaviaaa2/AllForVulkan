@@ -181,13 +181,20 @@ public final class SharedImage implements AutoCloseable {
     }
     /** Record release on the game's graphics queue, then signal readyForGl in that submission. */
     public void release(VkCommandBuffer command, int family) {
+        release(command, family, null);
+    }
+    /** Batch a companion TRANSFER -> BOTTOM_OF_PIPE image barrier with the release.
+     * The companion must reference a different image; initial ownership uses release(command, family). */
+    public void release(VkCommandBuffer command, int family, VkImageMemoryBarrier transferBarrier) {
         assertOwner();
+        if (transferBarrier != null && layout == VK_IMAGE_LAYOUT_UNDEFINED)
+            throw new IllegalStateException("Initial ownership cannot batch a transfer release");
         int access = layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? VK_ACCESS_TRANSFER_WRITE_BIT
                 : layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL ? VK_ACCESS_TRANSFER_READ_BIT : 0;
         int nextLayout = copyOnly ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL;
         barrier(command, layout, nextLayout, access, 0, family, VK_QUEUE_FAMILY_EXTERNAL,
                 layout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, transferBarrier);
         layout = nextLayout;
     }
     /** Wait in the GL queue and return the sampled texture, without changing framebuffer state. */
@@ -227,18 +234,31 @@ public final class SharedImage implements AutoCloseable {
     }
     /** Record acquire in a submission waiting on readyForVulkan at TRANSFER. */
     public void acquire(VkCommandBuffer command, int family) {
+        acquire(command, family, null);
+    }
+    /** Batch a companion TOP_OF_PIPE -> TRANSFER image barrier with the acquire.
+     * The companion must reference a different image and use compatible access masks. */
+    public void acquire(VkCommandBuffer command, int family, VkImageMemoryBarrier transferBarrier) {
         assertOwner();
         barrier(command, copyOnly ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL,
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0, VK_ACCESS_TRANSFER_READ_BIT,
-                VK_QUEUE_FAMILY_EXTERNAL, family, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+                VK_QUEUE_FAMILY_EXTERNAL, family, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, transferBarrier);
         layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     }
     private void barrier(VkCommandBuffer command, int oldLayout, int newLayout, int srcAccess, int dstAccess,
                          int srcFamily, int dstFamily, int srcStage, int dstStage) {
+        barrier(command, oldLayout, newLayout, srcAccess, dstAccess, srcFamily, dstFamily, srcStage, dstStage, null);
+    }
+    private void barrier(VkCommandBuffer command, int oldLayout, int newLayout, int srcAccess, int dstAccess,
+                         int srcFamily, int dstFamily, int srcStage, int dstStage, VkImageMemoryBarrier companion) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            var barrier = VkImageMemoryBarrier.calloc(1, stack).sType$Default().image(image).oldLayout(oldLayout).newLayout(newLayout)
+            var barrier = VkImageMemoryBarrier.calloc(companion == null ? 1 : 2, stack).sType$Default().image(image).oldLayout(oldLayout).newLayout(newLayout)
                     .srcAccessMask(srcAccess).dstAccessMask(dstAccess).srcQueueFamilyIndex(srcFamily).dstQueueFamilyIndex(dstFamily);
             barrier.subresourceRange().aspectMask(aspect).levelCount(1).layerCount(1);
+            if (companion != null) {
+                if (companion.image() == image) throw new IllegalArgumentException("Companion barrier must use a different image");
+                barrier.get(1).set(companion);
+            }
             vkCmdPipelineBarrier(command, srcStage, dstStage, 0, null, null, barrier);
         }
     }
