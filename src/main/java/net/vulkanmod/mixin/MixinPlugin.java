@@ -17,7 +17,8 @@ public class MixinPlugin implements IMixinConfigPlugin {
         org.lwjgl.system.Configuration.STACK_SIZE.set(Math.max(1024,
                 org.lwjgl.system.Configuration.STACK_SIZE.get(64)));
         dev.allforvulkan.neoforge.BackendBootstrap.initialize();
-        if (dev.allforvulkan.neoforge.BackendBootstrap.vulkan() && Boolean.getBoolean("afv.zinkInterop"))
+        if ((dev.allforvulkan.neoforge.BackendBootstrap.vulkan() && Boolean.getBoolean("afv.zinkInterop"))
+                || Boolean.getBoolean("afv.validationEgl"))
             org.lwjgl.system.Configuration.OPENGL_EXPLICIT_INIT.set(true);
     }
 

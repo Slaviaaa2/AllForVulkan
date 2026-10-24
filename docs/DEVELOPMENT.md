@@ -307,3 +307,50 @@ The current validation X session uses Xephyr on `:97`; its Xauthority file is
 test subprocess. The client runs separately from the user's working desktop.
 Captures must still target the identified client window or a smaller region;
 virtual desktops do not authorize full-screen capture.
+
+
+For a production pack run, prefer the installed launcher metadata and the built
+JAR instead of the development launch. This avoids IDE-only GameTest registration
+and mod assertions. The helper reads public version/library/assets metadata,
+uses an offline QA identity, and never reads launcher accounts:
+
+```sh
+DISPLAY=:97 XAUTHORITY="$PWD/build/compatibility/xsession/Xauthority" \
+python3 scripts/launch_modpack_client.py \
+  --instance build/compatibility/dtfuel-client \
+  --install /mnt/hdd/CurseForge/Install --java-home /path/to/jdk21 \
+  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.1.jar \
+  --smoke --local-xim --zink --x11-no-modifiers
+```
+
+`--local-xim` supplies the nested X session with a local XIM context, avoiding
+CocoaInput's null-XIC failure when the host input-method server is absent there.
+`--zink` explicitly selects the GL comparison route (AFV native Vulkan renderer
+disabled), forces real Mesa EGL/Zink, and asserts the resulting GL renderer.
+No GL version/capability strings are spoofed. Source pack files remain untouched.
+`--shader-fixture tests/shaderpacks/AFV-Smoke --require-iris` enables the private
+test pack and requires an actual IrisRenderingPipeline in the world. The original
+private client's Iris config is backed up. `--benchmark-ticks 600` and
+`--inspect-ticks 900` optionally extend the stable-world phase.
+
+
+For nested X11 servers where Zink/EGL presents black windows,
+`--x11-no-modifiers` sets Mesa's `LIBGL_KOPPER_DRI2=true` in that child only.
+This is an explicit presentation compatibility choice, recorded in the run
+manifest; include it in performance conditions. See [Mesa environment variables](https://docs.mesa3d.org/envvars.html#libgl-kopper-dri2).
+EGL runs also resolve GL entrypoints through eglGetProcAddress rather than the
+default GLX loader. A 32×32 numeric sample of Minecraft's actual color texture
+rejects an entirely black target during GL smoke checks; it is not frame transport
+or proof of full-image correctness.
+
+```sh
+# Add to the production command above:
+--shader-pack /path/to/ComplementaryReimagined_r5.9.3.zip --require-iris \
+--benchmark-ticks 300 --inspect-ticks 600
+```
+
+The adjacent `.zip.txt` is copied automatically, with input hashes stored in
+`.afv-launch-manifest.json`. Iris may rewrite the private copy's comment timestamp;
+compare option values separately from whole-file hashes. Never edit the original
+user shader/options file. The smoke harness requests a different size even if the
+client initially launches at 960×540.

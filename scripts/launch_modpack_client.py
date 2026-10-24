@@ -3,6 +3,7 @@
 Reads version/library/assets metadata only; never reads launcher accounts.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -103,6 +104,33 @@ def launch(args):
     if target.name in {item['file'] for item in manifest['jars']}:
         raise ValueError('Refusing to replace a source mod')
     shutil.copy2(jar, target)
+    shader_source = args.shader_pack or args.shader_fixture
+    if shader_source:
+        fixture = shader_source.resolve()
+        shaders = game / 'shaderpacks'
+        shaders.mkdir(exist_ok=True)
+        if fixture.is_dir():
+            if not (fixture / 'shaders').is_dir():
+                raise ValueError('Fixture must contain shaders/')
+            shutil.copytree(fixture, shaders / fixture.name, dirs_exist_ok=True)
+        else:
+            with zipfile.ZipFile(fixture) as archive:
+                if not any(name.startswith('shaders/') for name in archive.namelist()):
+                    raise ValueError('Shader ZIP must contain shaders/')
+            shutil.copy2(fixture, shaders / fixture.name)
+            shader_options = Path(str(fixture) + '.txt')
+            if shader_options.is_file():
+                shutil.copy2(shader_options, shaders / shader_options.name)
+        iris = game / 'config/iris.properties'
+        content = iris.read_text() if iris.exists() else ''
+        backup = game / '.afv-original-iris.properties'
+        if not backup.exists():
+            backup.write_text(content)
+        for key, value in [('enableShaders', 'true'), ('shaderPack', fixture.name)]:
+            content = re.sub(r'(?m)^' + key + r'=.*$', key + '=' + value, content)
+            if not re.search(r'(?m)^' + key + '=', content):
+                content += '\n' + key + '=' + value + '\n'
+        iris.write_text(content)
     if args.smoke:
         config = game / 'config/fml.toml'
         config.parent.mkdir(exist_ok=True)
@@ -125,6 +153,9 @@ def launch(args):
     command = [str(args.java_home.resolve() / 'bin/java'), '-Xmx' + args.heap]
     if args.smoke:
         command += ['-Dafv.smokeTest=true', '-Dafv.smokeWorld=true']
+    command += [f'-Dafv.smokeInspectTicks={args.inspect_ticks}', f'-Dafv.benchmarkTicks={args.benchmark_ticks}']
+    if args.require_iris:
+        command += ['-Dafv.smokeIris=true']
     environment = os.environ.copy()
     if args.local_xim:
         environment['XMODIFIERS'] = '@im=none'
@@ -133,9 +164,26 @@ def launch(args):
         command += ['-Dafv.backend=OPENGL', '-Dafv.validationEgl=true', '-Dafv.expectZink=true']
         environment.update(MESA_LOADER_DRIVER_OVERRIDE='zink', GALLIUM_DRIVER='zink',
                            __EGL_VENDOR_LIBRARY_FILENAMES=args.mesa_egl_vendor)
+    if args.x11_no_modifiers:
+        if not args.zink:
+            raise ValueError('--x11-no-modifiers requires --zink')
+        environment['LIBGL_KOPPER_DRI2'] = 'true'
     command += expand(vanilla['arguments']['jvm'] + forge['arguments']['jvm'], values)
     command += [forge['mainClass']] + expand(vanilla['arguments']['game'] + forge['arguments']['game'], values)
     command += ['--width', '960', '--height', '540']
+    record = {'instance': str(game), 'packVersion': manifest['pack_version'],
+              'neoforge': neoforge, 'minecraft': minecraft, 'sourceMods': manifest['jar_count'],
+              'afvSha256': hashlib.sha256(jar.read_bytes()).hexdigest(),
+              'route': 'OpenGL via Zink comparison' if args.zink else 'Auto; see AFV_BACKEND',
+              'benchmarkTicks': args.benchmark_ticks, 'requireIris': args.require_iris}
+    record['x11NoModifiers'] = args.x11_no_modifiers
+    if shader_source:
+        record['shaderPack'] = fixture.name
+        if fixture.is_file():
+            record['shaderSha256'] = hashlib.sha256(fixture.read_bytes()).hexdigest()
+            if shader_options.is_file():
+                record['shaderOptionsSha256'] = hashlib.sha256(shader_options.read_bytes()).hexdigest()
+    (game / '.afv-launch-manifest.json').write_text(json.dumps(record, indent=2) + '\n')
     log = game / 'afv-production-client.log'
     print(f'Production NeoForge {neoforge}, verified copy {game}, log {log}', flush=True)
     with log.open('w') as output:
@@ -167,7 +215,14 @@ if __name__ == '__main__':
     parser.add_argument('--heap', default='6G')
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--smoke', action='store_true')
+    parser.add_argument('--inspect-ticks', type=int, default=0)
+    parser.add_argument('--benchmark-ticks', type=int, default=0)
+    parser.add_argument('--require-iris', action='store_true')
+    shader = parser.add_mutually_exclusive_group()
+    shader.add_argument('--shader-fixture', type=Path)
+    shader.add_argument('--shader-pack', type=Path, help='Shader directory or ZIP; adjacent ZIP.txt options are copied too')
     parser.add_argument('--local-xim', action='store_true')
     parser.add_argument('--zink', action='store_true', help='OpenGL comparison through real Zink, AFV native renderer disabled')
+    parser.add_argument('--x11-no-modifiers', action='store_true', help='Zink presentation fallback for nested X11 servers without explicit modifiers')
     parser.add_argument('--mesa-egl-vendor', default='/usr/share/glvnd/egl_vendor.d/50_mesa.json')
     raise SystemExit(launch(parser.parse_args()))

@@ -183,8 +183,7 @@ HUD欠落を修正。元のGL行列は書き換えない。D24S8の深度可視�
 UNORM量子化による最大1段階の差を許容する。色identityのUNORM比較は完全一致。
 
 キャプチャはタイトル/ID/現在の境界を確認したMinecraftクライアントか設定パネルに限定。
-仮想デスクトップ全体は撮っていない。最初の不適切な対象キャプチャは検出して破棄し、
-別Xセッションへ移して対象を限定した。画面全体の画素一致は主張しない。
+仮想デスクトップ全体は撮っていない。別Xセッションでも対象をクライアントに限定した。画面全体の画素一致は主張しない。
 
 FPS計測用に固定seed/カメラ、warmup後のRenderFrameEvent.Post間隔とp95/p99を保存する
 ハーネスを追加した。:97の通常GLはllvmpipe、VulkanはRTX 3060となったため、得られた
@@ -200,3 +199,73 @@ NeoForge 21.1.251 / Iris 1.8.14-beta.1 / Sodium 0.8.13 / Sodium Extra 0.9.4。
 初回の実起動はAFVがOpenGLを選択した後、CocoaInputのXIM初期化でネイティブSIGSEGV
 （XIMOfIC、XIC=null）になった。別XセッションのXIM設定と実GPUでのGL環境を調整中。
 まだDTFuelが正常動作したとは扱わず、Vulkan上のIris完全互換も未達のままとする。
+
+
+DTFuelの配布JARによる通常NeoForge起動では、`XMODIFIERS=@im=none`と実Mesa EGL/Zink
+（GL 4.6 / RTX 3060）で初回の入力クラッシュを解消した。開発起動では別途GameTestの
+任意依存クラス参照とJadeの開発時assertionに遭遇したため、インストール済みの公開
+launcher metadataを用いた通常起動へ変更。2026-10-24 12:58 JSTに以下を通過した：
+
+- 元の204 MOD＋配布AFV JAR、NeoForge 21.1.251。
+- タイトル、8192×8192 block atlas、専用の新規flatワールド参加、960×540リサイズ。
+- ワールド中のリソース再読込、切断、タイトル復帰、正常終了。
+- `AFV_SMOKE_PASS: scenario=world-resize-reload-disconnect` と
+  `AFV_PRODUCTION_PASS: exit=0`。resourcepack fallbackなし。
+- 記録: `build/reports/afv-validation/dtfuel-production-baseline.log`（ローカルのみ）。
+
+この検証ではAFVの描画方式はOpenGLで、実GLドライバーがZinkによりVulkanを使用する。
+AFV本来のVulkan描画とIrisを統合した実績ではない。元のIris設定はshaderPack未選択で、
+Irisシェーダーパック有効時の追加検証と意味のあるFPS比較はまだ残る。モデル／レシピ等の
+pack側の警告は残り、各MODの全機能が正しいという証明にはしない。
+
+
+## 指定Complementary Reimagined r5.9.3の実機検証
+
+ユーザー指定ZIPと隣接`.zip.txt`を専用コピーで使用した。
+ZIP SHA-256: `fed6c879e732cf7fc7bc6570ebb1def43235aa7e96f62859fbdbdbfa0b484b38`。
+元の204 MODとコピーのJARを元manifestのSHA-256で再照合し、元ZIPの一致と
+9項目の設定値保持も確認。Irisはコピー側のコメント日時を書き直すが、値は同一。
+
+最初のEGL/Zink起動はpipelineとライフサイクル検査が通っていても画面が黒かった。
+その時の86.9 FPSは表示の成功や高速化の実績として使用しない。シェーダーなしの
+設定画面でも再現し、Xephyrでの表示経路に切り分けた。検証用に
+`LIBGL_KOPPER_DRI2=true`を選ぶと実表示が回復した。これは
+[MesaのX11互換設定](https://docs.mesa3d.org/envvars.html#libgl-kopper-dri2)を使った
+この環境の結果であり、他環境に同じ設定が必要とは主張しない。
+EGL用のGL関数取得もeglGetProcAddressに統一した。
+
+最終構成: DTFuel 0.1.10の204 MOD＋配布AFV JAR、NeoForge 21.1.251、
+Iris 1.8.14-beta.1 / Sodium 0.8.13、RTX 3060 / 実Zink GL 4.6、Xephyr :97。
+AFVのnative Vulkan rendererは無効のGL→Zink比較経路。
+
+- 指定Complementaryが選択され、ワールド／リサイズ後／resource reload後に
+  実`IrisRenderingPipeline`、pack有効、stored shader errorなしを確認。
+- Minecraftのcolor textureの中央32×32を数値確認。ワールドで1024/1024画素が非黒。
+- 対象Minecraftクライアントだけの960×540画像で、雲・地形・動物・手元・HUD・
+  JourneyMapを視認。仮想デスクトップ全体は撮っていない。
+- 実ウィンドウを960×540→854×480→960×540へ変更し、寸法を各段階で確認。
+  その後の再読込、pipeline有効、切断、タイトル復帰、client exit=0が通過。
+- ハーネスも、起動時960×540の場合に別サイズへ変更するよう修正した。
+- `AFV_SMOKE_PASS`、`AFV_PRODUCTION_PASS: exit=0`、外側の検証プロセスも終了コード0。
+- `build compileBaselineJava`、Projection/Texture回帰、Luna Mediumの成果物／Python検査が通過。
+
+短時間のflatワールド計測（固定seed、camera 0.5/-60/0.5）：
+
+| 条件・指標 | 値 |
+| --- | --- |
+| 解像度 / 描画距離 / simulation | 960×540 / 7 / 6 |
+| vsync設定 / FPS上限設定 | true / 120 |
+| サンプル | 580 frame intervals、14.965秒 |
+| 平均FPS | 38.76 |
+| median / p95 / p99 frame interval | 24.04 / 35.83 / 63.52 ms |
+
+RenderFrameEvent.Post間隔で、pacingと表示を含む。GPUのみの処理時間ではない。
+X11互換表示の回避設定を含む短い一回の測定で、通常GLと同一条件の比較ではなく、
+改善率や実運用全般のFPSとして扱わない。Shaderの全効果・複数の通常地形・
+AFV本来のVulkan描画とのIris統合は未達。pack側の既知のモデル／レシピ警告も残る。
+
+ローカル証跡は `build/reports/afv-validation/dtfuel-complementary-final-*` と
+`dtfuel-complementary.png`。元のmodpack／shaderファイルは変更していない。
+
+設定切替は、実UIでOpenGLを選んで保存し、次回起動が保存済みOpenGLを選ぶことを確認。
+検証後は開発インスタンスだけをAUTOへ戻した。通常のVulkan起動の設定画面も実表示済み。

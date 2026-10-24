@@ -198,3 +198,11 @@ macOSはVulkan実装とGL機能の制約を別に評価する。
   数値を比べて高速化と主張しない。FPS/p95/p99計測には実rendererと条件を保存する。
 - DTFuel 0.1.10 / NeoForge 21.1.251の204 MODを独立コピーし、全JARのSHA-256を照合。
   元の設定・MOD・ワールドは変更しない。実クライアントの検証は継続中。
+
+
+### 追加検証対象: Complementary Reimagined r5.9.3
+
+ユーザー指定の `/mnt/hdd/CurseForge/Instances/DTFuel/shaderpacks/ComplementaryReimagined_r5.9.3.zip`
+と隣接する `.zip.txt` を専用コピーへ導入。元ファイルを変更せず、設定の9項目を保持して
+Irisの実pipeline、ワールド表示、実寸法の変更、再読込・切断を検証する。
+AFV本体のVulkan rendererとの統合と、GL→Zink比較構成の成功は区別する。

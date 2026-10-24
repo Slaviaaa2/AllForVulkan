@@ -28,10 +28,13 @@ neoForge {
             sourceSet = sourceSets.baseline
             gameDirectory = file('run-iris-baseline')
             systemProperty 'afv.expectZink', 'true'
+            systemProperty 'org.lwjgl.opengl.explicitInit', 'true'
             systemProperty 'afv.benchmarkTicks', System.getProperty('afv.benchmarkTicks', '0')
             environment 'MESA_LOADER_DRIVER_OVERRIDE', 'zink'
             environment 'GALLIUM_DRIVER', 'zink'
             environment '__EGL_VENDOR_LIBRARY_FILENAMES', providers.gradleProperty('mesaEglVendor').getOrElse('/usr/share/glvnd/egl_vendor.d/50_mesa.json')
+            if (providers.gradleProperty('zinkX11NoModifiers').getOrElse('false').toBoolean())
+                environment 'LIBGL_KOPPER_DRI2', 'true'
         }
         irisBaseline {
             client()
@@ -82,6 +85,7 @@ def devNatives = hostOs.contains('win') ? 'natives-windows' :
         hostOs.contains('mac') ? (hostArch == 'aarch64' ? 'natives-macos-arm64' : 'natives-macos') : 'natives-linux'
 def nativeTargets = ['natives-linux', 'natives-windows', 'natives-macos', 'natives-macos-arm64']
 dependencies {
+    baselineImplementation "org.lwjgl:lwjgl-egl:${lwjglVersion}"
     testImplementation "org.joml:joml:1.10.5"
     testImplementation "org.lwjgl:lwjgl:${lwjglVersion}"
     testImplementation "org.lwjgl:lwjgl-opengl:${lwjglVersion}"

@@ -27,6 +27,7 @@ public final class ClientSmokeTest {
     private static final boolean WORLD = Boolean.getBoolean("afv.smokeWorld");
     private static int ticks, stableTicks, phase, inspectUntil;
     private static int benchmarkUntil;
+    private static int resizeWidth, resizeHeight;
     private static boolean benchmarkFinished;
     private static long drawBaseline;
     private static CompletableFuture<Void> reload;
@@ -104,12 +105,15 @@ public final class ClientSmokeTest {
                 if (BackendBootstrap.vulkan()) Initializer.LOGGER.info("AFV_SMOKE_WORLD: visible sections={}, submitted terrain draws={}",
                         WorldRenderer.getInstance().getVisibleSectionsCount(), DrawBuffers.getSubmittedDraws() - drawBaseline);
                 else Initializer.LOGGER.info("AFV_SMOKE_OPENGL_WORLD: player and world active");
-                GLFW.glfwSetWindowSize(client.getWindow().getWindow(), 960, 540);
+                boolean alreadyTarget = client.getWindow().getWidth() == 960 && client.getWindow().getHeight() == 540;
+                resizeWidth = alreadyTarget ? 854 : 960;
+                resizeHeight = alreadyTarget ? 480 : 540;
+                GLFW.glfwSetWindowSize(client.getWindow().getWindow(), resizeWidth, resizeHeight);
                 phase = 2;
             } else if (phase == 2) {
-                if (client.getWindow().getWidth() != 960 || client.getWindow().getHeight() != 540)
+                if (client.getWindow().getWidth() != resizeWidth || client.getWindow().getHeight() != resizeHeight)
                     throw new IllegalStateException("AFV_SMOKE_FAIL: resize did not reach expected framebuffer size");
-                Initializer.LOGGER.info("AFV_SMOKE_RESIZE: framebuffer 960x540");
+                Initializer.LOGGER.info("AFV_SMOKE_RESIZE: framebuffer {}x{}", resizeWidth, resizeHeight);
                 reload = client.reloadResourcePacks();
                 phase = 3;
             } else if (reload.isDone()) {
@@ -131,6 +135,7 @@ public final class ClientSmokeTest {
         if (client.level != null && Boolean.getBoolean("afv.smokeIris"))
             dev.allforvulkan.validation.IrisAssertions.requireActive();
         if (!BackendBootstrap.vulkan()) {
+            dev.allforvulkan.validation.GlFrameChecks.sampleColor(client.getMainRenderTarget().getColorTextureId());
             String renderer = org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_RENDERER);
             if (Boolean.getBoolean("afv.expectZink") && !renderer.toLowerCase(java.util.Locale.ROOT).contains("zink"))
                 throw new IllegalStateException("Expected real Zink renderer, got " + renderer);
