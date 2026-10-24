@@ -64,4 +64,15 @@ public final class IrisAssertions {
         try { Class.forName("net.irisshaders.iris.Iris").getMethod("reload").invoke(null); }
         catch (ReflectiveOperationException failure) { throw new IllegalStateException("Cannot reload Iris shaders", failure); }
     }
+
+    public static void requireDimension(String expected) {
+        try {
+            Object dimension = Class.forName("net.irisshaders.iris.Iris").getMethod("getCurrentDimension").invoke(null);
+            String namespace = (String) dimension.getClass().getMethod("getNamespace").invoke(dimension);
+            String name = (String) dimension.getClass().getMethod("getName").invoke(dimension);
+            if (!expected.equals(namespace + ":" + name)) throw new IllegalStateException("Iris dimension differs from client world: " + dimension + " != " + expected);
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException("Cannot validate Iris dimension", failure);
+        }
+    }
 }

@@ -132,6 +132,17 @@ Iris pipeline. The launcher requires `AFV_WINDOW_CYCLE_PASS`. It requires
 `--smoke --zink-client`; a missing window manager is an explicit test failure,
 not a simulated minimize. No screenshot is needed for these state assertions.
 
+Use `--dimension-cycle` with `--smoke --require-iris --zink-client` to travel
+Overworld → Nether → End → Nether → Overworld after the resource reload. It uses
+real server dimension transfers and client chunks, not a fabricated render-level
+key. Small lit platforms are created only in the freshly named AFV smoke world;
+existing saves are rejected. The return route avoids End credits. Each stage
+requires 120 client ticks, 120 actual Vulkan frames, the expected Iris dimension,
+an active pack with no stored shader error, an independent pipeline per dimension,
+nonblack color samples and the same EGL context. The selected shader pack remains
+unchanged. The launcher requires `AFV_DIMENSION_CYCLE_PASS`. No FPS measurement
+is performed unless benchmarking is separately requested.
+
 For a matched Zink/EGL presentation comparison, replace `--zink-client` with
 `--zink --x11-no-modifiers` when that fallback is required by the nested X server.
 Keep scene, shader options, warmup, resolution and game settings identical. This

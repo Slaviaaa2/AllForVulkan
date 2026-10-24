@@ -34,6 +34,7 @@ public final class ClientSmokeTest {
     private static CompletableFuture<Void> scene;
     private static dev.allforvulkan.validation.IrisLifecycle irisCycle;
     private static WindowLifecycle windowCycle;
+    private static DimensionLifecycle dimensionCycle;
     private static long renderedFrames;
 
     @SubscribeEvent public static void frame(net.neoforged.neoforge.client.event.RenderFrameEvent.Post event) {
@@ -83,6 +84,10 @@ public final class ClientSmokeTest {
         if (phase == 12 && client.level != null && client.player != null && client.screen == null) {
             if (!windowCycle.tick(ticks)) return;
             disconnect(client);
+            return;
+        }
+        if (phase == 13) {
+            if (dimensionCycle.tick()) finishWorldChecks(client);
             return;
         }
         if (phase >= 1 && phase <= 3 && client.level != null && client.player != null && client.screen == null) {
@@ -162,10 +167,10 @@ public final class ClientSmokeTest {
             } else if (reload.isDone()) {
                 reload.join();
                 Initializer.LOGGER.info("AFV_SMOKE_RELOAD: resources reloaded with active world");
-                if (Boolean.getBoolean("afv.smokeWindowCycle")) {
-                    windowCycle = new WindowLifecycle(client, ticks);
-                    phase = 12;
-                } else disconnect(client);
+                if (Boolean.getBoolean("afv.smokeDimensions")) {
+                    dimensionCycle = new DimensionLifecycle(client);
+                    phase = 13;
+                } else finishWorldChecks(client);
             }
         } else if (phase == 4 && client.screen instanceof TitleScreen && ++stableTicks >= 60) pass(client);
         else if (phase == 10 && client.screen instanceof BackendScreen && ++stableTicks >= Math.max(300, Integer.getInteger("afv.smokeInspectTicks", 0))) {
@@ -184,6 +189,13 @@ public final class ClientSmokeTest {
         client.level.disconnect();
         client.disconnect();
         client.setScreen(new TitleScreen());
+    }
+
+    private static void finishWorldChecks(Minecraft client) {
+        if (Boolean.getBoolean("afv.smokeWindowCycle")) {
+            windowCycle = new WindowLifecycle(client, ticks);
+            phase = 12;
+        } else disconnect(client);
     }
 
     private static void verifyAtlas(Minecraft client) {

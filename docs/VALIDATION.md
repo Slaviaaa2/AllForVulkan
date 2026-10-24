@@ -502,3 +502,45 @@ Sodium 0.8.13）と指定Complementaryを、専用Xephyr :97＋Metacity（compos
 pack由来の既知のproducer GL警告は残る。証跡はローカル
 `build/reports/afv-validation/dtfuel-surface-lifecycle-*`に保存した。
 元のmodpackと提供shaderは変更せず、第三者のバイナリーは公開しない。
+
+## Irisのディメンション別pipeline（2026-10-24）
+
+指定Complementary ZIPには`world0`／`world-1`／`world1`に各73本のvertex・fragment・
+compute shader入口がある。同じOverworldだけの検査では他ディメンションの経路を
+確認できないため、専用クライアントへ明示的な`--dimension-cycle`を追加した。
+通常起動では実行しない。
+
+新規`AFV-Smoke-*`ワールド以外を拒否し、実サーバーでOverworld→Nether→End→
+Nether→Overworldを移動する。Endから直接Overworldへ戻るcreditsの流れを避け、
+各移動先では実際にチャンクが読み込まれたこと、120 tickと120以上の実Vulkan frame、
+非黒の色画像、元のEGL contextを要求する。Nether／Endには石・ガラス・発光ブロックの
+小さな足場を作り、クリエイティブ飛行で安全に観察する。元のmodpackの既存saveは
+使用しない。
+
+各stageでIrisの実dimension IDがクライアントのworld keyと一致することを確認し、
+stored shader errorなしの実Iris pipelineを要求する。別ディメンションのpipelineを
+使い回していないこともobject identityで検査する。戻った先ではIris自身による
+pipeline再利用／再生成の両方を許し、AFVがIris資源を勝手に破棄しない。
+選択packは不変で、launcherも`AFV_DIMENSION_CYCLE_PASS`を必須にする。
+
+ビルド、baselineのコンパイル、配布JARと16 nested library、Python構文と差分の
+空白検査が通過。機械検査ログはローカル
+`build/reports/afv-validation/dimension-cycle-build.log`。
+
+DTFuelの独立コピー（元204 MOD、NeoForge 21.1.251、Iris 1.8.14-beta.1、Sodium 0.8.13）
+と指定Complementaryで実施した。AUTO→Vulkan、リサイズ・リソース再読込に続き、
+Nether 256 frame、End 239 frame、Nether再訪316 frame、Overworld復帰269 frameを
+それぞれ通過し、3種類の独立した実Iris pipelineを確認。5486回の実Vulkan表示、
+5483回の最終default出力のVulkan画像照合、切断・タイトル復帰・clientとlauncherの
+終了コード0を確認した。FPSの測定は行っていない。追加のrenderer不具合は
+このシーケンスでは再現しなかった。pack由来の既知のproducer GL警告は残る。
+
+viewport限定のNether／End画像も取得して一度確認したが、いずれもLoading terrainの
+タイミングだった。これは移動先ワールドの目視証拠にはせず、ローカルの
+`dtfuel-dimension-loading-*.png`として区別する。上記の判定は移動先の実チャンク、
+screenなしでの120 tick待機、GL数値画像検査、IrisとVulkanの実行状態による。
+各ディメンションのshader効果全体の目視確認は未実施で、次回の画像取得では
+world-ready時点に同期する必要がある。
+
+証跡はローカル`build/reports/afv-validation/dtfuel-dimension-cycle-*`。元のmodpack・
+既存save・提供shaderは変更せず、第三者バイナリーは公開しない。

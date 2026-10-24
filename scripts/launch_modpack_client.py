@@ -51,6 +51,8 @@ def launch(args):
         raise ValueError('--iris-cycle requires --smoke --require-iris')
     if args.window_cycle and not (args.smoke and args.zink_client):
         raise ValueError('--window-cycle requires --smoke --zink-client')
+    if args.dimension_cycle and not (args.smoke and args.require_iris and args.zink_client):
+        raise ValueError('--dimension-cycle requires --smoke --require-iris --zink-client')
     game, install = args.instance.resolve(), args.install.resolve()
     manifest_file = game / '.afv-validation-source.json'
     manifest = json.loads(manifest_file.read_text())
@@ -168,6 +170,8 @@ def launch(args):
         command += ['-Dafv.smokeIrisCycle=true']
     if args.window_cycle:
         command += ['-Dafv.smokeWindowCycle=true']
+    if args.dimension_cycle:
+        command += ['-Dafv.smokeDimensions=true']
     if args.scene:
         command += ['-Dafv.smokeScene=true']
     if args.final_output_probe:
@@ -212,6 +216,7 @@ def launch(args):
     record['finalOutputProbe'] = args.final_output_probe
     record['irisCycle'] = args.iris_cycle
     record['windowCycle'] = args.window_cycle
+    record['dimensionCycle'] = args.dimension_cycle
     record['requestedBackend'] = args.backend or ('VULKAN' if args.zink_client else 'OPENGL' if args.zink else 'saved setting')
     record['x11NoModifiers'] = args.x11_no_modifiers
     if shader_source:
@@ -245,6 +250,8 @@ def launch(args):
         passed = passed and 'AFV_IRIS_CYCLE_PASS' in text
     if args.window_cycle:
         passed = passed and 'AFV_WINDOW_CYCLE_PASS' in text
+    if args.dimension_cycle:
+        passed = passed and 'AFV_DIMENSION_CYCLE_PASS' in text
     print(('AFV_PRODUCTION_PASS' if passed else 'AFV_PRODUCTION_FAIL') + f': exit={code} log={log}', flush=True)
     return 0 if passed else 1
 
@@ -265,6 +272,7 @@ if __name__ == '__main__':
     parser.add_argument('--require-iris', action='store_true')
     parser.add_argument('--iris-cycle', action='store_true', help='Disable/re-enable/reload real Iris shaders with an additional resize in the same world')
     parser.add_argument('--window-cycle', action='store_true', help='Iconify/restore the private Vulkan window and switch VSync; requires a real window manager')
+    parser.add_argument('--dimension-cycle', action='store_true', help='Transfer the fresh QA world through Nether/End and back with real Iris pipelines')
     parser.add_argument('--scene', action='store_true', help='Build a shader validation scene in the new smoke world')
     parser.add_argument('--final-output-probe', action='store_true', help='Verify a last default-framebuffer draw reaches the Vulkan shared image')
     parser.add_argument('--debug-gl', action='store_true', help='Log bounded synchronous GL errors for client-bridge diagnosis')
