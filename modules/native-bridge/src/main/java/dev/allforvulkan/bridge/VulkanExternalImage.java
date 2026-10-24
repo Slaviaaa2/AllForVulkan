@@ -300,6 +300,98 @@ public final class VulkanExternalImage implements AutoCloseable {
             }
         }
     }
+    /** Exercise both production transfer strategies even when WSI offers only BGRA.
+     * The existing owned RGBA image is the private destination, never a screen. */
+    void verifyPresentationTransfer() {
+        verifyPresentationTransfer(true);
+        verifyPresentationTransfer(false);
+    }
+    private void verifyPresentationTransfer(boolean directCopy) {
+        assertUsable();
+        int sourceTexture = 0, sourceFramebuffer = 0;
+        try (var state = new GlStateScope(); var stack = MemoryStack.stackPush();
+             var shared = SharedImage.forGlCopy(physical, device, width, height, VK_FORMAT_R8G8B8A8_UNORM)) {
+            try {
+                sourceTexture = org.lwjgl.opengl.GL11.glGenTextures();
+                org.lwjgl.opengl.GL11.glBindTexture(org.lwjgl.opengl.GL11.GL_TEXTURE_2D, sourceTexture);
+                org.lwjgl.opengl.GL11.glTexImage2D(org.lwjgl.opengl.GL11.GL_TEXTURE_2D, 0, org.lwjgl.opengl.GL11.GL_RGBA8,
+                        width, height, 0, org.lwjgl.opengl.GL11.GL_RGBA, org.lwjgl.opengl.GL11.GL_UNSIGNED_BYTE, (ByteBuffer) null);
+                sourceFramebuffer = org.lwjgl.opengl.GL30.glGenFramebuffers();
+                org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_FRAMEBUFFER, sourceFramebuffer);
+                org.lwjgl.opengl.GL30.glFramebufferTexture2D(org.lwjgl.opengl.GL30.GL_FRAMEBUFFER,
+                        org.lwjgl.opengl.GL30.GL_COLOR_ATTACHMENT0, org.lwjgl.opengl.GL11.GL_TEXTURE_2D, sourceTexture, 0);
+                if (org.lwjgl.opengl.GL30.glCheckFramebufferStatus(org.lwjgl.opengl.GL30.GL_FRAMEBUFFER) != org.lwjgl.opengl.GL30.GL_FRAMEBUFFER_COMPLETE)
+                    throw new IllegalStateException("Presentation transfer source FBO incomplete");
+                org.lwjgl.opengl.GL30.glDisablei(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST, 0);
+                org.lwjgl.opengl.GL11.glDisable(org.lwjgl.opengl.GL30.GL_FRAMEBUFFER_SRGB);
+                var input = stack.malloc(width * height * 4);
+                begin(stack);
+                shared.release(command, queueFamily);
+                check(vkEndCommandBuffer(command), "end presentation initial release");
+                check(vkResetFences(device, fence), "reset presentation initial release fence");
+                check(vkQueueSubmit(queue, VkSubmitInfo.calloc(stack).sType$Default()
+                        .pCommandBuffers(stack.pointers(command)).pSignalSemaphores(stack.longs(shared.readyForGl())), fence), "submit presentation initial release");
+                awaitFence();
+                for (int frame = 0; frame < 8; frame++) {
+                    for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+                        int offset = (y * width + x) * 4;
+                        input.put(offset, (byte) (x * 3 + frame * 17));
+                        input.put(offset + 1, (byte) (y * 5 + frame * 11));
+                        input.put(offset + 2, (byte) (x + y * 7 + frame));
+                        input.put(offset + 3, (byte) 255);
+                    }
+                    org.lwjgl.opengl.GL45.glTextureSubImage2D(sourceTexture, 0, 0, 0, width, height,
+                            org.lwjgl.opengl.GL11.GL_RGBA, org.lwjgl.opengl.GL11.GL_UNSIGNED_BYTE, input);
+                    PresentationTransfer.copyGl(sourceFramebuffer, shared.beginGlCopy(), width, height, width, height, directCopy);
+                    shared.endGlWrite();
+                    begin(stack);
+                    var destination = VkImageMemoryBarrier.calloc(stack).sType$Default().image(image)
+                            .oldLayout(VK_IMAGE_LAYOUT_UNDEFINED).newLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+                            .srcAccessMask(0).dstAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                            .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED).dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
+                    destination.subresourceRange().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).levelCount(1).layerCount(1);
+                    shared.acquire(command, queueFamily, destination);
+                    PresentationTransfer.record(command, shared.image(), image, width, height, directCopy);
+                    barrier(stack, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+                            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+                    recordReadback(stack, image);
+                    shared.release(command, queueFamily);
+                    check(vkEndCommandBuffer(command), "end presentation transfer");
+                    check(vkResetFences(device, fence), "reset presentation transfer fence");
+                    check(vkQueueSubmit(queue, VkSubmitInfo.calloc(stack).sType$Default().pCommandBuffers(stack.pointers(command))
+                            .waitSemaphoreCount(1).pWaitSemaphores(stack.longs(shared.readyForVulkan()))
+                            .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_TRANSFER_BIT))
+                            .pSignalSemaphores(stack.longs(shared.readyForGl())), fence), "submit presentation transfer");
+                    awaitFence();
+                    currentLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                    verifyPresentationPixels(frame, stack);
+                }
+                System.out.println("AFV_PRESENTATION_TRANSFER_PASS: " + (directCopy ? "copy" : "blit")
+                        + ", vertical flip, nonuniform RGBA, 8 changing frames, size=" + width + "x" + height);
+            } finally {
+                org.lwjgl.opengl.GL11.glFinish();
+                vkDeviceWaitIdle(device);
+                if (sourceFramebuffer != 0) org.lwjgl.opengl.GL30.glDeleteFramebuffers(sourceFramebuffer);
+                if (sourceTexture != 0) org.lwjgl.opengl.GL11.glDeleteTextures(sourceTexture);
+            }
+        }
+    }
+    private void verifyPresentationPixels(int frame, MemoryStack stack) {
+        var pointer = stack.mallocPointer(1);
+        check(vkMapMemory(device, readbackMemory, 0, (long) width * height * 4, 0, pointer), "map presentation pixels");
+        try {
+            var pixels = org.lwjgl.system.MemoryUtil.memByteBuffer(pointer.get(0), width * height * 4);
+            for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+                int sourceY = height - 1 - y, offset = (y * width + x) * 4;
+                if ((pixels.get(offset) & 255) != ((x * 3 + frame * 17) & 255)
+                        || (pixels.get(offset + 1) & 255) != ((sourceY * 5 + frame * 11) & 255)
+                        || (pixels.get(offset + 2) & 255) != ((x + sourceY * 7 + frame) & 255)
+                        || (pixels.get(offset + 3) & 255) != 255)
+                    throw new IllegalStateException("Presentation transfer changed orientation/channel/bytes at " + x + "," + y + ", frame=" + frame);
+            }
+        } finally { vkUnmapMemory(device, readbackMemory); }
+    }
     private void awaitFence() {
         check(vkWaitForFences(device, fence, true, 10_000_000_000L), "interop fence (10 second deadline)");
     }

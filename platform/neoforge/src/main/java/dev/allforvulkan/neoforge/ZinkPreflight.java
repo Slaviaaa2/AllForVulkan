@@ -70,6 +70,8 @@ final class ZinkPreflight {
             String output = Files.readString(log);
             if (process.exitValue() != 0 || !output.contains("AFV_ZINK_PROBE_PASS") || !output.contains("AFV_EXTERNAL_IMAGE_PASS")
                     || !output.contains("AFV_SHARED_COPY_LAYOUT_PASS")
+                    || !output.contains("AFV_PRESENTATION_TRANSFER_PASS: copy")
+                    || !output.contains("AFV_PRESENTATION_TRANSFER_PASS: blit")
                     || !output.contains("AFV_WSI_SUPPORT_PASS") || !output.contains("AFV_INDEXED_STATE_PASS"))
                 return new VulkanSupport.Result(false, "Zink driver preflight failed (exit " + process.exitValue() + "); see " + log);
             return new VulkanSupport.Result(true, "Real Zink GL 4.6, compute and bidirectional external-image synchronization passed");

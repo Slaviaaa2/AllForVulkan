@@ -47,11 +47,11 @@ final class FinalOutputReadback implements AutoCloseable {
             pixels = MemoryUtil.memByteBuffer(mapped, BYTES);
         } catch (Throwable failure) { close(); throw failure; }
     }
-    void record(VkCommandBuffer command, long image, int width, int height, MemoryStack stack) {
+    void record(VkCommandBuffer command, long image, int width, int height, boolean flipped, MemoryStack stack) {
         if (pending) throw new IllegalStateException("Unverified final-output diagnostic reused");
         var copy = VkBufferImageCopy.calloc(1, stack);
         copy.imageSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
-        copy.imageOffset().set(width - 24, height - 24, 0);
+        copy.imageOffset().set(width - 24, flipped ? 16 : height - 24, 0);
         copy.imageExtent().set(8, 8, 1);
         vkCmdCopyImageToBuffer(command, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, copy);
         var barrier = VkBufferMemoryBarrier.calloc(1, stack).sType$Default().buffer(buffer).offset(0).size(VK_WHOLE_SIZE)

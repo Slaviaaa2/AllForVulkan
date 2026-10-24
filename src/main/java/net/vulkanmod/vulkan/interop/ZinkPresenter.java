@@ -3,6 +3,7 @@ package net.vulkanmod.vulkan.interop;
 import dev.allforvulkan.bridge.GlStateScope;
 import dev.allforvulkan.bridge.GlBlitScope;
 import dev.allforvulkan.bridge.PresentationSurface;
+import dev.allforvulkan.bridge.PresentationTransfer;
 import dev.allforvulkan.bridge.SharedImage;
 import dev.allforvulkan.bridge.SurfaceFailure;
 import dev.allforvulkan.bridge.ZinkContext;
@@ -15,7 +16,6 @@ import org.lwjgl.vulkan.*;
 import static dev.allforvulkan.bridge.SharedImage.check;
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL30.*;
-import static org.lwjgl.opengl.GL45.glBlitNamedFramebuffer;
 import static org.lwjgl.vulkan.VK10.*;
 import static org.lwjgl.vulkan.KHRSurface.*;
 import static org.lwjgl.vulkan.KHRSwapchain.*;
@@ -40,6 +40,7 @@ public final class ZinkPresenter implements AutoCloseable {
     private int width, height, frame;
     private int windowWidth, windowHeight;
     private boolean vsync = true, dirty = true, closed;
+    private boolean directCopy;
     private long presented;
     private long verifiedOutput;
     private long reusedTransfers, recordedTransfers;
@@ -117,7 +118,9 @@ public final class ZinkPresenter implements AutoCloseable {
             if (checkOutput) drawFinalMarker();
             try (var state = new GlBlitScope(context.defaultReadBuffer())) {
                 int destination = shared.beginGlCopy();
-                glBlitNamedFramebuffer(0, destination, 0, 0, context.width(), context.height(), 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                // An identical-format Vulkan copy cannot flip rows. Fold that
+                // flip into the existing GL blit instead of adding another pass.
+                PresentationTransfer.copyGl(0, destination, context.width(), context.height(), width, height, directCopy);
                 int blitError = glGetError();
                 if (blitError != GL_NO_ERROR) throw new IllegalStateException("Client color transfer: GL error 0x" + Integer.toHexString(blitError));
                 shared.endGlWrite();
@@ -161,6 +164,7 @@ public final class ZinkPresenter implements AutoCloseable {
             glFinish(); // Resize/teardown only; no work or destruction for a suspended surface.
             check(vkDeviceWaitIdle(device), "drain presentation before resize");
             destroySwapchain();
+            directCopy = color.directCopy();
             width = extent.width(); height = extent.height();
             int count = caps.minImageCount() + 1;
             if (caps.maxImageCount() > 0) count = Math.min(count, caps.maxImageCount());
@@ -210,7 +214,7 @@ public final class ZinkPresenter implements AutoCloseable {
             recordTransferCommands(stack);
             dirty = false;
             windowWidth = requestedWidth; windowHeight = requestedHeight;
-            Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}, sharedLayout=transfer", width, height, format, images.length, vsync);
+            Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}, sharedLayout=transfer, transfer={}", width, height, format, images.length, vsync, directCopy ? "copy" : "blit");
             return true;
         }
     }
@@ -268,15 +272,8 @@ public final class ZinkPresenter implements AutoCloseable {
             // access/layout/ownership contract in one dependency command.
             shared.acquire(command, family, imageBarrier(images[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED,
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT, stack));
-            if (checkOutput) outputChecks[slot].record(command, shared.image(), width, height, stack);
-            var blit = VkImageBlit.calloc(1, stack);
-            blit.srcSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
-            blit.dstSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
-            // GL texture rows start at the bottom; Vulkan WSI rows start at the top.
-            blit.srcOffsets(0).set(0, height, 0); blit.srcOffsets(1).set(width, 0, 1);
-            blit.dstOffsets(1).set(width, height, 1);
-            vkCmdBlitImage(command, shared.image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                    images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, blit, VK_FILTER_NEAREST);
+            if (checkOutput) outputChecks[slot].record(command, shared.image(), width, height, directCopy, stack);
+            PresentationTransfer.record(command, shared.image(), images[imageIndex], width, height, directCopy);
             shared.release(command, family, imageBarrier(images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0, stack));
             check(vkEndCommandBuffer(command), "end reusable presentation command");

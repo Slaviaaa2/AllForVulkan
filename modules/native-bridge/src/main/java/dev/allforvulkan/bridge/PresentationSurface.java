@@ -13,7 +13,10 @@ import static org.lwjgl.vulkan.KHRSurface.*;
 /** Shared capability policy for the isolated preflight and the real GL/Vulkan presenter. */
 public final class PresentationSurface {
     public record OfferedFormat(int format, int colorSpace) {}
-    public record ColorFormat(int surface, int shared, int colorSpace) {}
+    public record ColorFormat(int surface, int shared, int colorSpace) {
+        /** Only identical formats can preserve channel order and encoding with a raw copy. */
+        public boolean directCopy() { return surface == shared; }
+    }
     public record Extent(int width, int height) {
         public boolean drawable() { return width > 0 && height > 0; }
     }
@@ -45,13 +48,16 @@ public final class PresentationSurface {
         for (var format : formats) offered.add(new OfferedFormat(format.format(), format.colorSpace()));
         var features = new HashMap<Integer, Integer>();
         var shared = new HashMap<Integer, Boolean>();
-        return colorFormat(offered, format -> (features.computeIfAbsent(format, f -> features(physical, f)) & VK_FORMAT_FEATURE_BLIT_DST_BIT) != 0,
+        int required = VK_FORMAT_FEATURE_BLIT_DST_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+        return colorFormat(offered, format -> (features.computeIfAbsent(format, f -> features(physical, f)) & required) == required,
                 format -> shared.computeIfAbsent(format, f -> exportableSource(physical, f)));
     }
 
     /** Prefer byte-preserving UNORM output, but search every usable supported pair. */
     public static ColorFormat colorFormat(List<OfferedFormat> offered, IntPredicate destination, IntPredicate sharedSource) {
-        int[] preferences = {VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_SRGB};
+        // Prefer a byte-preserving UNORM pair; among equal encodings, an exact
+        // RGBA match avoids the Vulkan blit/conversion after the GL color copy.
+        int[] preferences = {VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_B8G8R8A8_SRGB};
         for (int format : preferences) {
             for (var candidate : offered) {
                 if (candidate.colorSpace() != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
@@ -73,7 +79,8 @@ public final class PresentationSurface {
     }
 
     private static boolean exportableSource(VkPhysicalDevice physical, int format) {
-        if ((features(physical, format) & VK_FORMAT_FEATURE_BLIT_SRC_BIT) == 0) return false;
+        int required = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+        if ((features(physical, format) & required) != required) return false;
         try (var stack = MemoryStack.stackPush()) {
             var external = VkPhysicalDeviceExternalImageFormatInfo.calloc(stack).sType$Default()
                     .handleType(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);

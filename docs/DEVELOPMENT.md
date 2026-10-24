@@ -596,3 +596,26 @@ there is no claim of four fewer per-frame Java recording calls.
 
 See the [Vulkan pipeline-barrier specification](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdPipelineBarrier.html)
 for the common execution scope and per-image memory barriers.
+
+## Exact-format presentation copies
+
+Among surfaces with the same UNORM/sRGB interpretation, prefer an exact RGBA
+shared/surface format match. The normal GL color blit then flips vertically into
+the shared image, and Vulkan uses `vkCmdCopyImage` with identical formats and
+extents. BGRA/RGBA pairs retain the existing GL copy and Vulkan conversion/flip
+blit. UNORM remains preferred over sRGB; copy preference never changes encoding.
+Transfer and blit format feature checks, shared allocation, external ownership,
+semaphores, fences and cached command lifetimes remain in effect.
+
+`PresentationTransfer` contains the actual GL and Vulkan operations used by the
+presenter and the isolated GPU probe. The probe runs copy and blit strategies at
+16x16 and 31x31, with 8 changing nonuniform RGBA images each, and compares every
+returned pixel against a vertically flipped reference. Both strategy markers are
+required before enabling the Zink client. This exercises the copy path even if
+the current window system offers only BGRA. Only the probe reads whole private
+test images back; the normal client path remains GPU-only. The final-output
+marker diagnostic reads the reflected marker position for exact-format copies.
+
+See [Vulkan image copies](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdCopyImage.html)
+for copy format/extent/usage constraints. No format conversion is attempted by
+the raw-copy strategy, and no performance gain is assumed without measurement.

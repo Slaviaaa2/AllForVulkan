@@ -91,7 +91,7 @@ final class WsiSupportProbe {
             swapchain = handle.get(0);
             check(vkGetSwapchainImagesKHR(device, swapchain, count, null), "WSI probe swapchain images");
             if (count.get(0) == 0) throw new IllegalStateException("WSI returned no swapchain images");
-            System.out.println("AFV_WSI_SUPPORT_PASS: same GPU, hidden NO_API surface, graphics/present queues, transfer/blit formats, shared-format FD import, logical device, " + count.get(0) + " swapchain images");
+            System.out.println("AFV_WSI_SUPPORT_PASS: same GPU, hidden NO_API surface, graphics/present queues, transfer/blit formats, shared-format FD import, logical device, " + count.get(0) + " swapchain images, transfer=" + (color.directCopy() ? "copy" : "blit") + ", format=" + format);
         } finally {
             if (device != null) {
                 vkDeviceWaitIdle(device);

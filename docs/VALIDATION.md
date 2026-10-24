@@ -888,3 +888,63 @@ Minecraft client領域960×540だけを取得して原因を確認した。同�
 preflight.log,manifest.json,result.json,thread-dump.txt}`、更新画面は
 `dtfuel-update-prompt.png`と`dtfuel-update-prompt-target.json`。
 元pack・既存save・提供shaderは変更していない。
+
+## 同一形式の画像コピーと上下反転の統合（2026-10-25）
+
+UNORMを優先する既存方針を保ち、同じencoding内ではRGBA共有画像とsurfaceの形式が
+一致する組を優先する。一致した場合は既存GL blitに上下反転をまとめ、Vulkan側は
+同じ形式・同じ大きさの`vkCmdCopyImage`にする。BGRA/RGBA等の形式が異なる組は
+従来のVulkan blitによる変換と反転を保つ。共有memory・semaphore・所有権移譲・
+fence・command再利用は維持し、Irisの描画passやシェーダー設定は変更しない。
+
+GLとVulkanの転送処理を共通の`PresentationTransfer`にまとめ、起動前GPU検査でも
+本番と同じ実装を使う。copy／blit各経路で16×16と31×31、各8 frameの非一様RGBA画像
+を転送し、全画素の位置・色・上下方向を照合する。WSIがBGRAだけを提供する環境でも、
+同じGPU上の専用RGBA targetでcopyを実行する。両経路の成功markerを起動条件に加えた。
+最終出力marker診断も、GL側で反転した場合の座標を読むよう更新した。
+
+ビルド／baselineコンパイル、形式選択の回帰検査、配布JAR検査、差分空白検査が通過。
+隔離GPU helperでcopy／blitの2経路・2サイズ・各8 frameの非一様画像の全画素照合が
+通過した。NVIDIA RTX 3060／専用X :97の実WSIはBGRA UNORM（format 44）で、
+実ゲームは従来のblitを選択した。同一形式copyを実WSIに表示する動作は、このsurface
+では未検証であり、専用RGBA targetでの実GPU転送検査と区別する。
+
+Iris／Sodium最小構成、指定Complementaryと元の9設定値、960×540、距離12、固定scene／
+視点、VSyncなし、追加600 ticks待機後400 ticks計測、readback診断なしで参考値を取得。
+前節とJSONのrenderer・待機ticks・解像度・距離・VSync・frame制限・カメラ・display・
+focus・計測方式が一致した。
+
+| 最小構成・同じblit経路の約20秒単発測定 | 平均FPS | median frame ms | p95 frame ms | p99 frame ms |
+| --- | ---: | ---: | ---: | ---: |
+| 変更前 `f6b7276` | 53.64 | 18.10 | 21.91 | 24.74 |
+| copy対応を含む版 | 54.61 | 18.00 | 20.90 | 23.46 |
+
+今回は1091 frames／19.978秒。両方とも従来blit経路なのでcopy経路の改善値とはせず、
+単発の回帰指標として扱う。world、resize、resource reload、実iconify／復帰、VSync、
+実surface再作成、同一context／device／Iris維持、disconnectと正常終了が通過した。
+転送commandは5033回再利用、36個を記録した。
+
+配布JAR SHA-256は
+`f6456881ca338251ad35fb4f122a2ebd138a798360f28836cf068ae88cb96de5`。
+証跡はローカル`direct-copy-build.log`、
+`minimal-direct-copy-{benchmark.json,launch.log,client.log,preflight.log,manifest.json}`。
+
+同じJARでDTFuel 0.1.10・全204 MOD・NeoForge 21.1.251・指定Complementaryを再検証した。
+AUTO→Vulkan（実surfaceはblit）、world、resize、shader off→on／shader-only reload、
+resource reload、実iconify／復帰、VSync切替／復帰、実surface再作成、同一GL context／
+VkDevice／有効Irisの維持、disconnectと正常終了が通過した。GPU共有画像の最終出力
+markerを3521回照合し、転送commandの6962回再利用（記録84個）を確認した。
+埋め込み起動前helperでもcopy／blit・2サイズ・各8 frameの全画素照合が通過した。
+shader ZIPのSHA-256と9設定値は元ファイルとprivate copyで一致した。
+
+今回もDTFuel更新確認がTitleScreenへの移行を待たせた。専用Minecraftの現在のPID、
+window ID、bounds、単一clientのstackingを確認し、960×540のclient領域だけを取得した。
+画面を確認して同じ実行中の専用clientの「Not now」を押し、更新せず検証を継続した。
+無人で全手順が通ったという扱いにはしない。readback診断を伴うこの全MOD実行の
+FPSは測定していない。元pack・既存save・提供shaderは変更していない。
+
+全MODの証跡はローカル
+`dtfuel-direct-copy-{launch.log,client.log,preflight.log,manifest.json,result.json}`、
+更新画面と対象metadataは`dtfuel-direct-copy-update-prompt{.png,-target.json}`。
+同一形式copyによる実WSI表示、sRGB surfaceへのcopy、別GPU／別OSの動作と性能は
+今回のハードウェアでは未検証であり、全Iris環境の完全互換を示す結果ではない。

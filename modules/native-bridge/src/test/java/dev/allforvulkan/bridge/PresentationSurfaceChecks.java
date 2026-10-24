@@ -21,6 +21,16 @@ public final class PresentationSurfaceChecks {
         var bgra = new OfferedFormat(VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
         var rgba = new OfferedFormat(VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
         var srgb = new OfferedFormat(VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+        var exact = colorFormat(List.of(bgra, rgba), f -> true, f -> true);
+        if (exact.surface() != VK_FORMAT_R8G8B8A8_UNORM || !exact.directCopy())
+            throw new AssertionError("Prefer an exact RGBA pair for a byte-preserving copy");
+        if (colorFormat(List.of(bgra), f -> true, f -> true).directCopy())
+            throw new AssertionError("BGRA/RGBA conversion cannot use a raw copy");
+        var rgbaSrgb = new OfferedFormat(VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+        if (!colorFormat(List.of(srgb, rgbaSrgb), f -> true, f -> true).directCopy())
+            throw new AssertionError("An identical sRGB pair can copy its encoded bytes");
+        if (colorFormat(List.of(rgbaSrgb, bgra), f -> true, f -> true).surface() != VK_FORMAT_B8G8R8A8_UNORM)
+            throw new AssertionError("Copy preference must not override UNORM preference");
         var fallback = colorFormat(List.of(bgra, rgba), f -> f == VK_FORMAT_R8G8B8A8_UNORM, f -> true);
         if (fallback.surface() != VK_FORMAT_R8G8B8A8_UNORM) throw new AssertionError("Unsupported first format prevented a valid fallback");
         var exportFallback = colorFormat(List.of(bgra, srgb), f -> true, f -> f == VK_FORMAT_R8G8B8A8_SRGB);

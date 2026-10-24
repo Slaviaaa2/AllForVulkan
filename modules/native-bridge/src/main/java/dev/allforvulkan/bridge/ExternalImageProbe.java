@@ -31,6 +31,7 @@ public final class ExternalImageProbe {
             try (VulkanExternalImage image = new VulkanExternalImage(uuid, size, size)) {
                 roundTrip(image, size);
                 image.verifySharedCopy();
+                image.verifyPresentationTransfer();
             }
         }
         System.out.println("AFV_EXTERNAL_IMAGE_PASS: UUID match, opaque FD image, bidirectional semaphores, repeated frames, resize");
