@@ -79,6 +79,29 @@ rechecks capabilities and recreates the swapchain. Image acquisition uses a
 finite timeout, so a surface that stops making progress cannot block the render
 thread indefinitely. An out-of-date creation/acquisition is retried next frame.
 
+The GL client also handles `VK_ERROR_SURFACE_LOST_KHR` from acquisition,
+presentation, swapchain creation and surface-property queries. It drains both
+APIs, destroys the old swapchain/image/command generation, replaces the real
+surface on the same GLFW window, checks the existing present queue, renews WSI
+acquisition semaphores, and recreates the swapchain. GL context, Iris resources,
+world and Vulkan device remain alive. Three replacement attempts without a
+successful presentation fail explicitly; presentation failures restore the
+next-launch OpenGL recovery marker even after startup was stable. A device loss
+or a replacement surface requiring a different device/queue is not hot-switched.
+Surface queries check VkResult and retry changing enumerations instead of using
+undefined capability data or null format/present-mode lists.
+
+For a short performance checkpoint, use the same private minimal Iris/Sodium
+profile, shader/options, scene, resolution and distances and add
+`--benchmark-ticks 400 --warmup-ticks 600 --uncapped` to its smoke launch. This
+waits 120 stable world ticks plus 600 warmup ticks before a roughly 20-second
+sample. Do not enable `--final-output-probe` for FPS comparisons; its readback and
+marker work is diagnostic. Record mean FPS and p95 frame time with the actual
+conditions and nested X display label. The launcher rejects a missing new result
+and archives benchmark JSON plus launch/artifact/shader metadata under
+`.allforvulkan/benchmarks/` in the private client. This provides a single-run
+section indicator, not the user's normal DTFuel FPS.
+
 Surface queue selection is shared by the isolated preflight and the game. A
 combined graphics/present family is preferred, with separate present queues
 allowed. Present support is always queried on the actual surface; a compute

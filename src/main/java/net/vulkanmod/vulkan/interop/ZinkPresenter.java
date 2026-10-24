@@ -4,6 +4,7 @@ import dev.allforvulkan.bridge.GlStateScope;
 import dev.allforvulkan.bridge.GlBlitScope;
 import dev.allforvulkan.bridge.PresentationSurface;
 import dev.allforvulkan.bridge.SharedImage;
+import dev.allforvulkan.bridge.SurfaceFailure;
 import dev.allforvulkan.bridge.ZinkContext;
 import net.vulkanmod.Initializer;
 import net.vulkanmod.vulkan.Vulkan;
@@ -44,6 +45,8 @@ public final class ZinkPresenter implements AutoCloseable {
     private long reusedTransfers, recordedTransfers;
     private int transferGenerations;
     private int producerErrors;
+    private boolean surfaceLost;
+    private int surfaceAttempts, recoveredSurfaces;
 
     public ZinkPresenter(ZinkContext context, long window) {
         this.context = context;
@@ -67,6 +70,12 @@ public final class ZinkPresenter implements AutoCloseable {
     public long verifiedFinalOutputFrames() { return verifiedOutput; }
     public long reusedTransferFrames() { return reusedTransfers; }
     public long recordedTransferCommands() { return recordedTransfers; }
+    public int recoveredSurfaces() { return recoveredSurfaces; }
+    /** Explicit QA request exercises the same real surface replacement as loss. */
+    public void requestSurfaceRecreation() {
+        context.assertCurrentThread();
+        surfaceLost = dirty = true;
+    }
 
     public void present() {
         context.assertCurrentThread();
@@ -81,13 +90,21 @@ public final class ZinkPresenter implements AutoCloseable {
             if (w.get(0) == 0 || h.get(0) == 0 || org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(window, org.lwjgl.glfw.GLFW.GLFW_ICONIFIED) != 0) {
                 dirty = true; return;
             }
-            if ((dirty || windowWidth != w.get(0) || windowHeight != h.get(0)) && !recreate(w.get(0), h.get(0))) return;
+            try {
+                if (surfaceLost) recoverSurface();
+                if ((dirty || windowWidth != w.get(0) || windowHeight != h.get(0)) && !recreate(w.get(0), h.get(0))) return;
+            } catch (SurfaceFailure failure) {
+                if (failure.result() == VK_ERROR_SURFACE_LOST_KHR) { surfaceLost = dirty = true; return; }
+                if (failure.result() == VK_ERROR_OUT_OF_DATE_KHR || failure.result() == VK_INCOMPLETE) { dirty = true; return; }
+                throw failure;
+            }
             check(vkWaitForFences(device, fences[frame], true, -1L), "wait presentation slot");
             if (outputChecks != null && outputChecks[frame].verify()) verifiedOutput++;
             var index = stack.mallocInt(1);
             // Keep event processing alive if an occluded/minimized surface stops making progress.
             int acquired = vkAcquireNextImageKHR(device, swapchain, 100_000_000L, available[frame], 0, index);
             if (acquired == VK_TIMEOUT || acquired == VK_NOT_READY) return;
+            if (acquired == VK_ERROR_SURFACE_LOST_KHR) { surfaceLost = dirty = true; return; }
             if (acquired == VK_ERROR_OUT_OF_DATE_KHR) { dirty = true; return; }
             if (acquired != VK_SUBOPTIMAL_KHR) check(acquired, "acquire presentation image");
             else dirty = true;
@@ -122,8 +139,10 @@ public final class ZinkPresenter implements AutoCloseable {
             int result = vkQueuePresentKHR(DeviceManager.getPresentQueue().queue(), VkPresentInfoKHR.calloc(stack).sType$Default()
                     .pWaitSemaphores(stack.longs(presentReady[imageIndex])).swapchainCount(1)
                     .pSwapchains(stack.longs(swapchain)).pImageIndices(index));
+            if (result == VK_ERROR_SURFACE_LOST_KHR) { surfaceLost = dirty = true; return; }
             if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) dirty = true;
             else check(result, "present client Vulkan image");
+            if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) surfaceAttempts = 0;
             if (++presented == 120) Initializer.LOGGER.info("AFV_ZINK_CLIENT_PRESENT_PASS: 120 real GL -> shared GPU image -> AFV Vulkan WSI frames, {}x{}", width, height);
             frame = (frame + 1) % FRAMES;
         }
@@ -163,6 +182,7 @@ public final class ZinkPresenter implements AutoCloseable {
             else info.imageSharingMode(VK_SHARING_MODE_EXCLUSIVE);
             var handle = stack.mallocLong(1);
             int created = vkCreateSwapchainKHR(device, info, null, handle);
+            if (created == VK_ERROR_SURFACE_LOST_KHR) { surfaceLost = dirty = true; return false; }
             if (created == VK_ERROR_OUT_OF_DATE_KHR) { dirty = true; return false; }
             check(created, "create client swapchain");
             swapchain = handle.get(0);
@@ -192,6 +212,30 @@ public final class ZinkPresenter implements AutoCloseable {
             windowWidth = requestedWidth; windowHeight = requestedHeight;
             Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}, sharedLayout=transfer", width, height, format, images.length, vsync);
             return true;
+        }
+    }
+
+    private void recoverSurface() {
+        if (++surfaceAttempts > 3) throw new IllegalStateException("Vulkan surface recovery failed after 3 attempts");
+        try (var stack = MemoryStack.stackPush(); var state = new GlStateScope()) {
+            glFinish();
+            check(vkDeviceWaitIdle(device), "drain presentation before surface replacement");
+            destroySwapchain();
+            Vulkan.recreatePresentationSurface(window);
+            var supported = stack.mallocInt(1);
+            SurfaceFailure.check(vkGetPhysicalDeviceSurfaceSupportKHR(DeviceManager.physicalDevice,
+                    Queue.getQueueFamilies().presentFamily, Vulkan.getSurface(), supported), "check replacement surface queue");
+            if (supported.get(0) != VK_TRUE) throw new IllegalStateException("Existing Vulkan device cannot present to the replacement surface");
+            // Acquisition semaphores belong to the old WSI generation too.
+            for (int i = 0; i < FRAMES; i++) {
+                if (available[i] != 0) vkDestroySemaphore(device, available[i], null);
+                available[i] = 0;
+                available[i] = semaphore(stack);
+            }
+            frame = 0;
+            surfaceLost = false;
+            dirty = true;
+            Initializer.LOGGER.info("AFV_ZINK_SURFACE_RECREATED: generation={}, same Vulkan device and GL context", ++recoveredSurfaces);
         }
     }
 

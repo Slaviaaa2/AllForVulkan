@@ -41,7 +41,8 @@ public final class ZinkClientSession {
     public static void present(long handle) {
         if (handle != window || presenter == null) throw new IllegalStateException("Wrong Zink presentation window");
         dev.allforvulkan.validation.GlDebugTrace.installIfRequested();
-        presenter.present();
+        try { presenter.present(); }
+        catch (RuntimeException | LinkageError failure) { BackendBootstrap.presentationFailed(failure); throw failure; }
     }
     public static void prepareFrame() {
         if (context == null) return;
@@ -59,6 +60,11 @@ public final class ZinkClientSession {
     public static long verifiedFinalOutputFrames() { return presenter == null ? 0 : presenter.verifiedFinalOutputFrames(); }
     public static long reusedTransferFrames() { return presenter == null ? 0 : presenter.reusedTransferFrames(); }
     public static long recordedTransferCommands() { return presenter == null ? 0 : presenter.recordedTransferCommands(); }
+    public static int recoveredSurfaces() { return presenter == null ? 0 : presenter.recoveredSurfaces(); }
+    public static void requestSurfaceRecreation() {
+        if (presenter == null) throw new IllegalStateException("Zink presenter is not initialized");
+        presenter.requestSurfaceRecreation();
+    }
     public static void close() {
         if (presenter != null) { presenter.close(); presenter = null; Vulkan.cleanUpPresentation(); }
         dev.allforvulkan.validation.GlDebugTrace.close();

@@ -395,30 +395,34 @@ public abstract class DeviceManager {
     }
 
     public static SurfaceProperties querySurfaceProperties(VkPhysicalDevice device, MemoryStack stack) {
-
         long surface = Vulkan.getSurface();
-        SurfaceProperties details = new SurfaceProperties();
-
-        details.capabilities = VkSurfaceCapabilitiesKHR.malloc(stack);
-        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, details.capabilities);
-
-        IntBuffer count = stack.ints(0);
-
-        vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, count, null);
-
-        if (count.get(0) != 0) {
+        // A changing surface can grow an enumeration between count and data.
+        // Never consume uninitialized capability data or stale list tails.
+        for (int attempt = 0; attempt < 3; attempt++) {
+            SurfaceProperties details = new SurfaceProperties();
+            details.capabilities = VkSurfaceCapabilitiesKHR.malloc(stack);
+            dev.allforvulkan.bridge.SurfaceFailure.check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, details.capabilities), "query surface capabilities");
+            IntBuffer count = stack.ints(0);
+            dev.allforvulkan.bridge.SurfaceFailure.check(vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, count, null), "count surface formats");
             details.formats = VkSurfaceFormatKHR.malloc(count.get(0), stack);
-            vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, count, details.formats);
-        }
-
-        vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, count, null);
-
-        if (count.get(0) != 0) {
+            if (count.get(0) > 0) {
+                int result = vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, count, details.formats);
+                if (result == VK_INCOMPLETE) continue;
+                dev.allforvulkan.bridge.SurfaceFailure.check(result, "query surface formats");
+                details.formats.limit(count.get(0));
+            }
+            count.put(0, 0);
+            dev.allforvulkan.bridge.SurfaceFailure.check(vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, count, null), "count surface present modes");
             details.presentModes = stack.mallocInt(count.get(0));
-            vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, count, details.presentModes);
+            if (count.get(0) > 0) {
+                int result = vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, count, details.presentModes);
+                if (result == VK_INCOMPLETE) continue;
+                dev.allforvulkan.bridge.SurfaceFailure.check(result, "query surface present modes");
+                details.presentModes.limit(count.get(0));
+            }
+            return details;
         }
-
-        return details;
+        throw new dev.allforvulkan.bridge.SurfaceFailure(VK_INCOMPLETE, "surface properties changed during enumeration");
     }
 
     public static class SurfaceProperties {

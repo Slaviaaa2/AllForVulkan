@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
 public final class BackendBootstrap {
     public enum Mode { AUTO, VULKAN, OPENGL }
     private static final Set<String> BASE_MODS = Set.of("minecraft", "neoforge", "allforvulkan");
-    private static boolean initialized, vulkan, zinkClient;
+    private static boolean initialized, vulkan, zinkClient, presentationFailure;
     private static Mode requested = Mode.AUTO;
     private static String reason = "Not initialized";
     private static Path config, pending;
@@ -104,8 +104,14 @@ public final class BackendBootstrap {
     }
 
     public static void renderingStable() {
-        if (!vulkan && !zinkClient) return;
+        if (presentationFailure || (!vulkan && !zinkClient)) return;
         try { Files.deleteIfExists(pending); }
         catch (IOException failure) { LogManager.getLogger("AllForVulkan").warn("Cannot clear Vulkan startup recovery marker", failure); }
+    }
+    public static void presentationFailed(Throwable failure) {
+        if (!zinkClient || pending == null) return;
+        presentationFailure = true;
+        try { Files.writeString(pending, "Vulkan presentation failed: " + failure.getClass().getSimpleName() + "\n"); }
+        catch (IOException markerFailure) { LogManager.getLogger("AllForVulkan").warn("Cannot save Vulkan presentation recovery marker", markerFailure); }
     }
 }

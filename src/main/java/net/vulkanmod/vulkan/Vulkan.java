@@ -335,6 +335,14 @@ public class Vulkan {
         }
     }
 
+    /** Caller has drained the device and destroyed all swapchains for the old surface. */
+    public static void recreatePresentationSurface(long handle) {
+        if (!presentationOnly) throw new IllegalStateException("Surface-only recovery requires the GL client presenter");
+        if (surface != VK_NULL_HANDLE) KHRSurface.vkDestroySurfaceKHR(instance, surface, null);
+        surface = VK_NULL_HANDLE;
+        createSurface(handle);
+    }
+
     private static void createSurface(long handle) {
         window = handle;
 
@@ -344,7 +352,7 @@ public class Vulkan {
 
             // GLFW is in FML's parent layer, while the bundled Vulkan binding
             // lives in the game layer. Pass native handles across that boundary.
-            checkResult(nglfwCreateWindowSurface(instance.address(), window, NULL, org.lwjgl.system.MemoryUtil.memAddress(pSurface)),
+            dev.allforvulkan.bridge.SurfaceFailure.check(nglfwCreateWindowSurface(instance.address(), window, NULL, org.lwjgl.system.MemoryUtil.memAddress(pSurface)),
                     "Failed to create window surface");
 
             surface = pSurface.get(0);

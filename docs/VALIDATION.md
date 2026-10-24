@@ -778,3 +778,57 @@ command再利用（6 generation計72個を記録）、1086回の最終出力照�
 詳細はローカル`minimal-copy-layout-result.json`、実行証跡は
 `minimal-copy-layout-{launch,client,preflight}.log`。元pack・既存save・提供shaderは
 変更していない。
+
+## surfaceの再作成と軽量FPSチェック（2026-10-25）
+
+`VK_ERROR_SURFACE_LOST_KHR`を検出した場合は、GL側とVulkan deviceの処理完了を
+待って古いswapchain・共有画像・記録済みcommandを破棄し、同じGLFW windowに対して
+実surfaceを再作成する。新surfaceのpresent対応を既存queueで確認し、acquire用
+semaphoreも作り直す。GLコンテキスト、Vulkan device、ワールド、Iris pipelineは
+保持する。成功した実presentまで最大3回に制限し、継続不能時は次回起動のOpenGL
+復旧markerを残す。実行中に別GPUや別描画backendへ切り替える処理ではない。
+
+surface capabilities／formats／present modesの照会はVkResultを確認してから使用する。
+列挙中に件数が増えた場合は最大3回再照会し、失敗時の未初期化データを使わない。
+window-cycle検証に、正常なwindowの実surfaceを意図的に破棄・再作成する段階を加えた。
+OS由来のsurface-lossエラーそのものを再現する試験ではないが、同じ復旧処理を通り、
+同一device／GLコンテキストと有効なIrisを保持したまま実Vulkan表示が再開することを
+検査する。
+
+各セクションの参考指標として、同条件の短いFPS測定を記録する。今回は専用Xephyr
+:97上のIris／Sodium最小構成、NeoForge 21.1.251、指定Complementary Reimagined
+r5.9.3と元の9設定値を使用する。固定seedのflat worldと検証scene、カメラ
+(0.5, -60.0, 0.5)、yaw 0／pitch 8、960×540、描画／simulation距離12、VSyncなし、
+フレーム制限260（Minecraftの無制限設定）。world安定待ち120 ticksに追加600 ticks
+を置き、400 ticks（約20秒）だけ計測する。FPS試料はresize／resource reload／
+window-cycleより前で取得し、GPU→CPU readbackを伴う最終出力診断は無効にする。
+RenderFrameEvent.Post間隔から算出するため、pacingと表示待ちを含み、GPU単体時間
+ではない。実DTFuel環境や普段の約80 FPSとの直接比較には使わない。
+
+launcherは計測前に古いJSONを削除し、今回の計測完了markerとJSONを要求する。
+配布JAR・shader・MOD一覧・起動条件を添えたJSONをprivate clientの
+`.allforvulkan/benchmarks/`に時刻別で保存する。
+
+ビルド／baselineコンパイル、配布JAR検査、launcherのPython構文検査、MOD profileの
+2テスト、差分空白検査が通過。上記最小構成でAUTO→Vulkan、world、resize、resource
+reload、実iconify／復帰、VSync変更／復帰、実surface再作成、disconnectと正常終了が
+通過した。surface再作成後に有効なIris pipeline、同一GLコンテキストとVkDevice、
+非黒色のGL最終出力、実Vulkan presentの再開を検査した。6 generationで36個の転送
+commandを記録し、4995回再利用した。今回はCPU readbackによる最終画像の画素照合、
+OS由来のsurface-loss注入、DTFuel全204 MODの再起動は行っていない。
+
+| 約20秒の単発測定 | 平均FPS | median frame ms | p95 frame ms | p99 frame ms |
+| --- | ---: | ---: | ---: | ---: |
+| 変更前 `5037251` | 51.61 | 19.50 | 22.73 | 25.39 |
+| surface復旧追加後 | 51.35 | 19.55 | 22.83 | 25.61 |
+
+測定時間は19.978秒／19.980秒、frame数は1031／1026。JSONのrenderer、待機ticks、
+サイズ、距離、VSync、frame制限、カメラ、display、focus、計測方式の一致を確認した。
+平均FPS差は約-0.5%で、単発の参考値から性能改善や有意な低下を断定しない。
+shader ZIPのSHA-256と9設定値は元ファイルとprivate copyで一致する。
+
+変更後の配布JARのSHA-256は
+`a88e88e00e303e26d9006d68ece85f72a5709ee8f6a360041af94f828b066bc6`。
+ローカル証跡は`surface-recovery-{baseline,after}-{benchmark.json,client.log,launch.log}`、
+`surface-recovery-after-preflight.log`と`surface-recovery-build.log`。
+元pack・既存save・提供shaderは変更していない。

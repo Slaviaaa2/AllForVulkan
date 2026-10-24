@@ -12,9 +12,12 @@ final class WindowLifecycle {
     private final boolean vsync;
     private int step, changedTick;
     private long changedFrame;
+    private int previousSurfaceGeneration;
+    private final long device;
 
     WindowLifecycle(Minecraft client, int tick) {
         if (!BackendBootstrap.zinkClient()) throw new IllegalStateException("Window cycle requires the real Zink/Vulkan presenter");
+        device = net.vulkanmod.vulkan.Vulkan.getVkDevice().address();
         this.client = client;
         window = client.getWindow().getWindow();
         context = eglGetCurrentContext();
@@ -52,8 +55,16 @@ final class WindowLifecycle {
         } else if (step == 3) {
             client.getWindow().updateVsync(vsync);
             Initializer.LOGGER.info("AFV_WINDOW_VSYNC_PASS: alternate synchronization mode rendered");
+        } else if (step == 4) {
+            previousSurfaceGeneration = ZinkClientSession.recoveredSurfaces();
+            ZinkClientSession.requestSurfaceRecreation();
+            Initializer.LOGGER.info("AFV_SURFACE_RECOVERY_BEGIN: replace the real Vulkan surface in the active world");
         } else {
-            Initializer.LOGGER.info("AFV_WINDOW_CYCLE_PASS: iconify, responsive suspension, restore, VSync switch and restore, same GL context");
+            if (ZinkClientSession.recoveredSurfaces() <= previousSurfaceGeneration
+                    || net.vulkanmod.vulkan.Vulkan.getVkDevice().address() != device)
+                throw new IllegalStateException("Surface replacement did not retain the existing Vulkan device");
+            Initializer.LOGGER.info("AFV_SURFACE_RECOVERY_PASS: new real surface/swapchain, same GL context, Vulkan device, world and Iris pipeline");
+            Initializer.LOGGER.info("AFV_WINDOW_CYCLE_PASS: iconify, restore, VSync, surface replacement, same GL context");
             return true;
         }
         step++; changedTick = tick; changedFrame = frames;

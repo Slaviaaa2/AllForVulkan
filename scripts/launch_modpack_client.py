@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 
 
@@ -257,6 +258,8 @@ def launch(args):
                 record['shaderOptionsSha256'] = hashlib.sha256(shader_options.read_bytes()).hexdigest()
     (game / '.afv-launch-manifest.json').write_text(json.dumps(record, indent=2) + '\n')
     log = game / 'afv-production-client.log'
+    if args.benchmark_ticks > 0:
+        (game / 'afv-benchmark.json').unlink(missing_ok=True)
     print(f'Production NeoForge {neoforge}, verified copy {game}, log {log}', flush=True)
     with log.open('w') as output:
         with subprocess.Popen(command, cwd=game, env=environment, stdout=output, stderr=subprocess.STDOUT) as process:
@@ -279,13 +282,26 @@ def launch(args):
     if args.iris_cycle:
         passed = passed and 'AFV_IRIS_CYCLE_PASS' in text
     if args.window_cycle:
-        passed = passed and 'AFV_WINDOW_CYCLE_PASS' in text
+        passed = passed and 'AFV_WINDOW_CYCLE_PASS' in text and 'AFV_SURFACE_RECOVERY_PASS' in text
     if args.dimension_cycle:
         passed = passed and 'AFV_DIMENSION_CYCLE_PASS' in text
     if args.expect_backend:
         passed = passed and bool(re.search(r'AFV_BACKEND: requested=[A-Z]+, active=' + args.expect_backend + r',', text))
     if args.zink_client and args.smoke:
         passed = passed and 'AFV_ZINK_TRANSFER_REUSE_PASS' in text
+    if args.benchmark_ticks > 0:
+        benchmark = game / 'afv-benchmark.json'
+        if 'AFV_BENCHMARK_RESULT:' not in text or not benchmark.is_file():
+            passed = False
+        else:
+            report = json.loads(benchmark.read_text())
+            report['launch'] = record
+            history = game / '.allforvulkan/benchmarks'
+            history.mkdir(parents=True, exist_ok=True)
+            destination = history / f'{time.time_ns()}-{record["afvSha256"][:12]}.json'
+            report['clientPassed'] = passed
+            destination.write_text(json.dumps(report, indent=2) + '\n')
+            print(f'AFV_BENCHMARK_SAVED: {destination}', flush=True)
     print(('AFV_PRODUCTION_PASS' if passed else 'AFV_PRODUCTION_FAIL') + f': exit={code} log={log}', flush=True)
     return 0 if passed else 1
 
