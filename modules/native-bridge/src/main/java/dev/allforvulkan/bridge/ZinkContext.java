@@ -14,9 +14,9 @@ import static org.lwjgl.opengl.GL11.*;
 /** An independent, thread-confined Mesa desktop GL context on a hidden pbuffer. */
 public final class ZinkContext implements AutoCloseable {
     private final Thread owner = Thread.currentThread();
-    private long display, surface, context;
+    private long display, config, surface, context;
     private boolean glCreated, closed;
-    private final int width, height;
+    private int width, height;
 
     public ZinkContext(int width, int height) {
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Invalid pbuffer size");
@@ -38,10 +38,12 @@ public final class ZinkContext implements AutoCloseable {
             var count = stack.mallocInt(1);
             require(eglChooseConfig(display, stack.ints(EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
                     EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT, EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8,
-                    EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8, EGL_NONE), configs, count) && count.get(0) > 0, "eglChooseConfig");
-            surface = eglCreatePbufferSurface(display, configs.get(0), stack.ints(EGL_WIDTH, width, EGL_HEIGHT, height, EGL_NONE));
+                    EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8, EGL_DEPTH_SIZE, 24, EGL_STENCIL_SIZE, 8,
+                    EGL_SAMPLE_BUFFERS, 0, EGL_NONE), configs, count) && count.get(0) > 0, "eglChooseConfig");
+            config = configs.get(0);
+            surface = eglCreatePbufferSurface(display, config, stack.ints(EGL_WIDTH, width, EGL_HEIGHT, height, EGL_NONE));
             require(surface != EGL_NO_SURFACE, "eglCreatePbufferSurface");
-            context = eglCreateContext(display, configs.get(0), EGL_NO_CONTEXT, stack.ints(
+            context = eglCreateContext(display, config, EGL_NO_CONTEXT, stack.ints(
                     EGL_CONTEXT_MAJOR_VERSION, 4, EGL_CONTEXT_MINOR_VERSION, 6,
                     EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT, EGL_NONE));
             require(context != EGL_NO_CONTEXT, "eglCreateContext(GL 4.6 core)");
@@ -61,6 +63,36 @@ public final class ZinkContext implements AutoCloseable {
 
     public int width() { return width; }
     public int height() { return height; }
+    /** Replace only the drawable, retaining the context, objects and driver state.
+     * Call before drawing a new game frame, never after its default-buffer output. */
+    public void resize(int width, int height) {
+        assertCurrentThread();
+        if (width <= 0 || height <= 0) throw new IllegalArgumentException("Invalid pbuffer size");
+        if (this.width == width && this.height == height) return;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            long next = eglCreatePbufferSurface(display, config, stack.ints(EGL_WIDTH, width, EGL_HEIGHT, height, EGL_NONE));
+            require(next != EGL_NO_SURFACE, "resize eglCreatePbufferSurface");
+            boolean adopted = false;
+            try {
+                var actualWidth = stack.mallocInt(1); var actualHeight = stack.mallocInt(1);
+                require(eglQuerySurface(display, next, EGL_WIDTH, actualWidth), "query resized pbuffer width");
+                require(eglQuerySurface(display, next, EGL_HEIGHT, actualHeight), "query resized pbuffer height");
+                if (actualWidth.get(0) != width || actualHeight.get(0) != height)
+                    throw new IllegalStateException("EGL did not create the requested drawable size");
+                var viewport = stack.mallocInt(4); var scissor = stack.mallocInt(4);
+                glGetIntegerv(GL_VIEWPORT, viewport); glGetIntegerv(GL_SCISSOR_BOX, scissor);
+                glFinish(); // Drawable replacement only, not the normal frame path.
+                require(eglMakeCurrent(display, next, next, context), "resize eglMakeCurrent");
+                long previous = surface;
+                surface = next;
+                this.width = width; this.height = height;
+                adopted = true;
+                glViewport(viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
+                glScissor(scissor.get(0), scissor.get(1), scissor.get(2), scissor.get(3));
+                require(eglDestroySurface(display, previous), "destroy previous pbuffer");
+            } finally { if (!adopted) eglDestroySurface(display, next); }
+        }
+    }
     public void assertCurrentThread() {
         if (closed || Thread.currentThread() != owner) throw new IllegalStateException("Zink context is closed or used from another thread");
     }

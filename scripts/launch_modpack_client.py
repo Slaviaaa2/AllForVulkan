@@ -162,23 +162,31 @@ def launch(args):
         command += ['-Dafv.smokeIris=true']
     if args.scene:
         command += ['-Dafv.smokeScene=true']
+    if args.final_output_probe:
+        command += ['-Dafv.smokeFinalOutput=true']
     if args.debug_gl:
         command += ['-Dafv.debugGlClient=true']
     environment = os.environ.copy()
     if args.local_xim:
         environment['XMODIFIERS'] = '@im=none'
     if args.zink:
+        if args.backend and args.backend != 'OPENGL':
+            raise ValueError('--zink comparison requires OpenGL selection')
         # Explicit GL comparison route; do not call this AFV's native renderer.
         command += ['-Dafv.backend=OPENGL', '-Dafv.validationEgl=true', '-Dafv.expectZink=true']
         environment.update(MESA_LOADER_DRIVER_OVERRIDE='zink', GALLIUM_DRIVER='zink',
                            __EGL_VENDOR_LIBRARY_FILENAMES=args.mesa_egl_vendor)
     if args.zink_client:
-        command += ['-Dafv.backend=VULKAN', '-Dafv.expectZinkClient=true', '-Dafv.expectZink=true',
+        if args.backend == 'OPENGL':
+            raise ValueError('--zink-client cannot use OpenGL selection')
+        command += ['-Dafv.backend=' + (args.backend or 'VULKAN'), '-Dafv.expectZinkClient=true', '-Dafv.expectZink=true',
                     '-Dafv.mesaEglVendor=' + args.mesa_egl_vendor]
         # With Iris installed, exercise the same selection as the Vulkan setting.
         # The force flag remains useful for an otherwise vanilla GL client.
         if not args.require_iris:
             command += ['-Dafv.zinkClient=true']
+    elif args.backend and not args.zink:
+        command += ['-Dafv.backend=' + args.backend]
     if args.x11_no_modifiers:
         if not args.zink:
             raise ValueError('--x11-no-modifiers requires --zink')
@@ -193,6 +201,8 @@ def launch(args):
               'benchmarkTicks': args.benchmark_ticks, 'warmupTicks': args.warmup_ticks,
               'uncapped': args.uncapped, 'requireIris': args.require_iris, 'validationScene': args.scene}
     record['debugGlErrors'] = args.debug_gl
+    record['finalOutputProbe'] = args.final_output_probe
+    record['requestedBackend'] = args.backend or ('VULKAN' if args.zink_client else 'OPENGL' if args.zink else 'saved setting')
     record['x11NoModifiers'] = args.x11_no_modifiers
     if shader_source:
         record['shaderPack'] = fixture.name
@@ -240,6 +250,7 @@ if __name__ == '__main__':
     parser.add_argument('--uncapped', action='store_true', help='Disable VSync and the frame cap in this private smoke client')
     parser.add_argument('--require-iris', action='store_true')
     parser.add_argument('--scene', action='store_true', help='Build a shader validation scene in the new smoke world')
+    parser.add_argument('--final-output-probe', action='store_true', help='Verify a last default-framebuffer draw reaches the Vulkan shared image')
     parser.add_argument('--debug-gl', action='store_true', help='Log bounded synchronous GL errors for client-bridge diagnosis')
     shader = parser.add_mutually_exclusive_group()
     shader.add_argument('--shader-fixture', type=Path)
@@ -250,4 +261,5 @@ if __name__ == '__main__':
     renderer.add_argument('--zink-client', action='store_true', help='Zink GL frontend with AFV-owned Vulkan presentation')
     parser.add_argument('--x11-no-modifiers', action='store_true', help='Zink presentation fallback for nested X11 servers without explicit modifiers')
     parser.add_argument('--mesa-egl-vendor', default='/usr/share/glvnd/egl_vendor.d/50_mesa.json')
+    parser.add_argument('--backend', choices=['AUTO', 'VULKAN', 'OPENGL'], help='Exercise an explicit AFV backend selection')
     raise SystemExit(launch(parser.parse_args()))

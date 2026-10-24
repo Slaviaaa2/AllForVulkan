@@ -29,7 +29,8 @@ public class MixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-        if (mixinClassName.endsWith(".ZinkClientWindowMixin") || mixinClassName.endsWith(".ZinkClientFrameMixin"))
+        if (mixinClassName.endsWith(".ZinkClientWindowMixin") || mixinClassName.endsWith(".ZinkClientFrameMixin")
+                || mixinClassName.endsWith(".ZinkClientGameMixin"))
             return dev.allforvulkan.neoforge.BackendBootstrap.zinkClient();
         if (mixinClassName.endsWith(".EglValidationMixin"))
             return !dev.allforvulkan.neoforge.BackendBootstrap.usesVulkan() && Boolean.getBoolean("afv.validationEgl");

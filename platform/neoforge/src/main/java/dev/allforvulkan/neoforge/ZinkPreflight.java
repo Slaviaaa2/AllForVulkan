@@ -21,7 +21,7 @@ final class ZinkPreflight {
             var builder = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                     "-Xmx128m", "-Dorg.lwjgl.system.stackSize=1024", "-Dorg.lwjgl.opengl.explicitInit=true",
                     "-XX:-CreateCoredumpOnCrash", "-XX:ErrorFile=" + directory.resolve("driver-error-%p.log").toAbsolutePath(),
-                    "-jar", helper.toAbsolutePath().toString());
+                    "-jar", helper.toAbsolutePath().toString(), "--wsi");
             builder.directory(directory.toFile()).redirectErrorStream(true).redirectOutput(log.toFile());
             builder.environment().put("MESA_LOADER_DRIVER_OVERRIDE", "zink");
             builder.environment().put("GALLIUM_DRIVER", "zink");
@@ -33,7 +33,8 @@ final class ZinkPreflight {
             }
             // The helper emits only bounded diagnostic output from its private 16/31px images.
             String output = Files.readString(log);
-            if (process.exitValue() != 0 || !output.contains("AFV_ZINK_PROBE_PASS") || !output.contains("AFV_EXTERNAL_IMAGE_PASS"))
+            if (process.exitValue() != 0 || !output.contains("AFV_ZINK_PROBE_PASS") || !output.contains("AFV_EXTERNAL_IMAGE_PASS")
+                    || !output.contains("AFV_WSI_SUPPORT_PASS"))
                 return new VulkanSupport.Result(false, "Zink driver preflight failed (exit " + process.exitValue() + "); see " + log);
             return new VulkanSupport.Result(true, "Real Zink GL 4.6, compute and bidirectional external-image synchronization passed");
         } catch (InterruptedException failure) {

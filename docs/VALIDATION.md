@@ -347,3 +347,52 @@ scene・VSync・待機条件が異なるため比較しない。Iris全機能、
 
 設定切替は、実UIでOpenGLを選んで保存し、次回起動が保存済みOpenGLを選ぶことを確認。
 検証後は開発インスタンスだけをAUTOへ戻した。通常のVulkan起動の設定画面も実表示済み。
+
+## GL最終出力の保持と自動選択（2026-10-24）
+
+優先順位を、既存MODのGL呼び出し・描画順序・状態・資源寿命を保持する変換へ合わせた。
+独自の描画変更や追加最適化は後の任意featureとし、ここでは基礎的な互換境界を修正した。
+第三者MODがある場合は未知のMODも含め、Auto/Vulkanから実Zinkの既存GL frontendを選び、
+AFV native地形フックによる置換を避ける。実機の起動前検査が失敗すればOpenGLへ戻る。
+
+- 表示元をmain color textureから実default framebufferへ変更。Irisの最終window passや、
+  他MODが画面へ直接描いた内容を含めてVulkanへ渡す。
+- EGL drawableに実ウィンドウと同じ大きさ、depth 24 / stencil 8を用意する。
+  リサイズは次のフレームの描画前に行い、同じGL contextと既存texture/FBO、viewport、
+  scissorを維持する。描画済みの出力をリサイズで破棄しない。
+- 別JVMの起動前検査を拡張し、非表示・非focusのNO_APIウィンドウで同じGPUの
+  実surface、graphics/present queue、transfer/blit形式、共有形式のFD import、
+  論理deviceとswapchain作成まで確認する。子JVMの失敗・異常終了・タイムアウトは
+  OpenGL選択へ戻す。検査用GLFWはprobe JAR内に隔離し、ゲームのGLFWを置き換えない。
+
+単体probeでは73×41→31×47のdrawable変更を通じて、生きたtexture/FBOの内容、
+GL状態、corner pixels、depth/stencilを確認。外部画像・双方向セマフォの検査に加え、
+同じGPUで3 imageの実swapchain作成を通過した。
+`default-framebuffer-wsi-probe.log`に4種類の成功markerを保存している。
+
+vanilla実クライアントでは3021回の実Vulkan表示、3018回の最終出力marker照合、
+world・リサイズ・再読込・切断・タイトル復帰と終了コード0を確認した
+（`default-framebuffer-client.log`）。検査markerはmain textureを変更せず、全GL描画の後に
+default framebufferへ直接描く8×8のmagenta領域。その画素を共有Vulkan imageから
+slot fence後に照合する。読み戻しは明示した検査flag時だけ行う。
+
+現在のビルド、baselineのコンパイル、投影・texture upload検査、配布JAR構造、
+launcherのPython構文と差分の空白検査を通過。
+
+専用Xの約45.8 FPSはユーザーの通常環境の約80 FPSと条件が一致せず、性能の基準には
+しない。この実装パスではFPSを再計測せず、互換性とライフサイクルを確認した。
+実用性能の検証はユーザー側の条件を優先する。
+
+DTFuelの元204 MODを保持した独立コピー、NeoForge 21.1.251、Iris 1.8.14-beta.1、
+Sodium 0.8.13と指定Complementary ZIP/TXTで実クライアントを再確認した。
+強制flagなしの`requested=AUTO, active=Vulkan`を確認し、5590回の実Vulkan表示と
+5587回の最終出力marker照合を通過。960×540→854×480のリサイズ、
+リソース再読込後も実`IrisRenderingPipeline`が有効で、切断・タイトル復帰を含む
+`AFV_SMOKE_PASS`、クライアントとlauncherの終了コード0を確認した。
+viewport限定画像で影・水・透過・葉・発光ブロック・手元・HUD・ミニマップを確認した。
+右上の小さなmagenta領域は最終出力を調べるための検査markerで、通常起動では描かない。
+今回もpack由来の既知のGL producer errorは記録されており、全MODの全機能が
+無警告という意味ではない。
+
+証跡はローカル`build/reports/afv-validation/`の`dtfuel-default-output-*`と
+`dtfuel-default-output.png`。提供MODやshaderのバイナリーを公開リポジトリーへ含めない。

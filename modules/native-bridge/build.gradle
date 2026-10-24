@@ -5,11 +5,12 @@ java { toolchain.languageVersion = JavaLanguageVersion.of(21) }
 repositories { mavenCentral() }
 dependencies {
     implementation project(':core-api')
-    ['lwjgl', 'lwjgl-egl', 'lwjgl-opengl', 'lwjgl-vulkan'].each {
+    ['lwjgl', 'lwjgl-egl', 'lwjgl-opengl', 'lwjgl-vulkan', 'lwjgl-glfw'].each {
         implementation "org.lwjgl:${it}:3.3.3"
     }
     runtimeOnly 'org.lwjgl:lwjgl:3.3.3:natives-linux'
     runtimeOnly 'org.lwjgl:lwjgl-opengl:3.3.3:natives-linux'
+    runtimeOnly 'org.lwjgl:lwjgl-glfw:3.3.3:natives-linux'
 }
 application { mainClass = 'dev.allforvulkan.bridge.ZinkProbe' }
 tasks.named('run', JavaExec) {

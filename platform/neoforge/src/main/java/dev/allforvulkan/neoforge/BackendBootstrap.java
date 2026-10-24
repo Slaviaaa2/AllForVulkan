@@ -16,6 +16,7 @@ import java.util.stream.Collectors;
 /** Decides before either mixin configuration changes Minecraft's renderer. */
 public final class BackendBootstrap {
     public enum Mode { AUTO, VULKAN, OPENGL }
+    private static final Set<String> BASE_MODS = Set.of("minecraft", "neoforge", "allforvulkan");
     private static boolean initialized, vulkan, zinkClient;
     private static Mode requested = Mode.AUTO;
     private static String reason = "Not initialized";
@@ -36,12 +37,11 @@ public final class BackendBootstrap {
             requested = Mode.valueOf(value.trim().toUpperCase(Locale.ROOT));
             if (requested == Mode.OPENGL) { reason = "OpenGL selected in settings"; return; }
             Set<String> mods = FMLLoader.getLoadingModList().getMods().stream().map(mod -> mod.getModId()).collect(Collectors.toSet());
-            boolean glRenderer = mods.contains("sodium") || mods.contains("iris") || mods.contains("embeddium");
-            boolean clientBridge = Boolean.getBoolean("afv.zinkClient") || (requested == Mode.VULKAN && glRenderer);
-            if (!clientBridge && glRenderer) {
-                reason = "OpenGL selected automatically for the installed renderer; select Vulkan to try the Linux Zink client bridge";
-                return;
-            }
+            // Do not replace a third-party mod's terrain/GL hooks with the
+            // native renderer. Preserve the existing client pipeline and let
+            // the real GL driver translate it, including unfamiliar mods.
+            boolean moddedClient = mods.stream().anyMatch(mod -> !BASE_MODS.contains(mod));
+            boolean clientBridge = Boolean.getBoolean("afv.zinkClient") || moddedClient;
             if (net.neoforged.fml.loading.FMLConfig.getBoolConfigValue(net.neoforged.fml.loading.FMLConfig.ConfigValue.EARLY_WINDOW_CONTROL)) {
                 reason = "OpenGL selected: save Auto or Vulkan in AFV settings and restart to prepare the Vulkan window";
                 return;

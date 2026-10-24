@@ -19,23 +19,34 @@ that instance's `config/fml.toml` before launch. If the splash is already enable
 in the AFV config screen disables the early GL splash for the next launch.
 
 Do not install the original VulkanMod or another VulkanMod port alongside AFV.
-With Sodium, Iris or Embeddium installed, Auto selects OpenGL. Selecting Vulkan
-instead enables the Linux Zink client route below, after a real driver preflight.
+With any third-party mod installed, Auto and Vulkan preserve the existing GL
+client through the Linux Zink route below, after a real driver preflight. If it
+is unavailable, they select OpenGL. This avoids replacing unfamiliar mods' GL
+and terrain hooks with AFV's native renderer. AFV alone still uses the native
+renderer; the vanilla Zink force flag remains available for validation.
 No Mesa native distribution is bundled.
 
 ## Zink GL client with AFV Vulkan presentation
 
-Choose **Vulkan** in AFV's mod-list configuration and restart. When Iris, Sodium
-or Embeddium is present, the unmodified GL frontend runs on a surfaceless Zink
-context. AFV creates the visible NO_API GLFW window, its own Vulkan device and
+Choose **Auto** or **Vulkan** in AFV's mod-list configuration and restart.
+With third-party mods installed, the existing GL frontend runs on a surfaceless
+Zink context after preflight succeeds. AFV creates the visible NO_API GLFW window, its own Vulkan device and
 swapchain. It matches Zink's GPU UUID, imports dedicated color images using
 opaque FDs, and transfers ownership with two external binary semaphores per
-frame slot. GL blits the actual main render target to the shared image; Vulkan
+frame slot. GL blits the final default framebuffer to the shared image; Vulkan
 blits it, including the GL/WSI vertical coordinate conversion, into the acquired
 swapchain image. There is no CPU frame-image transport. Present completion
 semaphores belong to individual swapchain images, not frame slots. Resize drains
 both queues and recreates shared images/WSI; the GL context and game resources
 survive. VSync changes follow the same recreation path.
+
+The EGL drawable matches the real window size and includes depth/stencil.
+`Minecraft.runTick` prepares its size before drawing, retaining the same GL
+context, live objects and viewport/scissor state. It is not resized after a
+frame has already been drawn. Presentation reads the actual default framebuffer,
+including Iris's final window pass and last direct GL output, rather than
+assuming the main color texture is the final screen. Minimized frames skip WSI;
+a completed frame can be scaled if the window size changes before presentation.
 
 This route retains Iris/Sodium terrain, shadows, MRTs, buffers and frame hooks
 in the real GL implementation. AFV's native terrain renderer and its GL-wrapper
@@ -47,7 +58,11 @@ Linux and an installed Mesa EGL/Zink driver are required. `zinkProbeJar` embeds 
 standalone preflight helper, including its own LWJGL dependencies, in the mod.
 Before changing the game's native environment or applying client mixins, a child
 JVM tests real GL 4.6, compute pixels, matching Vulkan GPU UUIDs, opaque FD images
-and bidirectional semaphore synchronization. Failure, driver-process death or a
+and bidirectional semaphore synchronization. It also creates an unfocused hidden
+NO_API GLFW window, checks the actual surface's graphics/present queues,
+transfer/blit formats and same-GPU shared-format import, and creates a real
+swapchain on that surface. GLFW is bundled only inside the isolated probe JAR;
+the game continues to use its own GLFW. Failure, driver-process death or a
 45-second timeout selects OpenGL. Logs are under `.allforvulkan/preflight/` in
 the instance. This isolates preflight driver failures; runtime driver failures
 still use the existing next-launch recovery marker. A successful preflight does
@@ -63,19 +78,24 @@ For a verified private DTFuel copy (see preparation commands later in this file)
 python3 scripts/launch_modpack_client.py \
   --instance /path/to/private-client --install /path/to/CurseForge/Install \
   --java-home /path/to/jdk21 --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.1.jar \
-  --smoke --local-xim --zink-client --require-iris \
+  --smoke --local-xim --zink-client --backend AUTO --require-iris \
   --shader-pack /path/to/ComplementaryReimagined_r5.9.3.zip \
-  --scene --uncapped --benchmark-ticks 600 --warmup-ticks 900 --inspect-ticks 300
+  --scene --final-output-probe --inspect-ticks 600
 ```
 
 With `--require-iris`, this exercises the same Vulkan selection as the setting,
 without the vanilla force flag. `--scene` builds stone, glass, leaves, water,
-an emissive block and entities only in the newly created smoke world. The extra
-900 world ticks allow background mod initialization to settle before measuring.
+an emissive block and entities only in the newly created smoke world. The
+command above checks correctness without collecting a performance benchmark.
+Optional measurement flags remain available for explicitly matched comparisons;
 `--uncapped` changes VSync/frame cap only in the private client's options.
 The smoke test requires 120 real AFV Vulkan presentations, an actual active Iris
 pipeline, nonblack bounded GL color samples, resize, reload, disconnect and exit.
 Use `--debug-gl` only for bounded synchronous GL error diagnosis.
+`--final-output-probe` draws a test-only 8x8 marker directly into the last default
+framebuffer and verifies its pixels in AFV's actual Vulkan shared image after
+the slot fence. No main texture is changed. `--backend AUTO --zink-client
+--require-iris` checks automatic selection without the vanilla force flag.
 
 For a matched Zink/EGL presentation comparison, replace `--zink-client` with
 `--zink --x11-no-modifiers` when that fallback is required by the nested X server.

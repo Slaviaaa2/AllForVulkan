@@ -9,6 +9,8 @@
 
 2の接続はNeoForgeのウィンドウ／フレームMixinと`ZinkClientSession`、Vulkan側の`ZinkPresenter`、共通`native-bridge`の`ZinkContext`・`SharedImage`で構成する。Vulkanの初期化を表示用とnative描画用に分け、表示専用経路でnative terrain・VMA・シェーダーパイプラインを初期化しない。配布起動時のGLFW親ローダーとVulkan子ローダーの境界は、WSI生成へネイティブhandleを渡すことで越える。別プロセスの起動前検査で、未対応Zinkをゲームへ読み込む前にOpenGLへ戻す。
 
+互換性を優先し、第三者MODがある場合は未知のMODも含めて既存GL frontendを保持する。独自の描画変更や追加最適化は後の選択機能とし、現在はGLの状態・順序・寿命を変えない基礎を整える。最終出力はmain textureと決めつけずdefault framebufferから取得し、GL contextを維持して描画前にdrawableを実ウィンドウサイズへ合わせる。起動前の子JVMでは実surface・swapchain・共有形式まで確認する。
+
 GLクライアント経路の導入は、下記の共通API化・全GL入口／コンテキスト形式・全OS対応の完了を意味しない。
 
 ## 目的

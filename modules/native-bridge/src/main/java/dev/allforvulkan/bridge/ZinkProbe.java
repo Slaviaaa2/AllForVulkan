@@ -34,8 +34,17 @@ public final class ZinkProbe {
                     }
                 }
             }
+            DefaultFramebufferProbe.run(context);
             computeRoundTrip();
             ExternalImageProbe.run();
+            if (java.util.Arrays.asList(args).contains("--wsi")) {
+                try (MemoryStack stack = MemoryStack.stackPush()) {
+                    var bytes = stack.malloc(GL_UUID_SIZE_EXT);
+                    glGetUnsignedBytei_vEXT(GL_DEVICE_UUID_EXT, 0, bytes);
+                    byte[] uuid = new byte[GL_UUID_SIZE_EXT]; bytes.get(uuid);
+                    WsiSupportProbe.run(uuid);
+                }
+            }
             System.out.println("AFV_ZINK_PROBE_PASS: real offscreen desktop GL, image-store/compute, exact pixels");
         }
     }

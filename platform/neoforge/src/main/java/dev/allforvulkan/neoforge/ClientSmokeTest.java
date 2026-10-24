@@ -179,6 +179,11 @@ public final class ClientSmokeTest {
                 throw new IllegalStateException("AFV_SMOKE_FAIL: Zink client did not present through AFV Vulkan");
             Initializer.LOGGER.info("AFV_ZINK_CLIENT_SMOKE_PASS: {} real Vulkan presentations", ZinkClientSession.presentedFrames());
         }
+        if (Boolean.getBoolean("afv.smokeFinalOutput")) {
+            if (!BackendBootstrap.zinkClient() || ZinkClientSession.verifiedFinalOutputFrames() < 120)
+                throw new IllegalStateException("AFV_SMOKE_FAIL: final default-framebuffer output was not verified in Vulkan");
+            Initializer.LOGGER.info("AFV_FINAL_OUTPUT_PASS: {} last-output markers verified in actual Vulkan shared images", ZinkClientSession.verifiedFinalOutputFrames());
+        }
         if (BackendBootstrap.vulkan() && net.vulkanmod.vulkan.interop.ZinkFrameBridge.ENABLED) {
             var bridge = net.vulkanmod.vulkan.Renderer.getInstance().getZinkBridge();
             if (bridge == null || bridge.verifiedFrames() < 120 || bridge.verifiedScenes() < 120)

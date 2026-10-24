@@ -27,12 +27,14 @@ public final class ZinkPresenter implements AutoCloseable {
     private final SharedImage[] frames = new SharedImage[FRAMES];
     private final VkCommandBuffer[] commands = new VkCommandBuffer[FRAMES];
     private final long[] available = new long[FRAMES], fences = new long[FRAMES];
+    private final FinalOutputReadback[] outputChecks = Boolean.getBoolean("afv.smokeFinalOutput") ? new FinalOutputReadback[FRAMES] : null;
     private long swapchain;
     private long[] images, presentReady;
-    private int width, height, frame, readFramebuffer;
+    private int width, height, frame;
     private int windowWidth, windowHeight;
     private boolean vsync = true, dirty = true, closed;
     private long presented;
+    private long verifiedOutput;
     private int producerErrors;
 
     public ZinkPresenter(ZinkContext context, long window) {
@@ -49,16 +51,15 @@ public final class ZinkPresenter implements AutoCloseable {
                 check(vkCreateFence(device, VkFenceCreateInfo.calloc(stack).sType$Default().flags(VK_FENCE_CREATE_SIGNALED_BIT), null, handle), "presentation fence");
                 fences[i] = handle.get(0);
             }
-            readFramebuffer = glGenFramebuffers();
         } catch (Throwable failure) { close(); throw failure; }
     }
 
     public void setVsync(boolean enabled) { if (vsync != enabled) { vsync = enabled; dirty = true; } }
     public long presentedFrames() { return presented; }
+    public long verifiedFinalOutputFrames() { return verifiedOutput; }
 
-    public void present(int sourceTexture) {
+    public void present() {
         context.assertCurrentThread();
-        if (sourceTexture <= 0) return;
         // A producer's sticky GL error must not be attributed to FD import or
         // semaphore submission. Report it separately, with bounded logging.
         for (int error, n = 0; n < 16 && (error = glGetError()) != GL_NO_ERROR; n++) {
@@ -70,6 +71,7 @@ public final class ZinkPresenter implements AutoCloseable {
             if (w.get(0) == 0 || h.get(0) == 0) return;
             if (dirty || windowWidth != w.get(0) || windowHeight != h.get(0)) recreate(w.get(0), h.get(0));
             check(vkWaitForFences(device, fences[frame], true, -1L), "wait presentation slot");
+            if (outputChecks != null && outputChecks[frame].verify()) verifiedOutput++;
             var index = stack.mallocInt(1);
             int acquired = vkAcquireNextImageKHR(device, swapchain, -1L, available[frame], 0, index);
             if (acquired == VK_ERROR_OUT_OF_DATE_KHR) { dirty = true; return; }
@@ -77,16 +79,18 @@ public final class ZinkPresenter implements AutoCloseable {
             else dirty = true;
             int imageIndex = index.get(0);
             var shared = frames[frame];
+            boolean checkOutput = outputChecks != null && width == context.width() && height == context.height() && width >= 32 && height >= 32;
+            if (checkOutput) drawFinalMarker();
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            int previousReadBuffer = glGetInteger(GL_READ_BUFFER);
             shared.beginGlWrite();
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, readFramebuffer);
-            glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sourceTexture, 0);
-            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            glReadBuffer(glGetBoolean(GL_DOUBLEBUFFER) ? GL_BACK : GL_FRONT);
             if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-                throw new IllegalStateException("Client color framebuffer is incomplete");
-            int sourceWidth = org.lwjgl.opengl.GL45.glGetTextureLevelParameteri(sourceTexture, 0, GL_TEXTURE_WIDTH);
-            int sourceHeight = org.lwjgl.opengl.GL45.glGetTextureLevelParameteri(sourceTexture, 0, GL_TEXTURE_HEIGHT);
+                throw new IllegalStateException("Client default framebuffer is incomplete");
             glDisable(GL_SCISSOR_TEST); glDisable(GL_FRAMEBUFFER_SRGB);
-            glBlitFramebuffer(0, 0, sourceWidth, sourceHeight, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glBlitFramebuffer(0, 0, context.width(), context.height(), 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glReadBuffer(previousReadBuffer);
             int blitError = glGetError();
             if (blitError != GL_NO_ERROR) throw new IllegalStateException("Client color transfer: GL error 0x" + Integer.toHexString(blitError));
             shared.endGlWrite();
@@ -96,6 +100,7 @@ public final class ZinkPresenter implements AutoCloseable {
             check(vkBeginCommandBuffer(command, VkCommandBufferBeginInfo.calloc(stack).sType$Default()
                     .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)), "begin presentation command");
             shared.acquire(command, family);
+            if (checkOutput) outputChecks[frame].record(command, shared.image(), width, height, stack);
             imageBarrier(command, images[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, stack);
             var blit = VkImageBlit.calloc(1, stack);
@@ -116,6 +121,7 @@ public final class ZinkPresenter implements AutoCloseable {
                     .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT))
                     .pCommandBuffers(stack.pointers(command))
                     .pSignalSemaphores(stack.longs(presentReady[imageIndex], shared.readyForGl())), fences[frame]), "submit client Vulkan presentation");
+            if (checkOutput) outputChecks[frame].submitted();
             int result = vkQueuePresentKHR(DeviceManager.getPresentQueue().queue(), VkPresentInfoKHR.calloc(stack).sType$Default()
                     .pWaitSemaphores(stack.longs(presentReady[imageIndex])).swapchainCount(1)
                     .pSwapchains(stack.longs(swapchain)).pImageIndices(index));
@@ -179,7 +185,10 @@ public final class ZinkPresenter implements AutoCloseable {
             // Per-image semaphores are reused only after WSI reacquires that image.
             presentReady = new long[images.length];
             for (int i = 0; i < images.length; i++) presentReady[i] = semaphore(stack);
-            for (int i = 0; i < FRAMES; i++) frames[i] = new SharedImage(DeviceManager.physicalDevice, device, width, height, sharedFormat);
+            for (int i = 0; i < FRAMES; i++) {
+                frames[i] = new SharedImage(DeviceManager.physicalDevice, device, width, height, sharedFormat);
+                if (outputChecks != null) outputChecks[i] = new FinalOutputReadback();
+            }
             var command = commands[0];
             check(vkResetCommandBuffer(command, 0), "reset initial ownership command");
             check(vkBeginCommandBuffer(command, VkCommandBufferBeginInfo.calloc(stack).sType$Default()
@@ -200,6 +209,17 @@ public final class ZinkPresenter implements AutoCloseable {
         check(vkCreateSemaphore(device, VkSemaphoreCreateInfo.calloc(stack).sType$Default(), null, handle), "client presentation semaphore");
         return handle.get(0);
     }
+    private void drawFinalMarker() {
+        try (var state = new GlStateScope()) {
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            glDisable(GL_FRAMEBUFFER_SRGB);
+            glColorMask(true, true, true, true);
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(context.width() - 24, context.height() - 24, 8, 8);
+            glClearColor(1, 0, 1, 1);
+            glClear(GL_COLOR_BUFFER_BIT);
+        }
+    }
     private static void requireBlit(int format, int flag, MemoryStack stack) {
         var properties = VkFormatProperties.calloc(stack);
         vkGetPhysicalDeviceFormatProperties(DeviceManager.physicalDevice, format, properties);
@@ -213,6 +233,10 @@ public final class ZinkPresenter implements AutoCloseable {
         vkCmdPipelineBarrier(command, srcStage, dstStage, 0, null, null, barrier);
     }
     private void destroySwapchain() {
+        if (outputChecks != null) for (int i = 0; i < FRAMES; i++) if (outputChecks[i] != null) {
+            if (outputChecks[i].verify()) verifiedOutput++;
+            outputChecks[i].close(); outputChecks[i] = null;
+        }
         for (int i = 0; i < FRAMES; i++) if (frames[i] != null) { frames[i].close(); frames[i] = null; }
         if (presentReady != null) for (long semaphore : presentReady) if (semaphore != 0) vkDestroySemaphore(device, semaphore, null);
         presentReady = null;
@@ -230,7 +254,6 @@ public final class ZinkPresenter implements AutoCloseable {
             if (available[i] != 0) vkDestroySemaphore(device, available[i], null);
             if (fences[i] != 0) vkDestroyFence(device, fences[i], null);
         }
-        if (readFramebuffer != 0) glDeleteFramebuffers(readFramebuffer);
         // Commands belong to Vulkan's presentation pool and are freed with it.
     }
 }
