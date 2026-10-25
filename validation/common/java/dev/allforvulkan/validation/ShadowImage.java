@@ -93,11 +93,13 @@ public final class ShadowImage {
             for (int x = 0; x < width && found < limit; x++) {
                 if (near(left, right, width, height, x, y, tolerance)) continue;
                 int index = (y * width + x) * 4;
+                int nearest = nearest(left, right, width, height, x, y, index, tolerance);
                 summary.append(" (").append(x).append(',').append(y).append(" gl=")
                         .append(left[index] & 255).append(',').append(left[index + 1] & 255).append(',')
                         .append(left[index + 2] & 255).append(',').append(left[index + 3] & 255)
                         .append(" vk=").append(right[index] & 255).append(',').append(right[index + 1] & 255).append(',')
-                        .append(right[index + 2] & 255).append(',').append(right[index + 3] & 255).append(')');
+                        .append(right[index + 2] & 255).append(',').append(right[index + 3] & 255)
+                        .append(" nearest=").append(nearest < 0 ? "none" : nearest).append(')');
                 found++;
             }
         }
@@ -129,6 +131,23 @@ public final class ShadowImage {
             }
         }
         return false;
+    }
+
+    private static int nearest(byte[] left, byte[] right, int width, int height, int x, int y, int index, int tolerance) {
+        int best = -1;
+        for (int yy = 0; yy < height; yy++) {
+            for (int xx = 0; xx < width; xx++) {
+                int other = (yy * width + xx) * 4;
+                if (channel(left[index], right[other]) > tolerance
+                        || channel(left[index + 1], right[other + 1]) > tolerance
+                        || channel(left[index + 2], right[other + 2]) > tolerance
+                        || channel(left[index + 3], right[other + 3]) > tolerance)
+                    continue;
+                int distance = Math.max(Math.abs(xx - x), Math.abs(yy - y));
+                if (best < 0 || distance < best) best = distance;
+            }
+        }
+        return best;
     }
 
     private static int channel(byte left, byte right) {
