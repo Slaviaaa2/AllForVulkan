@@ -103,11 +103,8 @@ public final class ShadowMeshCapture {
 
     private static void noteRender(TerrainRenderPass pass, ChunkRenderListIterable lists, CameraTransform camera) {
         boolean shadow = shadows();
-        if (!shadow && renderLogs > 0) return;
-        if (renderLogs >= 6) return;
-        renderLogs++;
         int sections = 0;
-        if (lists != null && pass != null && !pass.isTranslucent()) {
+        if (shadow && lists != null && pass != null && !pass.isTranslucent()) {
             var iterator = lists.iterator(false);
             while (iterator.hasNext()) {
                 var indexes = iterator.next().sectionsWithGeometryIterator(false);
@@ -118,8 +115,10 @@ public final class ShadowMeshCapture {
                 }
             }
             lastSections = sections;
-            if (shadow && sections > maxSections) maxSections = sections;
+            if (sections > maxSections) maxSections = sections;
         }
+        if ((!shadow && renderLogs > 0) || renderLogs >= 6) return;
+        renderLogs++;
         System.out.println("AFV_SHADOW_MESH_RENDER: shadow=" + shadow
                 + " sections=" + sections
                 + " translucent=" + (pass != null && pass.isTranslucent())
