@@ -4,6 +4,7 @@ import dev.allforvulkan.bridge.GlStateScope;
 import dev.allforvulkan.bridge.GlBlitScope;
 import dev.allforvulkan.bridge.PresentationSurface;
 import dev.allforvulkan.bridge.PresentationTransfer;
+import dev.allforvulkan.bridge.FramePresentDispatcher;
 import dev.allforvulkan.bridge.SharedImage;
 import dev.allforvulkan.bridge.SurfaceFailure;
 import dev.allforvulkan.bridge.ZinkContext;
@@ -29,6 +30,7 @@ public final class ZinkPresenter implements AutoCloseable {
     private final VkDevice device = Vulkan.getVkDevice();
     private final int family = Queue.getQueueFamilies().graphicsFamily;
     private final SharedImage[] frames = new SharedImage[FRAMES];
+    private final FramePresentDispatcher presentation = new FramePresentDispatcher(Boolean.getBoolean("afv.experimentalAsyncPresent"));
     private VkCommandBuffer setupCommand;
     private VkCommandBuffer[] transferCommands;
     private boolean[] commandSubmitted;
@@ -72,6 +74,19 @@ public final class ZinkPresenter implements AutoCloseable {
     public long reusedTransferFrames() { return reusedTransfers; }
     public long recordedTransferCommands() { return recordedTransfers; }
     public int recoveredSurfaces() { return recoveredSurfaces; }
+    public boolean asynchronousPresentation() { return presentation.asynchronous(); }
+    /** Explicit lifecycle barrier; normal rendering drains at the next present. */
+    public void awaitPresentation() {
+        context.assertCurrentThread();
+        Integer result = presentation.complete();
+        if (result == null) return;
+        if (result == VK_ERROR_SURFACE_LOST_KHR) { surfaceLost = dirty = true; return; }
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) { dirty = true; return; }
+        if (result == VK_SUBOPTIMAL_KHR) dirty = true;
+        else check(result, "present client Vulkan image");
+        surfaceAttempts = 0;
+        if (++presented == 120) Initializer.LOGGER.info("AFV_ZINK_CLIENT_PRESENT_PASS: 120 real GL -> shared GPU image -> AFV Vulkan WSI frames, {}x{}", width, height);
+    }
     /** Explicit QA request exercises the same real surface replacement as loss. */
     public void requestSurfaceRecreation() {
         context.assertCurrentThread();
@@ -80,6 +95,9 @@ public final class ZinkPresenter implements AutoCloseable {
 
     public void present() {
         context.assertCurrentThread();
+        // The previous native call may overlap the GL rendering that just
+        // finished, but never another AFV queue operation or swapchain access.
+        awaitPresentation();
         // A producer's sticky GL error must not be attributed to FD import or
         // semaphore submission. Report it separately, with bounded logging.
         for (int error, n = 0; n < 16 && (error = glGetError()) != GL_NO_ERROR; n++) {
@@ -139,15 +157,21 @@ public final class ZinkPresenter implements AutoCloseable {
             if (commandSubmitted[commandIndex]) reusedTransfers++;
             commandSubmitted[commandIndex] = true;
             if (checkOutput) outputChecks[frame].submitted();
-            int result = vkQueuePresentKHR(DeviceManager.getPresentQueue().queue(), VkPresentInfoKHR.calloc(stack).sType$Default()
-                    .pWaitSemaphores(stack.longs(presentReady[imageIndex])).swapchainCount(1)
-                    .pSwapchains(stack.longs(swapchain)).pImageIndices(index));
-            if (result == VK_ERROR_SURFACE_LOST_KHR) { surfaceLost = dirty = true; return; }
-            if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) dirty = true;
-            else check(result, "present client Vulkan image");
-            if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) surfaceAttempts = 0;
-            if (++presented == 120) Initializer.LOGGER.info("AFV_ZINK_CLIENT_PRESENT_PASS: 120 real GL -> shared GPU image -> AFV Vulkan WSI frames, {}x{}", width, height);
+            var queue = DeviceManager.getPresentQueue().queue();
+            long target = swapchain, ready = presentReady[imageIndex];
+            presentation.submit(() -> presentNative(queue, target, ready, imageIndex));
+            if (!presentation.asynchronous()) awaitPresentation();
             frame = (frame + 1) % FRAMES;
+        }
+    }
+
+    private static int presentNative(VkQueue queue, long swapchain, long ready, int imageIndex) {
+        // Every pointer belongs to the executing thread's stack; no render-thread
+        // IntBuffer or VkPresentInfo escapes into the asynchronous request.
+        try (var stack = MemoryStack.stackPush()) {
+            return vkQueuePresentKHR(queue, VkPresentInfoKHR.calloc(stack).sType$Default()
+                    .pWaitSemaphores(stack.longs(ready)).swapchainCount(1)
+                    .pSwapchains(stack.longs(swapchain)).pImageIndices(stack.ints(imageIndex)));
         }
     }
 
@@ -214,7 +238,7 @@ public final class ZinkPresenter implements AutoCloseable {
             recordTransferCommands(stack);
             dirty = false;
             windowWidth = requestedWidth; windowHeight = requestedHeight;
-            Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}, sharedLayout=transfer, transfer={}", width, height, format, images.length, vsync, directCopy ? "copy" : "blit");
+            Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}, sharedLayout=transfer, transfer={}, asyncPresent={}", width, height, format, images.length, vsync, directCopy ? "copy" : "blit", presentation.asynchronous());
             return true;
         }
     }
@@ -329,6 +353,10 @@ public final class ZinkPresenter implements AutoCloseable {
     @Override public void close() {
         if (closed) return;
         context.assertCurrentThread();
+        Throwable pendingFailure = null;
+        try { awaitPresentation(); }
+        catch (RuntimeException | LinkageError failure) { pendingFailure = failure; }
+        finally { presentation.close(); }
         glFinish();
         vkDeviceWaitIdle(device);
         closed = true;
@@ -341,5 +369,8 @@ public final class ZinkPresenter implements AutoCloseable {
             vkFreeCommandBuffers(device, Vulkan.getCommandPool(), setupCommand);
             setupCommand = null;
         }
+        Initializer.LOGGER.info("AFV_PRESENT_DISPATCH_STATS: {}", presentation.statistics());
+        if (pendingFailure instanceof RuntimeException runtime) throw runtime;
+        if (pendingFailure instanceof LinkageError linkage) throw linkage;
     }
 }

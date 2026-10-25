@@ -644,3 +644,27 @@ the lock provenance in the launch/benchmark metadata. Use its existing
 `--require-iris --iris-cycle --window-cycle` checks and the supplied shader pack;
 FPS samples must still use the same documented scene/settings and no final-output
 readback. A different dependency pair is a separate profile, not an AFV speedup.
+
+## Experiment: overlap Vulkan presentation with GL frame production
+
+`-Dafv.experimentalAsyncPresent=true` (private launcher: `--async-present`) moves
+`vkQueuePresentKHR` onto an AFV-owned worker. After submitting the current transfer,
+the render thread can produce the next GL frame while the native presentation
+call runs. At the next presentation boundary it joins the prior result before
+any AFV queue submission, image acquisition, swapchain access or recreation.
+Only one native request may be outstanding. The worker builds its native structs
+on its own MemoryStack from captured scalar handles; no render-thread stack
+pointer crosses threads. GL calls, Iris passes and GL/Vulkan image ownership
+remain on the existing paths.
+
+The default is synchronous. Compare OFF/ON using the same JAR, profile, scene and
+short benchmark protocol. `asyncPresent` is recorded in launch and benchmark
+metadata. `AFV_PRESENT_DISPATCH_STATS` reports completed calls and cumulative
+native-call/join averages for the entire run (including startup/lifecycle stages),
+not GPU time or just the benchmark window. Native result handling stays on the
+render thread; only completed successful/suboptimal requests count as presented.
+The window-cycle probe drains pre-iconify work before measuring suspension.
+
+The [Vulkan presentation contract](https://docs.vulkan.org/refpages/latest/refpages/source/vkQueuePresentKHR.html)
+permits a blocking present call, making overlap a measurable hypothesis. The
+experiment does not execute concurrent host operations on AFV's queue/swapchain.

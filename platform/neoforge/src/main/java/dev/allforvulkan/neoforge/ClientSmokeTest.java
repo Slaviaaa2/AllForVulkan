@@ -114,6 +114,7 @@ public final class ClientSmokeTest {
                 conditions.put("renderer", BackendBootstrap.vulkan() ? "AFV Vulkan" : org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_RENDERER));
                 conditions.put("backendReason", BackendBootstrap.reason());
                 conditions.put("zinkClient", BackendBootstrap.zinkClient());
+                conditions.put("asyncPresent", ZinkClientSession.asynchronousPresentation());
                 conditions.put("validationScene", Boolean.getBoolean("afv.smokeScene"));
                 conditions.put("warmupTicks", warmup);
                 conditions.put("width", client.getWindow().getWidth());

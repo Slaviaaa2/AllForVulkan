@@ -30,6 +30,8 @@ MOD一覧のAFV設定から **「自動」「Vulkan」「OpenGL」** を選択�
 
 版・JARチェックサム・試験条件は[検証記録](docs/VALIDATION.md)に記載しています。
 
+性能実験として、JVM引数 `-Dafv.experimentalAsyncPresent=true` でVulkan表示処理を専用スレッドへ移し、その間に次のGLフレームを進められます。Zinkクライアント経路用で、標準はOFFです。同一JARのOFF／ON測定と試験条件は[検証記録](docs/VALIDATION.md)を参照してください。
+
 Linux向け実験機能 `-Dafv.zinkInterop=true` は別の経路で、AFV独自の地形描画からワールドの色と深度をGPU共有画像でZinkへ渡し、GLSL後処理からVulkanへ戻します。処理位置はワールド描画後・手元の深度クリアとGUI描画の前です。`-Dafv.zinkEffect=invert` / `depth` で診断用の色反転／深度表示を選べます。こちらの経路にIrisの地形・影・複数passを統合する機能は開発中です。**Iris全機能・全シェーダーパック・全GPUの完全互換は未確認**です。
 
 - [ビルド・起動方法と現状](docs/DEVELOPMENT.md)

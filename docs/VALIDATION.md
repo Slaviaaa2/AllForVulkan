@@ -991,3 +991,65 @@ copyのZIPおよび9設定値も一致した。Iris 1.8.12／Sodium 0.6.13に対
 証跡はローカル`iris-1.8.12-dimensions-{launch.log,client.log,preflight.log,manifest.json,
 source.json,result.json}`。この結果は2 MODのprofileであり、DTFuel全204 MODをこの旧版の
 組合せへ置換した検証や、全pack／全OS／全GPUの完全互換を示すものではない。
+
+## 実験: 表示API待ちと次GLフレームの重ね合わせ（2026-10-25）
+
+実験用`afv.experimentalAsyncPresent`を追加し、`vkQueuePresentKHR`を専用workerへ移す。
+現在frameの転送submit後、次frameのGL描画を先に進め、その後のAFV queue／swapchain
+操作前に前の結果へ合流する。未完了は最大1件で、native structはworker自身のstackに
+確保する。Iris passとGL描画、共有画像・semaphore・fenceの契約は変更しない。
+通常設定は同期実行のままとし、同一JARでOFF／ONを比較する。
+
+起動・benchmark metadataに実験のON／OFFを記録し、終了時に実行全体の完了call数、
+native API時間と合流待ち時間の平均を出す。後者は起動やライフサイクル試験も含む
+集計で、FPSの約20秒区間だけの値やGPU単体時間とは区別する。表示済み数は完了した
+成功／suboptimal結果だけで増やす。最小化検査では直前の未完了callを回収してから
+休止中の表示数を測る。
+
+ビルド／baselineコンパイル、dispatcherのthread・非同期重ね合わせ・未完了1件制限・
+例外伝播・割込み時の完了回収・終了の検査、配布JAR検査、launcher構文検査、差分空白
+検査が通過。同じJARでIris 1.8.14-beta.1／Sodium 0.8.13最小構成と指定Complementary
+r5.9.3をOFF→ONの順に各1回起動した。固定scene／視点、960×540、距離12、VSyncなし、
+追加600 ticks待機後400 ticks計測、最終出力readbackなし。JSONのrenderer、待機ticks、
+解像度、距離、VSync、frame制限、カメラ、display、focus、計測方式と、JAR／MOD／
+shader／shader設定のhashが一致した。
+
+| 同一JAR・最小構成の約20秒単発比較 | 平均FPS | median frame ms | p95 frame ms | p99 frame ms |
+| --- | ---: | ---: | ---: | ---: |
+| 実験OFF（同期） | 46.72 | 21.15 | 23.48 | 24.70 |
+| 実験ON（非同期） | 55.98 | 17.94 | 20.27 | 21.53 |
+
+今回のFPS差は+19.82%、p95時間差は-13.65%。
+OFFは934 frames／19.992秒、ONは1118 frames／19.971秒。
+反復統計や実DTFuel全構成の改善率ではなく、同じ専用X上の単発A/Bの参考値とする。
+両方ともworld、resize、shader off→on／shader-only reload、resource reload、実iconify／
+復帰、VSync切替／復帰、実surface再作成、同一context／device／Iris維持、disconnectと
+正常終了を通過した。
+
+実行全体では同期4843 callsのnative平均16.28 ms、非同期5792 callsのnative平均15.33 ms、
+合流待ち平均12.41 msだった。これらはFPS試料区間外やVSync切替の段階も含み、
+GPU時間や測定区間の厳密な待ち時間内訳には使わない。
+配布JAR SHA-256は`ea6c77499f5c447fd0b9def50a850d1889d62b5708dba09062e6e92c7cc2dca0`。
+証跡はローカル`async-present-build.log`、`async-present-comparison.json`、
+`async-present-{off,on}-{launch.log,client.log,preflight.log,manifest.json,benchmark.json}`。
+
+続いて同じJARをDTFuel 0.1.10全204 MOD・NeoForge 21.1.251・指定Complementaryで
+実験ON、最終出力readback診断付きで起動した。AUTO→Vulkan、world、resize、shader
+ off→on／shader-only reload、resource reload、実iconify／復帰、VSync切替／復帰、
+実surface再作成、同一GL context／VkDevice／有効Irisの維持、disconnectと正常終了が
+通過した。GPU共有画像の最終出力markerを3679回照合し、転送commandを7277回再利用
+（記録84個）した。実行全体の非同期present完了は7363 calls、native平均15.18 ms、
+合流待ち平均3.02 ms。これはreadback診断付きの全段階集計なので、通常DTFuelのFPS
+測定や内訳には使わない。全204 MODでの実験OFF／ONのFPS改善率は今回測っていない。
+shader ZIPと元の9設定値の一致を確認した。
+
+pack更新画面は専用Minecraftの現在のwindow ID／PID／bounds／stackingを確認して
+client領域960×540だけを取得し、表示されていた「Not now」で同じprocessを継続した。
+pack更新はしておらず、この手動介入は記録する。元pack・既存save・提供shaderは
+変更していない。証跡はローカル`dtfuel-async-present-{launch.log,client.log,preflight.log,
+manifest.json,result.json}`、更新画面と対象metadataは
+`dtfuel-async-present-update-prompt{.png,-target.json}`。
+
+このセクションは描画進行を変える性能実験の実装・比較であり、標準はOFFのまま。
+JVM引数`-Dafv.experimentalAsyncPresent=true`で試せる。描画本体と画像転送は同じ経路を
+保ち、効果があった仮説として保持する。全GPU・全packでの性能向上を示すものではない。

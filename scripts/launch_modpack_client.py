@@ -67,6 +67,8 @@ def verify_client_mods(game, manifest):
 
 
 def launch(args):
+    if args.async_present and not args.zink_client:
+        raise ValueError('--async-present requires --zink-client')
     if args.iris_cycle and not (args.smoke and args.require_iris):
         raise ValueError('--iris-cycle requires --smoke --require-iris')
     if args.window_cycle and not (args.smoke and args.zink_client):
@@ -201,6 +203,8 @@ def launch(args):
         command += ['-Dafv.smokeScene=true']
     if args.final_output_probe:
         command += ['-Dafv.smokeFinalOutput=true']
+    if args.async_present:
+        command += ['-Dafv.experimentalAsyncPresent=true']
     if args.debug_gl:
         command += ['-Dafv.debugGlClient=true']
     if args.mesa_egl_vendor:
@@ -244,6 +248,7 @@ def launch(args):
         record['dependencyLock'] = manifest['dependency_lock']
     record['debugGlErrors'] = args.debug_gl
     record['finalOutputProbe'] = args.final_output_probe
+    record['asyncPresent'] = args.async_present
     record['irisCycle'] = args.iris_cycle
     record['windowCycle'] = args.window_cycle
     record['dimensionCycle'] = args.dimension_cycle
@@ -328,6 +333,7 @@ if __name__ == '__main__':
     parser.add_argument('--dimension-inspect-ticks', type=int, default=0, help='Hold each validated dimension for scoped visual inspection')
     parser.add_argument('--scene', action='store_true', help='Build a shader validation scene in the new smoke world')
     parser.add_argument('--final-output-probe', action='store_true', help='Verify a last default-framebuffer draw reaches the Vulkan shared image')
+    parser.add_argument('--async-present', action='store_true', help='Experimental: overlap native Vulkan presentation with the next GL frame')
     parser.add_argument('--debug-gl', action='store_true', help='Log bounded synchronous GL errors for client-bridge diagnosis')
     shader = parser.add_mutually_exclusive_group()
     shader.add_argument('--shader-fixture', type=Path)

@@ -34,6 +34,8 @@ final class WindowLifecycle {
                 if (tick - changedTick > 100) throw new IllegalStateException("Window manager did not iconify the QA window");
                 return false;
             }
+            ZinkClientSession.awaitPresentation();
+            frames = ZinkClientSession.presentedFrames();
             changedTick = tick; changedFrame = frames; step = 1;
             return false;
         }

@@ -32,3 +32,9 @@ tasks.register('verifyQueueSelection', JavaExec) {
     mainClass = 'dev.allforvulkan.bridge.QueueSelectionChecks'
 }
 tasks.named('check') { dependsOn 'verifyQueueSelection' }
+tasks.register('verifyPresentDispatch', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.bridge.FramePresentDispatcherChecks'
+}
+tasks.named('check') { dependsOn 'verifyPresentDispatch' }
