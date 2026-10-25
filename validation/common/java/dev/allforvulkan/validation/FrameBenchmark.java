@@ -22,6 +22,12 @@ public final class FrameBenchmark {
         if (last != 0 && intervals.size() < 250_000) intervals.add(now - last);
         last = now;
     }
+    static double percentile(long[] sortedAscending, double rank) {
+        int index = (int) Math.ceil(sortedAscending.length * rank) - 1;
+        if (index < 0) index = 0;
+        if (index >= sortedAscending.length) index = sortedAscending.length - 1;
+        return sortedAscending[index] / 1e6;
+    }
     public static void finish(Path output, Map<String, Object> conditions) {
         active = false;
         if (intervals.size() < 30) throw new IllegalStateException("Insufficient benchmark frames");
@@ -32,9 +38,10 @@ public final class FrameBenchmark {
         report.put("frames", times.length);
         report.put("seconds", total / 1e9);
         report.put("averageFps", times.length * 1e9 / total);
+        report.put("p1FrameMs", percentile(times, .01));
         report.put("medianFrameMs", times[times.length / 2] / 1e6);
-        report.put("p95FrameMs", times[(int)Math.ceil(times.length * .95) - 1] / 1e6);
-        report.put("p99FrameMs", times[(int)Math.ceil(times.length * .99) - 1] / 1e6);
+        report.put("p95FrameMs", percentile(times, .95));
+        report.put("p99FrameMs", percentile(times, .99));
         String json = new GsonBuilder().setPrettyPrinting().create().toJson(report);
         try { Files.writeString(output, json + "\n"); }
         catch (IOException failure) { throw new IllegalStateException("Cannot save benchmark", failure); }
