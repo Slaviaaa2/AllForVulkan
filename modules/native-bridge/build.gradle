@@ -87,6 +87,21 @@ tasks.register('verifyShadowConstant', JavaExec) {
     systemProperty 'afv.compositeDevice', System.getProperty('afv.compositeDevice', '')
 }
 tasks.named('check') { dependsOn 'verifyShadowConstant' }
+tasks.register('verifyShadowMesh', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.framegraph.SodiumShadowDecoderChecks'
+    systemProperty 'org.lwjgl.system.stackSize', '1024'
+}
+tasks.register('verifyShadowMeshDraw', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.framegraph.ShadowMeshPassChecks'
+    systemProperty 'org.lwjgl.system.stackSize', '1024'
+    systemProperty 'afv.requireCompositeDevice', System.getProperty('afv.requireCompositeDevice', 'false')
+    systemProperty 'afv.compositeDevice', System.getProperty('afv.compositeDevice', '')
+}
+tasks.named('check') { dependsOn 'verifyShadowMesh', 'verifyShadowMeshDraw' }
 
 // Optional direct-output router; other platforms retain the ordinary copy path.
 if (System.getProperty('os.name').toLowerCase().contains('linux') &&

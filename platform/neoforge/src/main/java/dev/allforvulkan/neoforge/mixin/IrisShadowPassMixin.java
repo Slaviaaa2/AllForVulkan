@@ -12,6 +12,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(targets = "net.irisshaders.iris.pipeline.IrisRenderingPipeline", remap = false)
 public class IrisShadowPassMixin {
+    @Inject(method = "renderShadows", at = @At("HEAD"), remap = false, require = 1)
+    private void afvBeforeShadows(CallbackInfo callback) {
+        dev.allforvulkan.neoforge.ShadowMeshCapture.beginShadow();
+    }
+
     @Inject(method = "renderShadows", at = @At("RETURN"), remap = false, require = 1)
     private void afvAfterShadows(CallbackInfo callback) {
         IrisShadowHook.afterShadows();

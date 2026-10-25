@@ -27,6 +27,10 @@ class ShadowProbeDiffTest(unittest.TestCase):
         self.assertEqual(shadow_probe.center_mismatches(left[2], moved[2], width, height, 8), 1)
         near = self.image(width, height, fill, edits=((center, 128 - 8),))
         self.assertEqual(shadow_probe.center_mismatches(left[2], near[2], width, height, 8), 0)
+        shifted = bytearray(left[2])
+        shifted[4:width * 4] = left[2][: (width - 1) * 4]
+        self.assertEqual(shadow_probe.near_mismatches(left[2], bytes(shifted), width, height, 0), 0)
+        self.assertEqual(shadow_probe.near_mismatches(left[2], bytes(bytes((255, 255, 255, 255)) * (width * height)), width, height, 8), width * height)
         self.assertEqual(left[0], width)
         self.assertEqual(left[1], height)
 

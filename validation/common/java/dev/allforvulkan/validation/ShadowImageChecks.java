@@ -29,7 +29,14 @@ public final class ShadowImageChecks {
         byte[] white = fill(width, height, (byte) 255, (byte) 255, (byte) 255, (byte) 255);
         require(ShadowImage.replacement(white, other, width, height) == white, "mismatched center replaced the GL image");
         require(ShadowImage.replacement(left, null, width, height) == left, "missing Vulkan image replaced the GL image");
-        System.out.println("AFV_SHADOW_IMAGE_PASS: center half, tolerance, round trip, fallback");
+        byte[] shifted = new byte[left.length];
+        for (int y = 0; y < height; y++)
+            System.arraycopy(left, y * width * 4, shifted, y * width * 4 + 4, (width - 1) * 4);
+        require(ShadowImage.nearMismatches(left, shifted, width, height, 0) == 0, "a one-pixel shift was rejected");
+        require(ShadowImage.nearMismatches(left, white, width, height, ShadowImage.TOLERANCE) == width * height, "a different image matched");
+        require(ShadowImage.replacementNear(left, shifted, width, height) == shifted, "a shifted mesh was not accepted");
+        require(ShadowImage.replacementNear(left, white, width, height) == left, "a different mesh replaced the GL image");
+        System.out.println("AFV_SHADOW_IMAGE_PASS: center half, tolerance, round trip, fallback, one-pixel shift");
     }
 
     private static byte[] fill(int width, int height, byte r, byte g, byte b, byte a) {

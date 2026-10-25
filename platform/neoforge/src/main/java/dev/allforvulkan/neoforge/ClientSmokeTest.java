@@ -3,7 +3,10 @@ package dev.allforvulkan.neoforge;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
@@ -39,6 +42,49 @@ public final class ClientSmokeTest {
     private static DimensionLifecycle dimensionCycle;
     private static long renderedFrames;
     private static long benchmarkBeginWallMs;
+
+    /** Iris draws the player into the shadow map unless they are a spectator. The terrain mesh does not include that model. */
+    private static void hideProbePlayer(Minecraft client) {
+        client.player.setInvisible(true);
+        var server = client.getSingleplayerServer();
+        if (server == null) return;
+        var id = client.player.getUUID();
+        server.execute(() -> {
+            var player = server.getPlayerList().getPlayer(id);
+            if (player != null && !player.isSpectator()) player.setGameMode(GameType.SPECTATOR);
+        });
+    }
+
+    private static void placeShadowBlocks(Minecraft client) {
+        var server = client.getSingleplayerServer();
+        if (server == null || client.player == null) return;
+        BlockPos feet = client.player.blockPosition();
+        server.execute(() -> {
+            var level = server.overworld();
+            level.setDayTime(6000);
+            Block[] wool = {Blocks.RED_WOOL, Blocks.BLUE_WOOL, Blocks.WHITE_WOOL, Blocks.LIME_WOOL};
+            int surface = feet.getY() - 1;
+            for (int column = 0; column < wool.length; column++) {
+                for (int dx = 0; dx < 6; dx++) {
+                    for (int dz = 0; dz < 6; dz++) {
+                        var pos = new BlockPos(feet.getX() + 2 + column * 6 + dx, surface, feet.getZ() + 2 + dz);
+                        level.setBlockAndUpdate(pos, wool[column].defaultBlockState());
+                        level.setBlockAndUpdate(pos.above(), wool[column].defaultBlockState());
+                    }
+                }
+            }
+            System.out.println("AFV_SHADOW_MESH_SCENE: wool columns at " + feet.getX() + "," + surface + "," + feet.getZ());
+        });
+    }
+
+    private static int distinctColors(String summary) {
+        int at = summary.indexOf("distinct=");
+        if (at < 0) return 0;
+        int value = 0;
+        for (int index = at + "distinct=".length(); index < summary.length() && Character.isDigit(summary.charAt(index)); index++)
+            value = value * 10 + summary.charAt(index) - '0';
+        return value;
+    }
 
     @SubscribeEvent public static void frame(net.neoforged.neoforge.client.event.RenderFrameEvent.Post event) {
         if (ENABLED) renderedFrames++;
@@ -100,9 +146,13 @@ public final class ClientSmokeTest {
         }
         if (phase >= 1 && phase <= 3 && client.level != null && client.player != null && client.screen == null) {
             if (phase == 1 && Boolean.getBoolean("afv.shadowProbe")) {
-                if (++stableTicks < 200) return;
+                boolean mesh = Boolean.getBoolean("afv.shadowMesh");
+                if (mesh) hideProbePlayer(client);
+                if (mesh && stableTicks == 40) placeShadowBlocks(client);
+                if (++stableTicks < (mesh ? 120 : 200)) return;
                 if (!dev.allforvulkan.validation.ShadowProbe.capture()) return;
                 String summary = dev.allforvulkan.validation.ShadowProbe.summary();
+                if (mesh && distinctColors(summary) < 2 && stableTicks < 900) return;
                 Initializer.LOGGER.info("AFV_SHADOW_PROBE_PASS: {}", summary);
                 System.out.println("AFV_SHADOW_PROBE_PASS: " + summary);
                 pass(client);

@@ -74,6 +74,18 @@ Verified here, under Xvfb and llvmpipe:
 
 No FPS. Real Sodium meshes are still later. Complementary is not this pack, so a center mismatch keeps its GL shadow.
 
+## Iteration 7 — one Sodium shadow mesh, flag still off
+
+`afv.irisShadow` still defaults off and the hook still does not cancel Iris's shadow pass. While the flag is on, Sodium's opaque section upload is copied and the shadow draw records which sections it submitted. The vertices are the pinned Sodium 0.6 compact layout (Iris 1.8.12 appends attributes after those 20 bytes). Each vertex becomes the subset mesh: camera-relative position, atlas UV with Iris's texcoord shrink, and the stored tint.
+
+`ShadowMeshPass` draws that mesh with the compiled `shadow` program only when the pack's shadow shader is the fixed texture×tint program. Iris `const` directives such as `shadowMapResolution` are ignored by the subset check. The readback is kept only when every pixel has a sample within one texel and tolerance 8. Otherwise Iris's GL image stays. AFV-Shadow is not that program, so it still uses the constant-color path.
+
+AFV-Shadow-Mesh is the non-constant pack: 32×32, shadow distance 16, clear black, and the texture×tint shadow shader. The harness places red, blue, white, and lime wool columns and hides the player. `scripts/shadow_probe.py --pack mesh` compares the GL shadow with the replay.
+
+Verified here: `./gradlew check -Dafv.requireCompositeDevice=true`. `AFV_SHADOW_MESH_DECODE_PASS` covers a compact quad, a stride-24 buffer, and `const` directives. `AFV_SHADOW_MESH_DRAW_PASS` on lavapipe read a red left half and a green right half (`left=255,0,0,255 right=0,255,0,255`). The client harness is recorded in the same iteration after it runs. No FPS.
+
+This does not move Complementary Reimagined. Its shadow program is not the texture×tint subset, the flag is off, and the GL shadow pass still runs.
+
 ## Next
 
-Capture one real shadow mesh from the pinned Iris/Sodium pair and feed it to the subset draw. Until that write matches a pack that is not a constant clear, keep the flag off and do not cancel Iris's shadow pass.
+Match a shadow program that is not the fixed texture×tint shader, or cancel the GL shadow pass for this subset once the mesh replay stays matched. Until a Complementary pass is actually skipped, a desktop frame time should not move.

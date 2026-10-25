@@ -70,6 +70,47 @@ public final class ShadowImage {
         return vulkan;
     }
 
+    /** Pixels with no sample within one texel whose channels are inside the tolerance.
+     * A one-pixel raster shift between GL and Vulkan still matches. A different shape does not. */
+    public static int nearMismatches(byte[] left, byte[] right, int width, int height, int tolerance) {
+        if (left.length != width * height * 4 || right.length != left.length)
+            throw new IllegalArgumentException("RGBA size does not match " + width + "x" + height);
+        int mismatches = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (!near(left, right, width, height, x, y, tolerance)) mismatches++;
+            }
+        }
+        return mismatches;
+    }
+
+    /** The Vulkan image when every pixel has a neighbor within tolerance, otherwise the GL image. */
+    public static byte[] replacementNear(byte[] gl, byte[] vulkan, int width, int height) {
+        if (gl == null) return null;
+        if (vulkan == null || vulkan.length != gl.length) return gl;
+        if (nearMismatches(gl, vulkan, width, height, TOLERANCE) != 0) return gl;
+        return vulkan;
+    }
+
+    private static boolean near(byte[] left, byte[] right, int width, int height, int x, int y, int tolerance) {
+        int index = (y * width + x) * 4;
+        for (int dy = -1; dy <= 1; dy++) {
+            int yy = y + dy;
+            if (yy < 0 || yy >= height) continue;
+            for (int dx = -1; dx <= 1; dx++) {
+                int xx = x + dx;
+                if (xx < 0 || xx >= width) continue;
+                int other = (yy * width + xx) * 4;
+                if (channel(left[index], right[other]) <= tolerance
+                        && channel(left[index + 1], right[other + 1]) <= tolerance
+                        && channel(left[index + 2], right[other + 2]) <= tolerance
+                        && channel(left[index + 3], right[other + 3]) <= tolerance)
+                    return true;
+            }
+        }
+        return false;
+    }
+
     private static int channel(byte left, byte right) {
         return Math.abs((left & 0xff) - (right & 0xff));
     }

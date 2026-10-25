@@ -59,13 +59,17 @@ public final class ShadowProbe {
         int nonzero = 0;
         int cx = resolution / 2;
         int index = (cx * resolution + cx) * 4;
-        for (int i = 0; i < rgba.length; i += 4)
+        var colors = new java.util.HashSet<Integer>();
+        for (int i = 0; i < rgba.length; i += 4) {
             if ((rgba[i] | rgba[i + 1] | rgba[i + 2]) != 0) nonzero++;
+            colors.add((rgba[i] & 255) | ((rgba[i + 1] & 255) << 8) | ((rgba[i + 2] & 255) << 16) | ((rgba[i + 3] & 255) << 24));
+        }
         summary = "width=" + resolution + " height=" + resolution
                 + " format=" + formatName
                 + " hook=" + hook
                 + " file=" + output
                 + " nonzero=" + nonzero + "/" + (resolution * resolution)
+                + " distinct=" + colors.size()
                 + " center=" + (rgba[index] & 255) + "," + (rgba[index + 1] & 255) + ","
                 + (rgba[index + 2] & 255) + "," + (rgba[index + 3] & 255);
         return true;

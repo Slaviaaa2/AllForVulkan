@@ -108,8 +108,14 @@ var matcher = java.util.regex.Pattern.compile("(?m)^[ \\t]*#[ \\t]*version[ \\t]
         if (stripped.indexOf('#') >= 0) return "preprocessor";
         var tokens = tokens(stripped);
         int index = 0;
-var declarations = new ArrayList<String>();
+        var declarations = new ArrayList<String>();
         while (index < tokens.size() && !tokens.get(index).equals("void")) {
+            // Iris reads shadowMapResolution and the clear color from const declarations. They are not shader logic.
+            if (tokens.get(index).equals("const")) {
+                index = skipStatement(tokens, index);
+                if (index < 0) return "not the fixed texture*tint program";
+                continue;
+            }
             if (index + 3 >= tokens.size() || !tokens.get(index + 3).equals(";")) return "not the fixed texture*tint program";
             declarations.add(tokens.get(index) + " " + tokens.get(index + 1) + " " + tokens.get(index + 2));
             index += 4;
@@ -152,6 +158,19 @@ var declarations = new ArrayList<String>();
         if (statements.size() != 1 || !(statements.contains(FRAGMENT_DATA) || statements.contains(FRAGMENT_COLOR)))
             return "not the fixed texture*tint program";
         return null;
+    }
+
+    private static int skipStatement(List<String> tokens, int index) {
+        int depth = 0;
+        for (; index < tokens.size(); index++) {
+            String token = tokens.get(index);
+            if (token.equals("(")) depth++;
+            else if (token.equals(")")) {
+                if (depth == 0) return -1;
+                depth--;
+            } else if (token.equals(";") && depth == 0) return index + 1;
+        }
+        return -1;
     }
 
     private static boolean sameMembers(List<String> actual, List<String> expected) {
