@@ -43,3 +43,10 @@ crash-reports/
 # Python validation helpers
 **/__pycache__/
 *.pyc
+
+# Agent's readme
+AGENTS.md
+CLAUDE.md
+
+# Private implementation notes and local validation evidence
+/internal/

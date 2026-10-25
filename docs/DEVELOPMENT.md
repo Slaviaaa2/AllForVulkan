@@ -100,7 +100,7 @@ marker work is diagnostic. Record mean FPS and p95 frame time with the actual
 conditions and nested X display label. The launcher rejects a missing new result
 and archives benchmark JSON plus launch/artifact/shader metadata under
 `.allforvulkan/benchmarks/` in the private client. This provides a single-run
-section indicator, not the user's normal DTFuel FPS.
+section indicator; performance conclusions require repeated matched runs.
 
 Surface queue selection is shared by the isolated preflight and the game. A
 combined graphics/present family is preferred, with separate present queues
@@ -160,7 +160,7 @@ the game. The Zink environment changes affect only the launched game process.
 The private-client launcher accepts `--mesa-egl-vendor` for a manual override and
 `--expect-backend Vulkan` or `OpenGL` to assert the actual startup decision.
 
-For a verified private DTFuel copy (see preparation commands later in this file):
+For an independently prepared test instance (see preparation commands below):
 
 ```sh
 python3 scripts/launch_modpack_client.py \
@@ -224,7 +224,7 @@ A second independent profile can select only exact source JAR filenames:
 
 ```sh
 python3 scripts/prepare_modpack_client.py \
-  --source /path/to/DTFuel --destination /path/to/iris-sodium-only \
+  --source /path/to/modpack --destination /path/to/iris-sodium-only \
   --mod-file iris-neoforge-1.8.14-beta.1+mc1.21.1.jar \
   --mod-file sodium-neoforge-0.8.13+mc1.21.1.jar
 ```
@@ -288,14 +288,6 @@ this port. Inherited GL mixin classes are retained as reference but not register
 The early mixin plugin sets a minimum 1 MiB LWJGL thread-local stack for modern
 driver extension enumeration. Shader resources are read through the mod class
 loader, and shaderc include buffers live until the native release callback.
-
-## Next milestones
-
-Finish M0 title/world/resize/reload checks on real GPUs, including an independent
-Iris baseline. Extract renderer dependencies into common modules incrementally.
-Extend M1's isolated Mesa/Zink context and external image/semaphore sharing
-from the current game-frame diagnostic into resource and rendering integration. No fake
-GL capabilities, readback-based product path or Iris compatibility claims.
 
 ## World lifecycle and Iris comparisons
 
@@ -447,9 +439,9 @@ GL, using small host buffers after the normal fence. A separate (0,0) 32x32
 corner continues the CPU-asset sampler check. No full-frame CPU capture or image
 file is generated. `AFV_ZINK_SCENE_PASS` requires at least 120 completed scene
 comparisons; invert requires the RGB complement (alpha unchanged). Supported
-image formats are RGBA/BGRA8 UNORM or sRGB; this machine's actual swapchain path
-was UNORM. The sRGB branch uses sRGB shared images, GL framebuffer conversion,
-and linear-space inversion, but still needs its own surface-format runtime test.
+image formats are RGBA/BGRA8 UNORM or sRGB. The sRGB branch uses sRGB shared
+images, GL framebuffer conversion and linear-space inversion. Validate each
+surface format independently.
 Smoke assertions currently require a viewport of at least 64x32.
 
 General GL buffers/FBO registries, arbitrary GPU-updated asset synchronization,
@@ -487,8 +479,8 @@ using three acquire/release semaphore pairs, copies GL output back, and resumes
 the main pass with LOAD for the hand and GUI. The final UI submission owns the
 usual frame fence and presentation semaphore. Title frames use FRAME_END.
 
-Depth formats implemented: D16, X8_D24, D24S8, D32F, D32FS8. D24S8 was exercised
-on RTX 3060; the others still need device coverage. `-Dafv.zinkEffect=depth`
+Depth formats implemented: D16, X8_D24, D24S8, D32F, D32FS8. Validate format
+support and output on the target device. `-Dafv.zinkEffect=depth`
 samples depth in the GL pass. Test-only comparison uses a 32×32 scene region
 near the lower center, with at most one quantization step for depth visualization.
 The corner asset diagnostic remains a separate 32×32 region. No CPU transport
@@ -502,8 +494,8 @@ input preservation.
 ## Dedicated pack and benchmark runs
 
 ```sh
-python3 scripts/prepare_modpack_client.py --source /mnt/hdd/MinecraftModpacks/DTFuel --destination "$PWD/build/compatibility/dtfuel-client"
-./gradlew -Pneo_version=21.1.251 -PafvGameDir="$PWD/build/compatibility/dtfuel-client" -PafvClientHeap=6G -Dafv.smokeTest=true -Dafv.smokeWorld=true runClient
+python3 scripts/prepare_modpack_client.py --source /path/to/modpack --destination "$PWD/build/compatibility/test-client"
+./gradlew -Pneo_version=21.1.251 -PafvGameDir="$PWD/build/compatibility/test-client" -PafvClientHeap=6G -Dafv.smokeTest=true -Dafv.smokeWorld=true runClient
 ./gradlew -Dafv.benchmarkTicks=600 runIrisBaseline
 ./gradlew -Dafv.benchmarkTicks=600 runIrisZinkBaseline
 ```
@@ -511,24 +503,21 @@ python3 scripts/prepare_modpack_client.py --source /mnt/hdd/MinecraftModpacks/DT
 The copy command requires a new destination, resolves symlinks into independent
 files and verifies every mod's SHA-256. Original saves/configs/mods are not edited.
 A pack's fallback OpenGL result does not satisfy the separate Vulkan integration
-goal. The DTFuel copy pins the pack's own NeoForge/Iris/Sodium versions; the small
+goal. The full copy pins the pack's own NeoForge/Iris/Sodium versions; the small
 Iris baseline uses its independent lock file.
 
 Opt-in benchmarks warm up the fixed-seed flat world, set a fixed camera and
 record RenderFrameEvent.Post intervals for the requested client ticks. JSON
 contains renderer, resolution, camera, render/simulation distances, vsync, frame
 limit, sample duration, average FPS and median/p95/p99 intervals. These include
-pacing/presentation, not GPU-only times. A single synthetic-pack run is not a
-DTFuel performance claim. Verify identical hardware/ICD and settings before
+pacing/presentation, not GPU-only times. A single synthetic-scene run does not establish real-world modpack performance. Verify identical hardware/ICD and settings before
 comparing: Xephyr may expose llvmpipe to normal GL even while Vulkan uses the
 physical GPU. Such results cannot establish a Vulkan speedup.
 
-The current validation X session uses Xephyr on `:97`; its Xauthority file is
-`build/compatibility/xsession/Xauthority`. Export DISPLAY/XAUTHORITY only for the
-test subprocess. The client runs separately from the user's working desktop.
-Captures must still target the identified client window or a smaller region;
-virtual desktops do not authorize full-screen capture.
-
+A dedicated X11 server may be used for isolated client tests. Set `DISPLAY` and
+`XAUTHORITY` for the test subprocess to match that server. A real window manager
+is required for iconify/restore checks. Record the display/compositor conditions
+in benchmark reports; nested X11 and desktop-driver results are not interchangeable.
 
 For a production pack run, prefer the installed launcher metadata and the built
 JAR instead of the development launch. This avoids IDE-only GameTest registration
@@ -536,10 +525,9 @@ and mod assertions. The helper reads public version/library/assets metadata,
 uses an offline QA identity, and never reads launcher accounts:
 
 ```sh
-DISPLAY=:97 XAUTHORITY="$PWD/build/compatibility/xsession/Xauthority" \
 python3 scripts/launch_modpack_client.py \
-  --instance build/compatibility/dtfuel-client \
-  --install /mnt/hdd/CurseForge/Install --java-home /path/to/jdk21 \
+  --instance build/compatibility/test-client \
+  --install /path/to/CurseForge/Install --java-home /path/to/jdk21 \
   --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.1.jar \
   --smoke --local-xim --zink --x11-no-modifiers
 ```
@@ -679,8 +667,8 @@ fence, acquires a WSI image, submits the cached transfer, then presents. Before
 submitting another job the producer collects the oldest when the look-ahead limit
 is reached. `afv.experimentalPipelineDepth` (launcher `--pipeline-depth`) selects
 1–3 outstanding jobs, independently of the three-image GPU ring; the default is 1.
-Depth 3 experimentally increased average throughput but bunched producer frames,
-so a deeper CPU queue must not be equated with smooth frame delivery.
+A deeper CPU queue may increase throughput while bunching producer frames;
+measure frame-time percentiles and presentation throughput together.
 All AFV queue and swapchain work stays on that consumer until
 the main thread drains it for resource recreation. GL calls and SharedImage's
 owner-thread methods stay on the render thread.
@@ -735,3 +723,29 @@ Only the enumerated entrypoints are routed; arbitrary vendor extensions and MODs
 switching unrelated GL contexts on the same render thread require further work.
 The ordinary copy route remains available for comparison. The current direct
 target additionally requires the WSI and EGL extents to match.
+
+### Direct-output handoff layouts
+
+SharedImage now distinguishes a sampled Vulkan/GL bridge, a GL copy target and
+a direct GL render target. The sampled bridge retains GENERAL in both directions;
+the copy target retains TRANSFER_DST to GL and TRANSFER_SRC back to Vulkan.
+Direct output selects `afv.directOutputLayout=attachment|general` (launcher
+`--direct-output-layout`, default `attachment`). The attachment mode releases to
+GL in COLOR_ATTACHMENT_OPTIMAL and waits with GL_LAYOUT_COLOR_ATTACHMENT_EXT;
+GL signals TRANSFER_SRC and Vulkan acquires that layout before its cached blit.
+The general mode preserves the previous direct-output handoff for same-JAR A/B.
+Private depth/stencil creation belongs to the direct render-target factory.
+Role-specific GL sampling/Vulkan-scene-producer operations are rejected for
+presentation-only images. This changes ownership/layout declarations, not Iris
+shader operations, shaderpack settings or the number of WSI transfer commands.
+
+## Release preparation
+
+Publish a new version after a coherent feature set, acceptable measured performance
+and a tested default configuration have been established. Keep unproven experiments
+opt-in. Check the chosen defaults with representative Iris/Sodium profiles, build
+the distribution JAR and validate its metadata before publishing. Release notes
+should describe user-visible changes, requirements, supported scope and known issues.
+Keep machine-specific logs, private modpack details and working notes outside the
+tracked source tree. Do not distribute third-party mod or shader JARs/ZIPs without
+their applicable redistribution permissions.
