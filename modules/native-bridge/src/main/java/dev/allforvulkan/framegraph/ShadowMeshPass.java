@@ -12,8 +12,9 @@ import static org.lwjgl.vulkan.VK11.*;
 import static org.lwjgl.vulkan.VK12.VK_API_VERSION_1_2;
 
 /** Draws one decoded shadow mesh with the subset program. The readback is bottom-row-first, like glGetTexImage.
- * The GL projection is flipped on Y so Vulkan's top-left framebuffer matches that order after the row flip.
- * Face culling stays off, matching Iris's shadow terrain pass. */
+ * Iris's shadow ortho is classic OpenGL clip space, with z in [-1, 1]. Vulkan clips z to [0, 1], so that
+ * projection is rewritten with {@code z' = 0.5 z + 0.5 w} and then flipped on Y. The Y flip makes Vulkan's
+ * top-left framebuffer match glGetTexImage after the row flip. Face culling stays off, matching Iris's shadow terrain. */
 public final class ShadowMeshPass {
     private static final int FORMAT = VK_FORMAT_R8G8B8A8_UNORM;
     private static final int DEPTH_FORMAT = VK_FORMAT_D32_SFLOAT;
@@ -128,7 +129,7 @@ public final class ShadowMeshPass {
                 renderPass = renderPass(device, stack);
                 uniform = buffer(device, stack, UNIFORM_BYTES, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
                 uniformMemory = bind(device, stack, memory, uniform, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-                writeUniforms(device, uniformMemory, draw.modelView(), flippedProjection(draw.projection()));
+                writeUniforms(device, uniformMemory, draw.modelView(), vulkanProjection(draw.projection()));
                 long vertexBytes = (long) draw.vertices().length * 4;
                 vertices = buffer(device, stack, vertexBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
                 vertexMemory = bind(device, stack, memory, vertices, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -159,12 +160,16 @@ public final class ShadowMeshPass {
         }
     }
 
-    private static float[] flippedProjection(float[] projection) {
+    /** Column-major GL projection, rewritten for Vulkan clip space and a top-left framebuffer. */
+    public static float[] vulkanProjection(float[] projection) {
         float[] flipped = projection.clone();
-        flipped[1] = -flipped[1];
-        flipped[5] = -flipped[5];
-        flipped[9] = -flipped[9];
-        flipped[13] = -flipped[13];
+        for (int column = 0; column < 4; column++) {
+            int base = column * 4;
+            float z = flipped[base + 2];
+            float w = flipped[base + 3];
+            flipped[base + 1] = -flipped[base + 1];
+            flipped[base + 2] = 0.5f * z + 0.5f * w;
+        }
         return flipped;
     }
 

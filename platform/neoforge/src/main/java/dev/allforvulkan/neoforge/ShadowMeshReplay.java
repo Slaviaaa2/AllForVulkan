@@ -29,6 +29,8 @@ public final class ShadowMeshReplay {
     private static int cachedGeneration = -1;
     private static int cachedSize;
     private static String cachedDetail = "";
+    private static int clipLogs;
+    private static int loggedVertices = -1;
 
     public record Image(boolean subset, byte[] rgba, String detail) {}
 
@@ -48,6 +50,7 @@ public final class ShadowMeshReplay {
         float shrinkV = (float) (1.0 / 32768.0 - 1.0 / (atlasHeight * precision));
         float[] vertices = decode(snapshot, shrinkU, shrinkV);
         if (vertices == null) return new Image(true, null, "shadow mesh could not be decoded");
+        logClip(snapshot, vertices);
         var draw = new ShadowMeshPass.Draw(vertices, atlas, atlasWidth, atlasHeight, snapshot.modelView(), snapshot.projection(),
                 size, clearRed, clearGreen, clearBlue, clearAlpha);
         var rendered = ShadowMeshPass.render(shader, draw);
@@ -79,6 +82,38 @@ public final class ShadowMeshReplay {
             offset += mesh.vertices().length;
         }
         return vertices;
+    }
+
+    /** One line per mesh size, so a fully clipped replay is visible without a device. */
+    private static void logClip(ShadowMeshCapture.Snapshot snapshot, float[] vertices) {
+        if (!Boolean.getBoolean("afv.shadowMesh") || clipLogs >= 4 || vertices.length == loggedVertices) return;
+        loggedVertices = vertices.length;
+        clipLogs++;
+        float[] projection = ShadowMeshPass.vulkanProjection(snapshot.projection());
+        int inside = 0;
+        int count = vertices.length / 9;
+        for (int index = 0; index < vertices.length; index += 9) {
+            float[] eye = multiply(snapshot.modelView(), vertices[index], vertices[index + 1], vertices[index + 2], 1f);
+            float[] clip = multiply(projection, eye[0], eye[1], eye[2], eye[3]);
+            if (clip[3] > 0f && Math.abs(clip[0]) <= clip[3] && Math.abs(clip[1]) <= clip[3] && clip[2] >= 0f && clip[2] <= clip[3])
+                inside++;
+        }
+        var draw = snapshot.draws().isEmpty() ? null : snapshot.draws().get(0);
+        System.out.println("AFV_SHADOW_MESH_CLIP: vertices=" + count
+                + " inside=" + inside
+                + " proj=" + snapshot.projection()[0] + "," + snapshot.projection()[5] + "," + snapshot.projection()[10] + "," + snapshot.projection()[14]
+                + " model=" + snapshot.modelView()[12] + "," + snapshot.modelView()[13] + "," + snapshot.modelView()[14]
+                + " first=" + vertices[0] + "," + vertices[1] + "," + vertices[2]
+                + " region=" + (draw == null ? "none" : draw.regionX() + "," + draw.regionY() + "," + draw.regionZ()));
+    }
+
+    private static float[] multiply(float[] matrix, float x, float y, float z, float w) {
+        return new float[] {
+                matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12] * w,
+                matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13] * w,
+                matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14] * w,
+                matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15] * w
+        };
     }
 
     private static boolean resolve() {
