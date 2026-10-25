@@ -18,7 +18,7 @@ import net.caffeinemc.mods.sodium.client.render.viewport.CameraTransform;
 /** Copies Sodium section meshes at upload and remembers which of them the shadow pass drew.
  * The flag gates both steps. A normal launch does not retain the bytes. */
 public final class ShadowMeshCapture {
-    public record Draw(byte[] packed, int vertices, float regionX, float regionY, float regionZ) {}
+    public record Draw(byte[] packed, int vertices, int stride, float regionX, float regionY, float regionZ) {}
 
     public record Snapshot(float[] modelView, float[] projection, List<Draw> draws, int stride, int generation) {
         public int vertexCount() {
@@ -33,7 +33,6 @@ public final class ShadowMeshCapture {
     private static final float[] MODEL_VIEW = new float[16];
     private static final float[] PROJECTION = new float[16];
     private static boolean matrices;
-    private static int stride = SodiumShadowDecoder.COMPACT_BYTES;
     private static int generation;
 
     private ShadowMeshCapture() {}
@@ -55,11 +54,10 @@ public final class ShadowMeshCapture {
         }
     }
 
-    public static void retainDraw(int formatStride, ChunkRenderMatrices cameraMatrices, ChunkRenderListIterable lists,
+    public static void retainDraw(ChunkRenderMatrices cameraMatrices, ChunkRenderListIterable lists,
                                   TerrainRenderPass pass, CameraTransform camera) {
         if (!BackendBootstrap.irisShadow() || pass == null || pass.isTranslucent() || !shadows() || lists == null || camera == null)
             return;
-        stride = Math.max(formatStride, SodiumShadowDecoder.COMPACT_BYTES);
         if (!matrices && cameraMatrices != null && cameraMatrices.modelView() != null && cameraMatrices.projection() != null) {
             cameraMatrices.modelView().get(MODEL_VIEW);
             cameraMatrices.projection().get(PROJECTION);
@@ -82,12 +80,13 @@ public final class ShadowMeshCapture {
                 if (section == null) continue;
                 Stored stored = sections.get(new SectionKey(section.getOriginX(), section.getOriginY(), section.getOriginZ()));
                 if (stored == null) continue;
-                DRAWS.add(new Draw(stored.packed, stored.vertices, regionX, regionY, regionZ));
+                DRAWS.add(new Draw(stored.packed, stored.vertices, stored.stride, regionX, regionY, regionZ));
             }
         }
     }
 
     public static Snapshot snapshot() {
+        int stride = DRAWS.isEmpty() ? SodiumShadowDecoder.COMPACT_BYTES : DRAWS.get(0).stride();
         return new Snapshot(MODEL_VIEW.clone(), PROJECTION.clone(), List.copyOf(DRAWS), stride, generation);
     }
 
@@ -101,11 +100,14 @@ public final class ShadowMeshCapture {
         ByteBuffer view = parts.getVertexData().getDirectBuffer();
         if (view == null) return;
         view = view.duplicate();
-        if (view.remaining() <= 0 || view.remaining() > 2_000_000) return;
-        byte[] packed = new byte[view.remaining()];
+        int length = view.remaining();
+        if (length <= 0 || length > 2_000_000 || length % vertices != 0) return;
+        int stride = length / vertices;
+        if (stride < SodiumShadowDecoder.COMPACT_BYTES) return;
+        byte[] packed = new byte[length];
         view.get(packed);
         MESHES.computeIfAbsent(pass, key -> new java.util.HashMap<>())
-                .put(new SectionKey(x, y, z), new Stored(packed, vertices));
+                .put(new SectionKey(x, y, z), new Stored(packed, vertices, stride));
         generation++;
     }
 
@@ -120,5 +122,5 @@ public final class ShadowMeshCapture {
 
     private record SectionKey(int x, int y, int z) {}
 
-    private record Stored(byte[] packed, int vertices) {}
+    private record Stored(byte[] packed, int vertices, int stride) {}
 }

@@ -64,7 +64,7 @@ public final class ShadowMeshReplay {
         int floats = 0;
         var decoded = new java.util.ArrayList<SodiumShadowDecoder.Mesh>();
         for (var draw : snapshot.draws()) {
-            var mesh = SodiumShadowDecoder.decode(draw.packed(), snapshot.stride(), draw.vertices(),
+            var mesh = SodiumShadowDecoder.decode(draw.packed(), draw.stride(), draw.vertices(),
                     draw.regionX(), draw.regionY(), draw.regionZ(), shrinkU, shrinkV);
             if (mesh == null) continue;
             floats += mesh.vertices().length;
