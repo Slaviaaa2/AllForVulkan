@@ -27,6 +27,8 @@ import static org.lwjgl.vulkan.KHRSwapchain.*;
 public final class ZinkPresenter implements AutoCloseable {
     private final boolean framePipeline = Boolean.getBoolean("afv.experimentalFramePipeline");
     private final boolean directOutput = DirectDefaultFramebuffer.ENABLED;
+    private final SharedImage.GlOutputLayout directOutputLayout = SharedImage.GlOutputLayout.valueOf(
+            System.getProperty("afv.directOutputLayout", "attachment").toUpperCase(java.util.Locale.ROOT));
     private boolean useDirectTarget, directActive, directReady;
     private long directOutputFrames, copiedOutputFrames, discardedDirectFrames;
     private final int frameSlots = framePipeline ? 3 : 2;
@@ -87,6 +89,7 @@ public final class ZinkPresenter implements AutoCloseable {
     public int pipelineDepth() { return pipelineDepth; }
     public boolean directOutput() { return useDirectTarget; }
     public long directOutputFrames() { return directOutputFrames; }
+    public String directOutputLayout() { return useDirectTarget ? directOutputLayout.name().toLowerCase(java.util.Locale.ROOT) : "copy"; }
     public long droppedFrames() { if (framePipeline) collectCompleted(); return droppedFrames; }
     public int pendingFrames() { return presentation.pendingCount(); }
     /** Explicit lifecycle barrier; normal rendering drains at the next present. */
@@ -141,7 +144,7 @@ public final class ZinkPresenter implements AutoCloseable {
                 }
             }
             if (useDirectTarget) {
-                int target = frames[frame].beginGlCopy(); // GENERAL, renderable image
+                int target = frames[frame].beginGlOutput();
                 DirectDefaultFramebuffer.begin(target);
                 directActive = true;
             }
@@ -390,9 +393,8 @@ public final class ZinkPresenter implements AutoCloseable {
             for (int i = 0; i < images.length; i++) presentReady[i] = semaphore(stack);
             for (int i = 0; i < frameSlots; i++) {
                 frames[i] = useDirectTarget
-                        ? new SharedImage(DeviceManager.physicalDevice, device, width, height, sharedFormat)
+                        ? SharedImage.forGlRenderTarget(DeviceManager.physicalDevice, device, width, height, sharedFormat, directOutputLayout)
                         : SharedImage.forGlCopy(DeviceManager.physicalDevice, device, width, height, sharedFormat);
-                if (useDirectTarget) frames[i].attachDepthStencil();
                 if (outputChecks != null) outputChecks[i] = new FinalOutputReadback();
             }
             var command = setupCommand;
@@ -414,6 +416,7 @@ public final class ZinkPresenter implements AutoCloseable {
             Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}, sharedLayout=transfer, transfer={}, asyncPresent={}", width, height, format, images.length, vsync, directCopy ? "copy" : "blit", presentation.asynchronous());
             if (framePipeline) Initializer.LOGGER.info("AFV_FRAME_PIPELINE: slots={}, depth={}, acquire/transfer/present worker, bounded FIFO", frameSlots, pipelineDepth);
             if (directOutput) Initializer.LOGGER.info("AFV_DIRECT_OUTPUT: active={}, GL default -> imported target, colorCopySkipped={}", useDirectTarget, useDirectTarget);
+            if (useDirectTarget) Initializer.LOGGER.info("AFV_DIRECT_OUTPUT_LAYOUT: {}", directOutputLayout());
             return true;
         }
     }

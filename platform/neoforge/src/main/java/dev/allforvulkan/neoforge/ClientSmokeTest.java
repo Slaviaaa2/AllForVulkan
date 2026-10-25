@@ -125,6 +125,7 @@ public final class ClientSmokeTest {
                 conditions.put("framePipeline", ZinkClientSession.framePipeline());
                 conditions.put("pipelineDepth", ZinkClientSession.pipelineDepth());
                 conditions.put("directOutput", ZinkClientSession.directOutput());
+                conditions.put("directOutputLayout", ZinkClientSession.directOutputLayout());
                 if (BackendBootstrap.zinkClient()) {
                     conditions.put("completedVulkanPresents", ZinkClientSession.presentedFrames() - benchmarkPresentBaseline);
                     conditions.put("droppedVulkanFrames", ZinkClientSession.droppedFrames() - benchmarkDropBaseline);

@@ -65,6 +65,7 @@ public final class ZinkClientSession {
     public static int pipelineDepth() { return presenter == null ? 0 : presenter.pipelineDepth(); }
     public static boolean directOutput() { return presenter != null && presenter.directOutput(); }
     public static long directOutputFrames() { return presenter == null ? 0 : presenter.directOutputFrames(); }
+    public static String directOutputLayout() { return presenter == null ? "copy" : presenter.directOutputLayout(); }
     public static long droppedFrames() { return presenter == null ? 0 : presenter.droppedFrames(); }
     public static int pendingFrames() { return presenter == null ? 0 : presenter.pendingFrames(); }
     public static void awaitPresentation() { if (presenter != null) presenter.awaitPresentation(); }

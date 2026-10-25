@@ -208,7 +208,7 @@ def launch(args):
     if args.frame_pipeline:
         command += ['-Dafv.experimentalFramePipeline=true', '-Dafv.experimentalPipelineDepth=' + str(args.pipeline_depth)]
     if args.direct_output:
-        command += ['-Dafv.experimentalDirectOutput=true']
+        command += ['-Dafv.experimentalDirectOutput=true', '-Dafv.directOutputLayout=' + args.direct_output_layout]
     if args.debug_gl:
         command += ['-Dafv.debugGlClient=true']
     if args.mesa_egl_vendor:
@@ -255,6 +255,7 @@ def launch(args):
     record['asyncPresent'] = args.async_present or args.frame_pipeline
     record['framePipeline'] = args.frame_pipeline
     record['directOutput'] = args.direct_output
+    record['directOutputLayout'] = args.direct_output_layout if args.direct_output else 'copy'
     record['pipelineDepth'] = args.pipeline_depth if args.frame_pipeline else 0
     record['irisCycle'] = args.iris_cycle
     record['windowCycle'] = args.window_cycle
@@ -307,6 +308,7 @@ def launch(args):
         passed = passed and f'AFV_FRAME_PIPELINE: slots=3, depth={args.pipeline_depth},' in text and 'AFV_FRAME_PIPELINE_STATS:' in text
     if args.direct_output:
         passed = passed and 'AFV_DIRECT_DEFAULT_PROBE_PASS:' in text and 'AFV_DIRECT_OUTPUT: active=true,' in text and 'AFV_DIRECT_OUTPUT_PASS:' in text and 'AFV_DIRECT_OUTPUT_STATS:' in text
+        passed = passed and f'AFV_DIRECT_OUTPUT_LAYOUT: {args.direct_output_layout}' in text
         if args.iris_cycle:
             passed = passed and 'AFV_DIRECT_IRIS_CYCLE_PASS:' in text and 'AFV_DIRECT_RELOAD_PASS:' in text
     if args.benchmark_ticks > 0:
@@ -350,6 +352,7 @@ if __name__ == '__main__':
     parser.add_argument('--frame-pipeline', action='store_true', help='Experimental: three GL producer slots with worker-owned Vulkan acquire/transfer/present')
     parser.add_argument('--pipeline-depth', type=int, choices=(1, 2, 3), default=1, help='Maximum outstanding Vulkan jobs in frame-pipeline mode (default: 1)')
     parser.add_argument('--direct-output', action='store_true', help='Experimental Linux x86_64: route GL default framebuffer directly into the shared Vulkan image')
+    parser.add_argument('--direct-output-layout', choices=('general', 'attachment'), default='attachment', help='Direct-output handoff: general reference or attachment/transfer-specific layouts')
     parser.add_argument('--debug-gl', action='store_true', help='Log bounded synchronous GL errors for client-bridge diagnosis')
     shader = parser.add_mutually_exclusive_group()
     shader.add_argument('--shader-fixture', type=Path)

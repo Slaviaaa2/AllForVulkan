@@ -61,6 +61,7 @@ neoForge {
             systemProperty 'afv.experimentalFramePipeline', System.getProperty('afv.experimentalFramePipeline', 'false')
             systemProperty 'afv.experimentalPipelineDepth', System.getProperty('afv.experimentalPipelineDepth', '1')
             systemProperty 'afv.experimentalDirectOutput', System.getProperty('afv.experimentalDirectOutput', 'false')
+            systemProperty 'afv.directOutputLayout', System.getProperty('afv.directOutputLayout', 'attachment')
             systemProperty 'afv.debugGlClient', System.getProperty('afv.debugGlClient', 'false')
             systemProperty 'afv.validationEgl', System.getProperty('afv.validationEgl', 'false')
             systemProperty 'afv.validationPack', System.getProperty('afv.validationPack', 'false')
