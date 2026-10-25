@@ -25,6 +25,18 @@ public final class IrisSubsetPassChecks {
         var decision = ShaderBackendSelection.choose("direct", true, IrisPackPlan.read(smoke));
         if (!decision.fellBack() || !decision.active().equals("zink"))
             throw new IllegalStateException("Subset draw replaced the Zink client: " + decision);
-        System.out.println("AFV_IRIS_SUBSET_DRAW_PASS: " + result.detail());
+        float[] white = {
+                -1f, -1f, 0f, 0.5f, 0.5f, 1f, 1f, 1f, 1f,
+                3f, -1f, 0f, 0.5f, 0.5f, 1f, 1f, 1f, 1f,
+                -1f, 3f, 0f, 0.5f, 0.5f, 1f, 1f, 1f, 1f
+        };
+        var tint = IrisSubsetPass.execute(compiled.shaders(), new IrisSubsetPass.Mesh(
+                new byte[] {64, (byte) 128, (byte) 192, (byte) 255}, white, 64, 128, 192, 255));
+        if (tint.skipped() || !tint.ran().equals("shadow,gbuffers_textured_lit,gbuffers_terrain"))
+            throw new IllegalStateException(tint.detail());
+        var rejected = IrisSubsetPass.execute(compiled.shaders(), new IrisSubsetPass.Mesh(new byte[0], white, 0, 0, 0, 0));
+        if (rejected.skipped() || !rejected.fallback().contains("mesh (texture must be 1x1 RGBA)"))
+            throw new IllegalStateException(rejected.detail());
+        System.out.println("AFV_IRIS_SUBSET_DRAW_PASS: " + result.detail() + "; tint=" + tint.detail());
     }
 }

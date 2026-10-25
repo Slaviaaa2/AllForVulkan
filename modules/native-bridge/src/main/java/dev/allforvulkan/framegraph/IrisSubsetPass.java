@@ -21,6 +21,23 @@ public final class IrisSubsetPass {
     private static final int UNIFORM_BYTES = 256;
     private static final int VERTEX_FLOATS = 9;
 
+    /** Three vertices, nine floats each: position xyz, UV, RGBA tint. The texture is one RGBA texel. */
+    public record Mesh(byte[] texture, float[] vertices, int red, int green, int blue, int alpha) {
+        public static Mesh smoke() {
+            return new Mesh(new byte[] {64, (byte) 128, (byte) 192, (byte) 255}, new float[] {
+                    -1f, -1f, 0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 1f,
+                    3f, -1f, 0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 1f,
+                    -1f, 3f, 0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 1f
+            }, 32, 64, 96, 255);
+        }
+
+        String invalid() {
+            if (texture == null || texture.length != 4) return "texture must be 1x1 RGBA";
+            if (vertices == null || vertices.length != VERTEX_FLOATS * 3) return "mesh must be three vertices";
+            return null;
+        }
+    }
+
     public record Result(boolean skipped, String ran, String fallback, String detail) {
         static Result skip(String detail) { return new Result(true, "", "", detail); }
     }
@@ -28,14 +45,20 @@ public final class IrisSubsetPass {
     private IrisSubsetPass() {}
 
     public static Result execute(List<IrisSubset.Shader> shaders) {
+        return execute(shaders, Mesh.smoke());
+    }
+
+    public static Result execute(List<IrisSubset.Shader> shaders, Mesh mesh) {
+        String invalid = mesh == null ? "missing mesh" : mesh.invalid();
+        if (invalid != null) return new Result(false, "", "mesh (" + invalid + ")", invalid);
         try {
-            return run(shaders);
+            return run(shaders, mesh);
         } catch (Unavailable unavailable) {
             return Result.skip(unavailable.getMessage());
         }
     }
 
-    private static Result run(List<IrisSubset.Shader> shaders) {
+    private static Result run(List<IrisSubset.Shader> shaders, Mesh mesh) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             if (VK.getInstanceVersionSupported() < VK_API_VERSION_1_2)
                 throw new Unavailable("Vulkan 1.2 loader is unavailable");
@@ -104,15 +127,15 @@ public final class IrisSubsetPass {
                 writeUniforms(device, uniformMemory);
                 vertices = createBuffer(device, stack, 3L * VERTEX_FLOATS * 4, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
                 vertexMemory = bind(device, stack, memory, vertices, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-                writeVertices(device, vertexMemory);
+                writeVertices(device, vertexMemory, mesh.vertices());
                 texture = GpuImage.create(device, memory, stack, 1, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
                 pool = createCommandPool(device, stack, family);
-                uploadTexture(device, queue, memory, pool, texture);
+                uploadTexture(device, queue, memory, pool, texture, mesh.texture());
                 var ran = new ArrayList<String>();
                 var fallback = new ArrayList<String>();
                 for (var shader : shaders) {
                     String failure = draw(device, queue, memory, pool, sampler, descriptorLayout, pipelineLayout,
-                            renderPass, uniform, vertices, texture, shader);
+                            renderPass, uniform, vertices, texture, shader, mesh);
                     if (failure == null) ran.add(shader.name());
                     else fallback.add(shader.name() + " (" + failure + ")");
                 }
@@ -140,7 +163,7 @@ public final class IrisSubsetPass {
     /** Null when the program drew texture 64,128,192,255 times tint 0.5. */
     private static String draw(VkDevice device, VkQueue queue, VkPhysicalDeviceMemoryProperties memory,
                                long pool, long sampler, long descriptorLayout, long pipelineLayout, long renderPass,
-                               long uniform, long vertices, GpuImage texture, IrisSubset.Shader shader) {
+                               long uniform, long vertices, GpuImage texture, IrisSubset.Shader shader, Mesh mesh) {
         if (shader.vertex() == null || shader.vertex().length < 20 || shader.fragment() == null || shader.fragment().length < 20)
             return "empty SPIR-V";
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -184,7 +207,7 @@ public final class IrisSubsetPass {
                 vkCmdCopyImageToBuffer(buffer, target.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback, region);
                 check(vkEndCommandBuffer(buffer), "end subset");
                 submit(device, queue, stack, command);
-                return pixels(device, readbackMemory);
+                return pixels(device, readbackMemory, mesh);
             } catch (RuntimeException failure) {
                 String message = failure.getMessage() == null ? failure.toString() : failure.getMessage();
                 int breakAt = message.indexOf('\n');
@@ -202,14 +225,14 @@ public final class IrisSubsetPass {
     }
 
     private static void uploadTexture(VkDevice device, VkQueue queue, VkPhysicalDeviceMemoryProperties memory,
-                                      long pool, GpuImage texture) {
+                                      long pool, GpuImage texture, byte[] texel) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             long staging = createBuffer(device, stack, 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
             long stagingMemory = bind(device, stack, memory, staging, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
             try {
                 var mapped = stack.mallocPointer(1);
                 check(vkMapMemory(device, stagingMemory, 0, 4, 0, mapped), "map texture");
-                MemoryUtil.memByteBuffer(mapped.get(0), 4).put(new byte[] {64, (byte) 128, (byte) 192, (byte) 255});
+                MemoryUtil.memByteBuffer(mapped.get(0), 4).put(texel);
                 vkUnmapMemory(device, stagingMemory);
                 long command = allocateCommand(device, stack, pool);
                 var buffer = new VkCommandBuffer(command, device);
@@ -300,22 +323,17 @@ public final class IrisSubsetPass {
         }
     }
 
-    private static void writeVertices(VkDevice device, long memory) {
-        float[][] vertices = {
-                {-1f, -1f, 0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 1f},
-                {3f, -1f, 0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 1f},
-                {-1f, 3f, 0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 1f}
-        };
+    private static void writeVertices(VkDevice device, long memory, float[] vertices) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             var mapped = stack.mallocPointer(1);
             check(vkMapMemory(device, memory, 0, 3L * VERTEX_FLOATS * 4, 0, mapped), "map vertices");
             ByteBuffer bytes = MemoryUtil.memByteBuffer(mapped.get(0), 3 * VERTEX_FLOATS * 4);
-            for (float[] vertex : vertices) for (float value : vertex) bytes.putFloat(value);
+            for (float value : vertices) bytes.putFloat(value);
             vkUnmapMemory(device, memory);
         }
     }
 
-    private static String pixels(VkDevice device, long memory) {
+    private static String pixels(VkDevice device, long memory, Mesh mesh) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             var mapped = stack.mallocPointer(1);
             check(vkMapMemory(device, memory, 0, SIZE * SIZE * 4L, 0, mapped), "map readback");
@@ -326,7 +344,7 @@ public final class IrisSubsetPass {
                     int g = pixels.get(i * 4 + 1) & 0xff;
                     int b = pixels.get(i * 4 + 2) & 0xff;
                     int a = pixels.get(i * 4 + 3) & 0xff;
-                    if (r != 32 || g != 64 || b != 96 || a != 255)
+                    if (r != mesh.red() || g != mesh.green() || b != mesh.blue() || a != mesh.alpha())
                         return "pixel " + i + " is " + r + "," + g + "," + b + "," + a;
                 }
                 return null;

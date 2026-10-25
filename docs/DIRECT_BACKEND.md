@@ -73,7 +73,7 @@ The fallback string is the honest label. A benchmark route that requested `direc
 
 `./gradlew :native-bridge:verifyIrisSubset` compiles the AFV-Smoke shadow and gbuffer programs with shaderc and checks the SPIR-V. Programs outside that fixed source stay uncompiled. It does not create a Vulkan device.
 
-`./gradlew :native-bridge:verifyIrisSubsetDraw` runs those three programs on a private Vulkan device. Each one samples a 1×1 texture `(64, 128, 192, 255)` with vertex tint `0.5` and must read back `(32, 64, 96, 255)`. An empty program in the same list is reported and does not cancel the others. A missing device skips unless `afv.requireCompositeDevice=true`. This is not an FPS sample, and it does not replace Iris draws in the game.
+`./gradlew :native-bridge:verifyIrisSubsetDraw` runs those three programs on a private Vulkan device. The caller passes a three-vertex mesh and a 1×1 texel. The smoke mesh uses tint `0.5` and must read back `(32, 64, 96, 255)`. A white tint on the same texel must read back `(64, 128, 192, 255)`. An empty program in the same list is reported and does not cancel the others. A bad mesh is rejected before a device is created. A missing device skips unless `afv.requireCompositeDevice=true`. This is not an FPS sample, and it does not replace Iris draws in the game.
 
 Release builds of the existing Zink client no longer call `glGetError` per frame. `GlBlitScope` still queries scissor, sRGB, and the read buffer because Iris and the indexed-state probe can change them; those queries are correctness, not a missed optimization. Async present defaults on for the bridge. `--sync-present` or `-Dafv.asyncPresent=false` turns it off. Frame-pipeline depth above 1 stays off unless the frame-pipeline experiment is explicitly enabled.
 
