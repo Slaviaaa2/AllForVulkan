@@ -17,6 +17,8 @@
 
 GLクライアント経路の導入は、下記の共通API化・全GL入口／コンテキスト形式・全OS対応の完了を意味しない。
 
+Zinkを介さないIris経路の設計は [直接フレームグラフ](docs/DIRECT_BACKEND.md) に分けて記録する。実装済みの範囲は、パスの依存・バリア・描画グループ・記録ウェーブを決めるスケジューラと、その合成チェーンをヘッドレスなVulkanデバイスで実行する縦切りである。ゲーム内の `shaderBackend=direct` は、Irisのパスが未接続である理由を残して現行経路へ戻す。native renderer と Zink クライアントの排他は維持する。
+
 ## 目的
 
 初期対象はMinecraft 1.21.1 / NeoForge。将来のFabric版と、過去のMinecraftに対応したForge版で描画・GL互換処理を共有する。

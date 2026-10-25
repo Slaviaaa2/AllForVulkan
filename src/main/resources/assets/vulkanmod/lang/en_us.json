@@ -42,5 +42,8 @@
   "afv.backend.restart": "Renderer changes require restarting Minecraft.",
   "afv.presentation.title": "Presentation",
   "afv.presentation.native": "Direct Zink (experimental)",
-  "afv.presentation.bridge": "AFV shared images"
+  "afv.presentation.bridge": "AFV shared images",
+  "afv.shader.title": "Shader backend",
+  "afv.shader.zink": "Zink (current path)",
+  "afv.shader.direct": "Direct frame graph (experimental)"
 }

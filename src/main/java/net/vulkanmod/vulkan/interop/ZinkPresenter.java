@@ -6,6 +6,8 @@ import dev.allforvulkan.bridge.PresentationSurface;
 import dev.allforvulkan.bridge.PresentationTransfer;
 import dev.allforvulkan.bridge.FramePresentDispatcher;
 import dev.allforvulkan.bridge.DirectDefaultFramebuffer;
+import dev.allforvulkan.bridge.GlDiagnostics;
+import dev.allforvulkan.bridge.PresentationPolicy;
 import dev.allforvulkan.bridge.SharedImage;
 import dev.allforvulkan.bridge.SurfaceFailure;
 import dev.allforvulkan.bridge.ZinkContext;
@@ -27,18 +29,20 @@ import static org.lwjgl.vulkan.KHRSwapchain.*;
 public final class ZinkPresenter implements AutoCloseable {
     private final boolean framePipeline = Boolean.getBoolean("afv.experimentalFramePipeline");
     private final boolean directOutput = DirectDefaultFramebuffer.ENABLED;
+    private final boolean asyncPresent = PresentationPolicy.asyncPresent(
+            System.getProperty("afv.asyncPresent"), System.getProperty("afv.experimentalAsyncPresent"), framePipeline);
     private final SharedImage.GlOutputLayout directOutputLayout = SharedImage.GlOutputLayout.valueOf(
             System.getProperty("afv.directOutputLayout", "attachment").toUpperCase(java.util.Locale.ROOT));
     private boolean useDirectTarget, directActive, directReady;
     private long directOutputFrames, copiedOutputFrames, discardedDirectFrames;
     private final int frameSlots = framePipeline ? 3 : 2;
-    private final int pipelineDepth = framePipeline ? Math.max(1, Math.min(frameSlots, Integer.getInteger("afv.experimentalPipelineDepth", 1))) : 0;
+    private final int pipelineDepth = PresentationPolicy.pipelineDepth(framePipeline, System.getProperty("afv.experimentalPipelineDepth"), framePipeline ? 3 : 2);
     private final ZinkContext context;
     private final long window;
     private final VkDevice device = Vulkan.getVkDevice();
     private final int family = Queue.getQueueFamilies().graphicsFamily;
     private final SharedImage[] frames = new SharedImage[frameSlots];
-    private final FramePresentDispatcher presentation = new FramePresentDispatcher(framePipeline || Boolean.getBoolean("afv.experimentalAsyncPresent"), framePipeline ? pipelineDepth : 1);
+    private final FramePresentDispatcher presentation = new FramePresentDispatcher(asyncPresent, framePipeline ? pipelineDepth : 1);
     private VkCommandBuffer setupCommand;
     private VkCommandBuffer[] transferCommands, returnCommands;
     private boolean[] commandSubmitted;
@@ -49,6 +53,8 @@ public final class ZinkPresenter implements AutoCloseable {
     private long[] images, presentReady;
     private int width, height, frame;
     private int windowWidth, windowHeight;
+    private int notedWidth, notedHeight;
+    private boolean notedIconified, windowNoted;
     private int targetContextWidth, targetContextHeight;
     private boolean vsync = true, dirty = true, closed;
     private boolean directCopy;
@@ -79,6 +85,13 @@ public final class ZinkPresenter implements AutoCloseable {
     }
 
     public void setVsync(boolean enabled) { if (vsync != enabled) { vsync = enabled; dirty = true; } }
+    /** Sizes come from the window callback. The present path does not poll GLFW. */
+    public void noteWindow(int width, int height, boolean iconified) {
+        notedWidth = width;
+        notedHeight = height;
+        notedIconified = iconified;
+        windowNoted = true;
+    }
     public long presentedFrames() { if (framePipeline) collectCompleted(); return presented; }
     public long verifiedFinalOutputFrames() { return verifiedOutput.get(); }
     public long reusedTransferFrames() { return reusedTransfers.get(); }
@@ -125,18 +138,16 @@ public final class ZinkPresenter implements AutoCloseable {
         drainProducerErrors();
         if (framePipeline) collectCompleted();
         try (var stack = MemoryStack.stackPush()) {
-            var w = stack.mallocInt(1); var h = stack.mallocInt(1);
-            org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window, w, h);
-            if (w.get(0) <= 0 || h.get(0) <= 0
-                    || org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(window, org.lwjgl.glfw.GLFW.GLFW_ICONIFIED) != 0) {
+            int[] size = framebufferSize(stack);
+            if (size[0] <= 0 || size[1] <= 0 || size[2] != 0) {
                 dirty = true; return;
             }
-            if (surfaceLost || dirty || windowWidth != w.get(0) || windowHeight != h.get(0)
+            if (surfaceLost || dirty || windowWidth != size[0] || windowHeight != size[1]
                     || targetContextWidth != context.width() || targetContextHeight != context.height()) {
                 awaitPresentation();
                 try {
                     if (surfaceLost) recoverSurface();
-                    if (!recreate(w.get(0), h.get(0))) return;
+                    if (!recreate(size[0], size[1])) return;
                 } catch (SurfaceFailure failure) {
                     if (failure.result() == VK_ERROR_SURFACE_LOST_KHR) { surfaceLost = dirty = true; return; }
                     if (failure.result() == VK_ERROR_OUT_OF_DATE_KHR || failure.result() == VK_INCOMPLETE) { dirty = true; return; }
@@ -152,6 +163,7 @@ public final class ZinkPresenter implements AutoCloseable {
     }
 
     private void drainProducerErrors() {
+        if (!GlDiagnostics.errorsEnabled()) return;
         for (int error, n = 0; n < 16 && (error = glGetError()) != GL_NO_ERROR; n++) {
             if (++producerErrors <= 8) Initializer.LOGGER.warn("AFV_ZINK_CLIENT_PRODUCER_ERROR: GL 0x{} before presentation", Integer.toHexString(error));
         }
@@ -192,18 +204,17 @@ public final class ZinkPresenter implements AutoCloseable {
         drainProducerErrors();
         finishDirectOutput(shouldCheckOutput(framePipeline ? producedFrames : presented));
         try (var stack = MemoryStack.stackPush()) {
-            var w = stack.mallocInt(1); var h = stack.mallocInt(1);
-            org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window, w, h);
-            if (w.get(0) == 0 || h.get(0) == 0 || org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(window, org.lwjgl.glfw.GLFW.GLFW_ICONIFIED) != 0) {
+            int[] size = framebufferSize(stack);
+            if (size[0] == 0 || size[1] == 0 || size[2] != 0) {
                 if (framePipeline) awaitPresentation();
                 dirty = true; return;
             }
             try {
-                boolean discard = directReady && (surfaceLost || dirty || windowWidth != w.get(0) || windowHeight != h.get(0));
+                boolean discard = directReady && (surfaceLost || dirty || windowWidth != size[0] || windowHeight != size[1]);
                 if (discard) discardDirectOutput();
-                if (framePipeline && (surfaceLost || dirty || windowWidth != w.get(0) || windowHeight != h.get(0))) awaitPresentation();
+                if (framePipeline && (surfaceLost || dirty || windowWidth != size[0] || windowHeight != size[1])) awaitPresentation();
                 if (surfaceLost) recoverSurface();
-                if ((dirty || windowWidth != w.get(0) || windowHeight != h.get(0)) && !recreate(w.get(0), h.get(0))) return;
+                if ((dirty || windowWidth != size[0] || windowHeight != size[1]) && !recreate(size[0], size[1])) return;
                 if (discard) return; // The old direct image cannot be copied from the EGL pbuffer.
             } catch (SurfaceFailure failure) {
                 if (failure.result() == VK_ERROR_SURFACE_LOST_KHR) { surfaceLost = dirty = true; return; }
@@ -263,6 +274,15 @@ public final class ZinkPresenter implements AutoCloseable {
         } finally { if (directReady) discardDirectOutput(); }
     }
 
+    /** width, height, and 1 when the window is iconified. GLFW is only polled before the callback is installed. */
+    private int[] framebufferSize(MemoryStack stack) {
+        if (windowNoted) return new int[] {notedWidth, notedHeight, notedIconified ? 1 : 0};
+        var widthBuffer = stack.mallocInt(1);
+        var heightBuffer = stack.mallocInt(1);
+        org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window, widthBuffer, heightBuffer);
+        boolean iconified = org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(window, org.lwjgl.glfw.GLFW.GLFW_ICONIFIED) != 0;
+        return new int[] {widthBuffer.get(0), heightBuffer.get(0), iconified ? 1 : 0};
+    }
     private boolean shouldCheckOutput(long sequence) {
         return outputChecks != null && ((sequence / frameSlots) & 1) == 0
                 && width == context.width() && height == context.height() && width >= 32 && height >= 32;
@@ -277,8 +297,10 @@ public final class ZinkPresenter implements AutoCloseable {
         try (var state = new GlBlitScope(context.defaultReadBuffer())) {
             int destination = frames[slot].beginGlCopy();
             PresentationTransfer.copyGl(0, destination, context.width(), context.height(), width, height, directCopy);
-            int error = glGetError();
-            if (error != GL_NO_ERROR) throw new IllegalStateException("Client color transfer: GL error 0x" + Integer.toHexString(error));
+            if (GlDiagnostics.errorsEnabled()) {
+                int error = glGetError();
+                if (error != GL_NO_ERROR) throw new IllegalStateException("Client color transfer: GL error 0x" + Integer.toHexString(error));
+            }
             frames[slot].endGlWrite();
             copiedOutputFrames++;
         }

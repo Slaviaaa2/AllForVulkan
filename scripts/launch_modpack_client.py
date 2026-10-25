@@ -66,18 +66,35 @@ def verify_client_mods(game, manifest):
         raise ValueError('Unrecorded client mods would invalidate the selected profile: ' + ', '.join(sorted(unknown)))
 
 
+def async_manifest(sync_present, async_present, frame_pipeline):
+    if sync_present and async_present:
+        raise ValueError('--sync-present and --async-present cannot be combined')
+    if sync_present:
+        return False
+    if async_present or frame_pipeline:
+        return True
+    return 'default-on'
+
+
 def launch(args):
     native_zink = args.zink_client and args.presentation == 'native'
     if args.presentation and not args.zink_client:
         raise ValueError('--presentation requires --zink-client')
-    if native_zink and (args.async_present or args.frame_pipeline or args.direct_output or args.final_output_probe):
+    async_manifest(args.sync_present, args.async_present, args.frame_pipeline)
+    if args.width < 1 or args.height < 1:
+        raise ValueError('--width and --height must be positive')
+    if args.render_distance is not None and args.render_distance < 2:
+        raise ValueError('--render-distance must be at least 2')
+    if args.simulation_distance is not None and args.simulation_distance < 2:
+        raise ValueError('--simulation-distance must be at least 2')
+    if native_zink and (args.async_present or args.sync_present or args.frame_pipeline or args.direct_output or args.final_output_probe):
         raise ValueError('Native presentation has no AFV bridge; bridge experiments/readback are incompatible')
     if args.native_output_probe and not (native_zink and args.smoke):
         raise ValueError('--native-output-probe requires --smoke --zink-client --presentation native')
     if args.native_output_probe and args.benchmark_ticks > 0:
         raise ValueError('Native window readback must be measured separately from FPS')
-    if (args.async_present or args.frame_pipeline or args.direct_output) and not args.zink_client:
-        raise ValueError('--async-present, --frame-pipeline and --direct-output require --zink-client')
+    if (args.async_present or args.sync_present or args.frame_pipeline or args.direct_output) and not args.zink_client:
+        raise ValueError('--async-present, --sync-present, --frame-pipeline and --direct-output require --zink-client')
     if args.iris_cycle and not (args.smoke and args.require_iris):
         raise ValueError('--iris-cycle requires --smoke --require-iris')
     if args.window_cycle and not (args.smoke and args.zink_client):
@@ -186,6 +203,12 @@ def launch(args):
         if args.uncapped:
             lines = [line for line in lines if not line.startswith(('enableVsync:', 'maxFps:'))]
             lines += ['enableVsync:false', 'maxFps:260']
+        if args.render_distance is not None:
+            lines = [line for line in lines if not line.startswith('renderDistance:')]
+            lines.append('renderDistance:' + str(args.render_distance))
+        if args.simulation_distance is not None:
+            lines = [line for line in lines if not line.startswith('simulationDistance:')]
+            lines.append('simulationDistance:' + str(args.simulation_distance))
         options.write_text('\n'.join(lines + ['onboardAccessibility:false', 'pauseOnLostFocus:false']) + '\n')
     values = dict(auth_player_name='AFV_QA', version_name=profile_name,
                   game_directory=game, assets_root=assets, assets_index_name=index,
@@ -194,11 +217,14 @@ def launch(args):
                   library_directory=install / 'libraries', natives_directory=natives,
                   classpath=os.pathsep.join(map(str, artifacts.values())),
                   classpath_separator=os.pathsep, launcher_name='AFV private validation', launcher_version='1')
-    command = [str(args.java_home.resolve() / 'bin/java'), '-Xmx' + args.heap]
+    command = [str(args.java_home.resolve() / 'bin/java'), '-Xmx' + args.heap, *args.jvm_arg]
     if args.smoke:
         command += ['-Dafv.smokeTest=true', '-Dafv.smokeWorld=true']
     command += [f'-Dafv.smokeInspectTicks={args.inspect_ticks}', f'-Dafv.benchmarkTicks={args.benchmark_ticks}']
     command += [f'-Dafv.benchmarkWarmupTicks={args.warmup_ticks}']
+    command += ['-Dafv.benchmarkCamera=' + args.benchmark_camera]
+    if args.shader_backend:
+        command += ['-Dafv.shaderBackend=' + args.shader_backend.upper()]
     if args.require_iris:
         command += ['-Dafv.smokeIris=true']
     if args.iris_cycle:
@@ -214,7 +240,9 @@ def launch(args):
         command += ['-Dafv.smokeNativeOutput=true']
     if args.final_output_probe:
         command += ['-Dafv.smokeFinalOutput=true']
-    if args.async_present:
+    if args.sync_present:
+        command += ['-Dafv.asyncPresent=false']
+    elif args.async_present:
         command += ['-Dafv.experimentalAsyncPresent=true']
     if args.frame_pipeline:
         command += ['-Dafv.experimentalFramePipeline=true', '-Dafv.experimentalPipelineDepth=' + str(args.pipeline_depth)]
@@ -251,7 +279,7 @@ def launch(args):
         environment['LIBGL_KOPPER_DRI2'] = 'true'
     command += expand(vanilla['arguments']['jvm'] + forge['arguments']['jvm'], values)
     command += [forge['mainClass']] + expand(vanilla['arguments']['game'] + forge['arguments']['game'], values)
-    command += ['--width', '960', '--height', '540']
+    command += ['--width', str(args.width), '--height', str(args.height)]
     record = {'instance': str(game), 'packVersion': manifest['pack_version'],
               'neoforge': neoforge, 'minecraft': minecraft, 'sourceMods': manifest['jar_count'],
               'profile': manifest.get('profile', 'full-modpack'),
@@ -266,7 +294,14 @@ def launch(args):
     record['nativeOutputProbe'] = args.native_output_probe
     record['debugGlErrors'] = args.debug_gl
     record['finalOutputProbe'] = args.final_output_probe
-    record['asyncPresent'] = args.async_present or args.frame_pipeline
+    record['asyncPresent'] = async_manifest(args.sync_present, args.async_present, args.frame_pipeline)
+    record['shaderBackend'] = args.shader_backend
+    record['benchmarkCamera'] = args.benchmark_camera
+    record['width'] = args.width
+    record['height'] = args.height
+    record['renderDistance'] = args.render_distance
+    record['simulationDistance'] = args.simulation_distance
+    record['jvmArgs'] = args.jvm_arg
     record['framePipeline'] = args.frame_pipeline
     record['directOutput'] = args.direct_output
     record['directOutputLayout'] = args.direct_output_layout if args.direct_output else 'copy'
@@ -358,6 +393,11 @@ if __name__ == '__main__':
     parser.add_argument('--inspect-ticks', type=int, default=0)
     parser.add_argument('--benchmark-ticks', type=int, default=0)
     parser.add_argument('--warmup-ticks', type=int, default=900)
+    parser.add_argument('--benchmark-camera', choices=('fixed', 'orbit'), default='fixed', help='Fixed spawn view, or an 80-tick orbit after the world settles')
+    parser.add_argument('--width', type=int, default=960)
+    parser.add_argument('--height', type=int, default=540)
+    parser.add_argument('--render-distance', type=int)
+    parser.add_argument('--simulation-distance', type=int)
     parser.add_argument('--uncapped', action='store_true', help='Disable VSync and the frame cap in this private smoke client')
     parser.add_argument('--require-iris', action='store_true')
     parser.add_argument('--iris-cycle', action='store_true', help='Disable/re-enable/reload real Iris shaders with an additional resize in the same world')
@@ -366,7 +406,10 @@ if __name__ == '__main__':
     parser.add_argument('--dimension-inspect-ticks', type=int, default=0, help='Hold each validated dimension for scoped visual inspection')
     parser.add_argument('--scene', action='store_true', help='Build a shader validation scene in the new smoke world')
     parser.add_argument('--final-output-probe', action='store_true', help='Verify a last default-framebuffer draw reaches the Vulkan shared image')
-    parser.add_argument('--async-present', action='store_true', help='Experimental: overlap native Vulkan presentation with the next GL frame')
+    parser.add_argument('--async-present', action='store_true', help='Explicitly enable async presentation. The bridge default is already on; this records an explicit request')
+    parser.add_argument('--sync-present', action='store_true', help='Force synchronous vkQueuePresentKHR on the Zink client bridge')
+    parser.add_argument('--shader-backend', choices=('zink', 'direct'), help='Requested Iris shader backend. direct falls back until Iris passes are covered')
+    parser.add_argument('--jvm-arg', action='append', default=[], help='Extra JVM argument, repeated for each argument')
     parser.add_argument('--frame-pipeline', action='store_true', help='Experimental: three GL producer slots with worker-owned Vulkan acquire/transfer/present')
     parser.add_argument('--pipeline-depth', type=int, choices=(1, 2, 3), default=1, help='Maximum outstanding Vulkan jobs in frame-pipeline mode (default: 1)')
     parser.add_argument('--direct-output', action='store_true', help='Experimental Linux x86_64: route GL default framebuffer directly into the shared Vulkan image')

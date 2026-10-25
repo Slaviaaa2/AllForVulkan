@@ -28,6 +28,8 @@ public abstract class ZinkClientWindowMixin {
     private GLCapabilities afv$capabilities() { return GL.getCapabilities(); }
     @Inject(method = "updateVsync", at = @At("HEAD"), cancellable = true)
     private void afv$vsync(boolean enabled, CallbackInfo ci) { vsync = enabled; ZinkClientSession.setVsync(enabled); ci.cancel(); }
+    @Inject(method = "<init>", at = @At("TAIL"))
+    private void afv$observeWindow(CallbackInfo ci) { ZinkClientSession.observeWindow(((Window)(Object)this).getWindow()); }
     @Inject(method = "close", at = @At("HEAD"))
     private void afv$close(CallbackInfo ci) { ZinkClientSession.close(); }
 }

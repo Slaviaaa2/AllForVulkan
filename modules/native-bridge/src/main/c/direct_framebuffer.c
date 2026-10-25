@@ -20,6 +20,8 @@ static _Thread_local U alias;
 static _Thread_local I default_draw, default_read;
 static _Thread_local I max_draw_buffers;
 static _Thread_local jlong binds, named_blits, queries;
+static _Thread_local U tracked_draw, tracked_read;
+static _Thread_local int draw_valid, read_valid, track_suspend;
 
 #define PROC(R, N, A) static R (*real_##N) A
 PROC(void, BindFramebuffer, (U,U));
@@ -52,9 +54,16 @@ PROC(void, FramebufferTexture, (U,U,U,I));
 PROC(void, FramebufferRenderbuffer, (U,U,U,U));
 PROC(void, FramebufferParameteri, (U,U,I));
 
+static void note_binding(U target, U framebuffer) {
+    if (target == 0x8D40u || target == DRAW) { tracked_draw = framebuffer; draw_valid = 1; }
+    if (target == 0x8D40u || target == READ) { tracked_read = framebuffer; read_valid = 1; }
+}
 static U binding(U target) {
+    if (!track_suspend && target == READ && read_valid) return tracked_read;
+    if (!track_suspend && target != READ && draw_valid) return tracked_draw;
     I value;
     real_GetIntegerv(target == READ ? READ_BINDING : DRAW_BINDING, &value);
+    if (!track_suspend) note_binding(target == READ ? READ : DRAW, (U)value);
     return (U)value;
 }
 static U selector(I value) { return value == 0 ? 0 : COLOR0; }
@@ -62,7 +71,9 @@ static U selector(I value) { return value == 0 ? 0 : COLOR0; }
  * framebuffer's validation and object identity. Mutations of FBO 0 still fail. */
 static U default_scope(U target) {
     if (!alias) return 0;
+    track_suspend++;
     U current = binding(target);
+    track_suspend--;
     if (current != alias) return 0;
     real_BindFramebuffer(target == READ ? READ : DRAW, 0);
     return current;
@@ -73,7 +84,7 @@ static void restore(U target, U current) {
 static int virtual_parameter(U pname, I *value) {
     if (!alias) return 0;
     if (pname == DRAW_BINDING || pname == READ_BINDING) {
-        real_GetIntegerv(pname, value);
+        *value = (I)binding(pname == READ_BINDING ? READ : DRAW);
         if ((U)*value == alias) { *value = 0; queries++; }
         return 1;
     } else if (pname == READ_BUFFER && binding(READ) == alias) {
@@ -87,13 +98,21 @@ static int virtual_parameter(U pname, I *value) {
 static void hook_BindFramebuffer(U target, U framebuffer) {
     if (alias && framebuffer == 0) { framebuffer = alias; binds++; }
     real_BindFramebuffer(target, framebuffer);
+    note_binding(target, framebuffer);
+}
+static void refresh_bindings(void) {
+    draw_valid = read_valid = 0;
+    tracked_draw = binding(DRAW);
+    tracked_read = binding(READ);
 }
 static void hook_DeleteFramebuffers(I count, const U *framebuffers) {
     real_DeleteFramebuffers(count,framebuffers);
     if (alias) {
         /* Deleting a bound explicit FBO implicitly binds logical default 0. */
+        draw_valid = read_valid = 0;
         if (binding(DRAW) == 0) real_BindFramebuffer(DRAW,alias);
         if (binding(READ) == 0) real_BindFramebuffer(READ,alias);
+        refresh_bindings();
     }
 }
 #define GETTER(N,T) static void hook_##N(U pname, T *data) { \
@@ -236,12 +255,15 @@ PROC(void, DrawBuffersARB, (I,const U*));
 static void hook_BindFramebufferEXT(U target,U framebuffer) {
     if (alias && framebuffer == 0) { framebuffer = alias; binds++; }
     real_BindFramebufferEXT(target,framebuffer);
+    note_binding(target, framebuffer);
 }
 static void hook_DeleteFramebuffersEXT(I count,const U *framebuffers) {
     real_DeleteFramebuffersEXT(count,framebuffers);
     if (alias) {
+        draw_valid = read_valid = 0;
         if (binding(DRAW) == 0) real_BindFramebuffer(DRAW,alias);
         if (binding(READ) == 0) real_BindFramebuffer(READ,alias);
+        refresh_bindings();
     }
 }
 static void hook_DrawBuffersARB(I count,const U *buffers) {
@@ -300,8 +322,11 @@ JNIEXPORT void JNICALL Java_dev_allforvulkan_bridge_DirectDefaultFramebuffer_red
         real_NamedFramebufferDrawBuffer(alias,selector(default_draw));
         real_NamedFramebufferReadBuffer(alias,selector(default_read));
     }
-    real_BindFramebuffer(DRAW,alias && draw == 0 ? alias : draw);
-    real_BindFramebuffer(READ,alias && read == 0 ? alias : read);
+    tracked_draw = alias && draw == 0 ? alias : draw;
+    tracked_read = alias && read == 0 ? alias : read;
+    draw_valid = read_valid = 1;
+    real_BindFramebuffer(DRAW,tracked_draw);
+    real_BindFramebuffer(READ,tracked_read);
 }
 JNIEXPORT jlongArray JNICALL Java_dev_allforvulkan_bridge_DirectDefaultFramebuffer_counters
   (JNIEnv *env,jclass type) {

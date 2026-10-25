@@ -38,6 +38,7 @@ public final class ClientSmokeTest {
     private static WindowLifecycle windowCycle;
     private static DimensionLifecycle dimensionCycle;
     private static long renderedFrames;
+    private static long benchmarkBeginWallMs;
 
     @SubscribeEvent public static void frame(net.neoforged.neoforge.client.event.RenderFrameEvent.Post event) {
         if (ENABLED) renderedFrames++;
@@ -49,7 +50,9 @@ public final class ClientSmokeTest {
     public static void afterTick(ClientTickEvent.Post event) {
         if (!ENABLED) return;
         Minecraft client = Minecraft.getInstance();
-        if (++ticks > 6000) throw new IllegalStateException("AFV_SMOKE_FAIL: timeout at phase " + phase);
+        int benchmarkTicks = Integer.getInteger("afv.benchmarkTicks", 0);
+        int tickLimit = 6000 + (benchmarkTicks > 0 ? benchmarkTicks + Math.max(0, Integer.getInteger("afv.benchmarkWarmupTicks", 900)) : 0);
+        if (++ticks > tickLimit) throw new IllegalStateException("AFV_SMOKE_FAIL: timeout at phase " + phase);
         if (client.getOverlay() != null) { stableTicks = 0; return; }
         if (phase == 0 && client.screen instanceof TitleScreen) {
             if (++stableTicks < 60) return;
@@ -104,6 +107,8 @@ public final class ClientSmokeTest {
             if (phase == 1 && stableTicks == 0 && benchmarkUntil == 0 && Integer.getInteger("afv.benchmarkTicks", 0) > 0)
                 client.player.moveTo(.5, -60, .5, 0, Boolean.getBoolean("afv.smokeScene") ? 8 : 0);
             if (++stableTicks < 120) return;
+            if (phase == 1 && "orbit".equalsIgnoreCase(System.getProperty("afv.benchmarkCamera", "fixed")))
+                placeCamera(client, stableTicks - 120);
             int duration = Integer.getInteger("afv.benchmarkTicks", 0);
             if (phase == 1 && duration > 0 && !benchmarkFinished) {
                 int warmup = Math.max(0, Integer.getInteger("afv.benchmarkWarmupTicks", 900));
@@ -115,6 +120,8 @@ public final class ClientSmokeTest {
                     benchmarkPresentBaseline = ZinkClientSession.completedFrames();
                     benchmarkDropBaseline = ZinkClientSession.droppedFrames();
                     dev.allforvulkan.validation.FrameBenchmark.begin();
+                    benchmarkBeginWallMs = System.currentTimeMillis();
+                    Initializer.LOGGER.info("AFV_BENCHMARK_BEGIN: wallMs={} camera={}", benchmarkBeginWallMs, System.getProperty("afv.benchmarkCamera", "fixed"));
                 }
                 if (ticks < benchmarkUntil) return;
                 var conditions = new java.util.LinkedHashMap<String, Object>();
@@ -134,6 +141,14 @@ public final class ClientSmokeTest {
                     conditions.put("pendingVulkanJobs", ZinkClientSession.pendingFrames());
                 }
                 conditions.put("validationScene", Boolean.getBoolean("afv.smokeScene"));
+                conditions.put("benchmarkCamera", System.getProperty("afv.benchmarkCamera", "fixed"));
+                conditions.put("worldSeed", 123456789L);
+                conditions.put("benchmarkBeginWallMs", benchmarkBeginWallMs);
+                conditions.put("benchmarkEndWallMs", System.currentTimeMillis());
+                conditions.put("shaderBackendRequested", BackendBootstrap.shaderBackendRequested());
+                conditions.put("shaderBackendActive", BackendBootstrap.shaderBackendActive());
+                conditions.put("shaderBackendFallback", BackendBootstrap.shaderBackendFallback());
+                Initializer.LOGGER.info("AFV_BENCHMARK_END: wallMs={}", conditions.get("benchmarkEndWallMs"));
                 conditions.put("warmupTicks", warmup);
                 conditions.put("width", client.getWindow().getWidth());
                 conditions.put("height", client.getWindow().getHeight());
@@ -250,6 +265,20 @@ public final class ClientSmokeTest {
         registry.verifyDimensions(id, image.width, image.height);
         if (registry.uploads() == 0) throw new IllegalStateException("No real Minecraft GL uploads");
         Initializer.LOGGER.info("AFV_ZINK_ATLAS_PASS: id={}, {}x{}, allocations={}, uploads={}", id, image.width, image.height, registry.allocations(), registry.uploads());
+    }
+
+    /** Fixed orbit used by the desktop harness. Step 0 is the first post-settle tick, including warmup. */
+    private static void placeCamera(Minecraft client, int step) {
+        double angle = (step % 80) * (Math.PI * 2.0 / 80.0);
+        double x = 0.5 + Math.cos(angle) * 3.0;
+        double z = 0.5 + Math.sin(angle) * 3.0;
+        float yaw = (float) Math.toDegrees(angle);
+        var server = client.getSingleplayerServer();
+        if (server != null) server.execute(() -> {
+            var player = server.getPlayerList().getPlayer(client.player.getUUID());
+            if (player != null) player.connection.teleport(x, -60.0, z, yaw, 12.0f);
+        });
+        client.player.moveTo(x, -60.0, z, yaw, 12.0f);
     }
 
     private static void pass(Minecraft client) {

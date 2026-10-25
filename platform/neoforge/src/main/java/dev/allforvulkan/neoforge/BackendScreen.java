@@ -12,6 +12,7 @@ public final class BackendScreen extends Screen {
     private final Screen parent;
     private BackendBootstrap.Mode selected = BackendBootstrap.requested();
     private BackendBootstrap.Presentation selectedPresentation = BackendBootstrap.presentation();
+    private BackendBootstrap.ShaderBackend selectedShader = BackendBootstrap.shaderBackend();
     private Component status;
     private MultiLineLabel detail;
 
@@ -29,13 +30,16 @@ public final class BackendScreen extends Screen {
         detail = MultiLineLabel.create(font, Component.literal(BackendBootstrap.reason()), Math.min(width - 40, 440));
         addRenderableWidget(CycleButton.<BackendBootstrap.Mode>builder(BackendScreen::label)
                 .withValues(BackendBootstrap.Mode.values()).withInitialValue(selected)
-                .create(width / 2 - 140, height - 110, 280, 20, Component.translatable("afv.backend.renderer"), (button, value) -> selected = value));
+                .create(width / 2 - 140, height - 135, 280, 20, Component.translatable("afv.backend.renderer"), (button, value) -> selected = value));
         addRenderableWidget(CycleButton.<BackendBootstrap.Presentation>builder(value -> Component.translatable(value == BackendBootstrap.Presentation.NATIVE ? "afv.presentation.native" : "afv.presentation.bridge"))
                 .withValues(BackendBootstrap.Presentation.values()).withInitialValue(selectedPresentation)
-                .create(width / 2 - 140, height - 85, 280, 20, Component.translatable("afv.presentation.title"), (button, value) -> selectedPresentation = value));
+                .create(width / 2 - 140, height - 110, 280, 20, Component.translatable("afv.presentation.title"), (button, value) -> selectedPresentation = value));
+        addRenderableWidget(CycleButton.<BackendBootstrap.ShaderBackend>builder(value -> Component.translatable(value == BackendBootstrap.ShaderBackend.DIRECT ? "afv.shader.direct" : "afv.shader.zink"))
+                .withValues(BackendBootstrap.ShaderBackend.values()).withInitialValue(selectedShader)
+                .create(width / 2 - 140, height - 85, 280, 20, Component.translatable("afv.shader.title"), (button, value) -> selectedShader = value));
         addRenderableWidget(Button.builder(Component.translatable("afv.backend.save"), button -> {
             try {
-                BackendBootstrap.save(selected, selectedPresentation);
+                BackendBootstrap.save(selected, selectedPresentation, selectedShader);
                 status = Component.translatable("afv.backend.saved");
             } catch (IOException | RuntimeException failure) {
                 status = Component.translatable("afv.backend.error", failure.getMessage());

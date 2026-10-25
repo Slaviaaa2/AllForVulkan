@@ -17,10 +17,16 @@ complete compatibility from successful startup.
 ## Performance
 
 Reduce copies, redundant state changes and synchronization overhead without
-changing shader behavior. Evaluate architectural experiments, including direct
-output and asynchronous presentation, against the same artifact and rendering
-conditions. Keep experiments configurable until correctness, frame pacing and
-performance justify default settings. See the [validation guide](docs/VALIDATION.md).
+changing shader behavior. The bridge presents asynchronously by default;
+synchronous presentation and a frame-pipeline depth above 1 stay available as
+explicit switches. The Iris path's next structural change is a pass-level frame
+graph rather than a 1:1 GL translator. The scheduler and a headless composite
+chain are in tree; Iris passes still run on Zink, and the in-game direct switch
+records that fallback. See [DIRECT_BACKEND.md](docs/DIRECT_BACKEND.md) for the
+component breakdown and [BENCHMARK.md](docs/BENCHMARK.md) for the desktop
+measurement. Keep unfinished experiments configurable until correctness, frame
+pacing, and a repeated desktop comparison justify a new default. See the
+[validation guide](docs/VALIDATION.md).
 
 ## Distribution
 

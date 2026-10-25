@@ -9,5 +9,8 @@
   "afv.backend.restart": "描画方式の変更にはMinecraftの再起動が必要です。",
   "afv.presentation.title": "表示経路",
   "afv.presentation.native": "Zink直接表示（実験）",
-  "afv.presentation.bridge": "AFV共有表示"
+  "afv.presentation.bridge": "AFV共有表示",
+  "afv.shader.title": "シェーダー経路",
+  "afv.shader.zink": "Zink（現行）",
+  "afv.shader.direct": "直接フレームグラフ（実験）"
 }

@@ -6,7 +6,10 @@ import static org.lwjgl.opengl.GL45.glNamedFramebufferReadBuffer;
 
 /** State touched by a default-framebuffer color blit, without changing producer state.
  * Blits ignore viewport, color masks, blending, shaders and textures; only scissor
- * index 0 applies. Keep the broader GlStateScope for rendering and image creation. */
+ * index 0 applies. Keep the broader GlStateScope for rendering and image creation.
+ * Scissor, framebuffer sRGB and the default read buffer stay queried: Iris can leave
+ * any of them changed, and the blit must restore them. Release builds skip glGetError
+ * instead of skipping these load-bearing queries. */
 public final class GlBlitScope implements AutoCloseable {
     private final boolean scissor = glIsEnabledi(GL_SCISSOR_TEST, 0);
     private final boolean srgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
