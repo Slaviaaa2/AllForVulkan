@@ -113,6 +113,7 @@ def one_run(args, route, round_index, command, output):
         "shaderBackendRequested": None if report is None else report.get("shaderBackendRequested"),
         "shaderBackendActive": None if report is None else report.get("shaderBackendActive"),
         "shaderBackendFallback": None if report is None else report.get("shaderBackendFallback"),
+        "shaderBackendCoverage": None if report is None else report.get("shaderBackendCoverage"),
         "smMean": statistics_mean(sm_values), "classification": summary.classify(sm_values),
         "gpuSamples": len(samples), "directory": str(run_dir),
     }
