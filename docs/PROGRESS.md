@@ -39,6 +39,12 @@ Verified here: `./gradlew :native-bridge:verifyIrisSubsetDraw -Dafv.requireCompo
 
 Unmeasured: Complementary Reimagined r5.9.3, and any frame time. The desktop A/B is still `--route afv-bridge --route afv-direct`. A large gap on this build would be a measurement bug, because the game does not submit these passes.
 
+## Iteration 4 — the draw takes a caller mesh
+
+`IrisSubsetPass.Mesh` is three vertices (position, UV, tint) and one RGBA texel, plus the color the readback must match. The smoke triangle is that record with tint `0.5`. A second mesh with tint `1` reads back the texel unchanged: `(64, 128, 192, 255)`. A texture that is not 1×1 RGBA is rejected before a device is created. The game still does not supply this mesh.
+
+Verified here: `./gradlew :native-bridge:verifyIrisSubsetDraw -Dafv.requireCompositeDevice=true` on lavapipe. No FPS.
+
 ## Next
 
 Feed real shadow and gbuffer meshes into this pass from a pinned Iris hook, and write the shadow color back where Iris expects it. If the hook is missing, keep the Zink pass. Do not cancel Iris's shadow pass until that write exists.
