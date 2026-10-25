@@ -146,6 +146,12 @@ class HarnessChecks(unittest.TestCase):
                         shaderBackendCoverage="scheduled:shadow,gbuffers_terrain"),
         ], self.meta())
         self.assertTrue(any("World draws still run on Zink" in line for line in scheduled["interpretation"]))
+        compiled = summary.assemble([
+            self.sample("afv-direct", 100, shaderBackendFallback="world draws stay on Zink",
+                        shaderBackendCoverage="compiled:shadow,gbuffers_terrain"),
+        ], self.meta())
+        self.assertTrue(any("compiled to SPIR-V" in line for line in compiled["interpretation"]))
+        self.assertTrue(any("World draws still run on Zink" in line for line in compiled["interpretation"]))
 
     def test_environment_keeps_the_vulkan_icd_and_profiles_are_explicit(self):
         env = summary.child_environment({"VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/nvidia_icd.json", "DISPLAY": ":0"}, ":1")

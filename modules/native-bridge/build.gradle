@@ -8,6 +8,9 @@ dependencies {
     ['lwjgl', 'lwjgl-egl', 'lwjgl-opengl', 'lwjgl-vulkan', 'lwjgl-glfw'].each {
         implementation "org.lwjgl:${it}:3.3.3"
     }
+    compileOnly 'org.lwjgl:lwjgl-shaderc:3.3.3'
+    testImplementation 'org.lwjgl:lwjgl-shaderc:3.3.3'
+    testRuntimeOnly 'org.lwjgl:lwjgl-shaderc:3.3.3:natives-linux'
     runtimeOnly 'org.lwjgl:lwjgl:3.3.3:natives-linux'
     runtimeOnly 'org.lwjgl:lwjgl-opengl:3.3.3:natives-linux'
     runtimeOnly 'org.lwjgl:lwjgl-glfw:3.3.3:natives-linux'
@@ -60,6 +63,12 @@ tasks.register('verifyIrisPackPlan', JavaExec) {
     mainClass = 'dev.allforvulkan.framegraph.IrisPackPlanChecks'
 }
 tasks.named('check') { dependsOn 'verifyIrisPackPlan' }
+tasks.register('verifyIrisSubset', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.framegraph.IrisSubsetChecks'
+}
+tasks.named('check') { dependsOn 'verifyIrisSubset' }
 
 // Optional direct-output router; other platforms retain the ordinary copy path.
 if (System.getProperty('os.name').toLowerCase().contains('linux') &&

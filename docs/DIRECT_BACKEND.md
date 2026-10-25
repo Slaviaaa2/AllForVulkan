@@ -58,7 +58,8 @@ The executor prefers a device named by `afv.compositeDevice`. Otherwise it takes
 
 - No third-party mod is loaded. The slice is not the native terrain renderer, so the current renderer stays.
 - Iris or another mod is loaded and the shader pack has no supported program. Coverage stays `composite-chain`.
-- The pack has supported programs. Coverage is `scheduled:` plus those program names. Unsupported programs are named in the fallback string. World draws still run on Zink, so the client does not switch renderers.
+- The pack has supported programs, and none of them are the fixed texture×tint shadow or gbuffer program. Coverage is `scheduled:` plus those program names. Unsupported programs are named in the fallback string. World draws still run on Zink, so the client does not switch renderers.
+- Some shadow or gbuffer programs are exactly that fixed program (`ftransform`, `gl_MultiTexCoord0`, `gl_Color`, `texture2D(gtexture) * tint`). Those compile to SPIR-V. Coverage is `compiled:` plus their names. `final`, composites, and every other shape are listed after `not compiled:`. A shaderc error drops only that program. World draws still run on Zink. The SPIR-V is not submitted.
 
 The pack reader uses `config/iris.properties` and the file under `shaderpacks/`. A missing pack, `enableShaders=false`, or an unreadable zip leaves the plan empty and keeps the previous fallback. The reader does not follow paths outside `shaderpacks/`.
 
@@ -69,6 +70,8 @@ The fallback string is the honest label. A benchmark route that requested `direc
 `./gradlew :native-bridge:verifyFrameGraph` checks the barrier, merge, and wave counts, the ring, both caches, the presentation defaults, and runs `spirv-val` when `/usr/bin/spirv-val` exists.
 
 `./gradlew :native-bridge:verifyCompositeChain` runs the device chain. On a machine without a suitable Vulkan device it skips unless the require flag is set. This VM's lavapipe run is a correctness check of the pixels and the cache counters. It is not an FPS sample.
+
+`./gradlew :native-bridge:verifyIrisSubset` compiles the AFV-Smoke shadow and gbuffer programs with shaderc and checks the SPIR-V. Programs outside that fixed source stay uncompiled. It does not create a Vulkan device.
 
 Release builds of the existing Zink client no longer call `glGetError` per frame. `GlBlitScope` still queries scissor, sRGB, and the read buffer because Iris and the indexed-state probe can change them; those queries are correctness, not a missed optimization. Async present defaults on for the bridge. `--sync-present` or `-Dafv.asyncPresent=false` turns it off. Frame-pipeline depth above 1 stays off unless the frame-pipeline experiment is explicitly enabled.
 
