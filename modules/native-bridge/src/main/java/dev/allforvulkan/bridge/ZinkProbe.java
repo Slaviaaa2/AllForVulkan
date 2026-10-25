@@ -14,6 +14,7 @@ import static org.lwjgl.opengl.EXTMemoryObject.*;
 /** Standalone M1 evidence; no game mixins or fake GL capabilities are loaded. */
 public final class ZinkProbe {
     public static void main(String[] args) {
+        if (java.util.Arrays.asList(args).contains("--window")) { ZinkWindowProbe.run(); return; }
         try (ZinkContext context = new ZinkContext(16, 16)) {
             context.assertCurrentThread();
             var caps = GL.getCapabilities();
@@ -51,7 +52,7 @@ public final class ZinkProbe {
         }
     }
 
-    private static void computeRoundTrip() {
+    static void computeRoundTrip() {
         int texture = glGenTextures(), framebuffer = glGenFramebuffers(), shader = 0, program = 0;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             glBindTexture(GL_TEXTURE_2D, texture);

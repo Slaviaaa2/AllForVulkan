@@ -7,9 +7,13 @@
 1. **AFV native renderer**: VulkanMod由来の地形・GUI描画。任意のIris passの統合は引き続き開発対象。
 2. **Zink GL client / AFV Vulkan presentation**: Minecraft・Iris・Sodiumの既存GL描画を実Zinkで動かし、最終色画像をAFVのVkDeviceとWSIへ外部メモリ・セマフォで渡す。GLのMRT・影・資源管理はIrisとドライバーが担当する。この経路ではAFV native地形描画を使用しない。
 
+3. **Zink native window presentation（実験）**: Minecraft・Iris・SodiumのGL frontendからMesa/ZinkのEGLウィンドウへ直接表示する。AFVの追加VkDevice・共有画像リング・転送キューを作らず、描画と表示の寿命をMesaへ集約する。AFVの設定・起動前子JVM検査・復旧・MOD連携は維持する。共有経路専用の最適化スイッチと診断は混在させない。
+
 2の接続はNeoForgeのウィンドウ／フレームMixinと`ZinkClientSession`、Vulkan側の`ZinkPresenter`、共通`native-bridge`の`ZinkContext`・`SharedImage`で構成する。Vulkanの初期化を表示用とnative描画用に分け、表示専用経路でnative terrain・VMA・シェーダーパイプラインを初期化しない。配布起動時のGLFW親ローダーとVulkan子ローダーの境界は、WSI生成へネイティブhandleを渡すことで越える。別プロセスの起動前検査で、未対応Zinkをゲームへ読み込む前にOpenGLへ戻す。
 
 互換性を優先し、第三者MODがある場合は未知のMODも含めて既存GL frontendを保持する。独自の描画変更や追加最適化は後の選択機能とし、現在はGLの状態・順序・寿命を変えない基礎を整える。最終出力はmain textureと決めつけずdefault framebufferから取得し、GL contextを維持して描画前にdrawableを実ウィンドウサイズへ合わせる。起動前の子JVMでは実surface・swapchain・共有形式まで確認する。
+
+3の接続はEGLウィンドウ連携Mixinと`ZinkNativeSession`で構成する。完了したGLFW swap呼出し数を記録するが、Vulkan present完了数や実scanout数とは区別する。共有経路との比較では同一JARと描画条件を用いる。
 
 GLクライアント経路の導入は、下記の共通API化・全GL入口／コンテキスト形式・全OS対応の完了を意味しない。
 

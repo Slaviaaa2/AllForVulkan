@@ -770,3 +770,33 @@ On Linux x86_64, `check` also runs `verifyDirectOutputDispatch`: a driver-indepe
 native test of extension ABI separation, default selector mirroring, explicit FBO
 isolation, bindings and driver-error preservation. It does not establish actual
 EXT DSA support on a driver that does not advertise the extension.
+
+## Experiment: native Zink window presentation
+
+Choose **Direct Zink (experimental)** in AFV's presentation setting and restart,
+or use `-Dafv.presentation=NATIVE`. With Auto or Vulkan, AFV probes a real EGL
+window in an isolated JVM, selects Mesa/Zink and retains the Minecraft/Iris GL
+frontend. Mesa owns the window rendering and presentation. AFV does not create a
+second Vulkan device, shared-image ring, external semaphores or final-image
+transfer. This changes presentation ownership; it is separate from the native
+VulkanMod terrain renderer and the AFV shared-image bridge.
+
+The private launcher accepts `--zink-client --presentation native`. Bridge-only
+async/pipeline/direct-output experiments and final Vulkan-image readback are
+rejected for this route. For correctness diagnostics, `--native-output-probe`
+checks a bounded GL default-framebuffer region before swaps. It is not a Vulkan
+swapchain readback and must not run during FPS measurement. Benchmarks record
+`completedGlSwaps`; these are returned GLFW swap calls, not measured Vulkan
+presentation completions or monitor scanouts. Compare against `--presentation
+bridge` using the same artifact, shader settings, scene and display conditions.
+
+Mesa's `LIBGL_KOPPER_DRI2=true` permits Zink on X11 servers without explicit
+DRM format modifier support. The launcher's `--x11-no-modifiers` choice is recorded
+and allowed on either Zink route so comparison conditions can match. This flag
+does not disable Vulkan swapchains; `LIBGL_KOPPER_DISABLE` is a different setting.
+See [Mesa's environment documentation](https://docs.mesa3d.org/envvars.html#libgl-kopper-dri2).
+A successful hidden GL-window probe alone does not prove visible window output;
+check the actual client viewport as well. On affected X11 servers, set
+`LIBGL_KOPPER_DRI2=true` in the game's launcher environment or use the helper's
+`--x11-no-modifiers` option. Native mode retains other mods' shader-compatibility
+policies; it does not force-enable renderers those mods disable with shaders.

@@ -11,7 +11,8 @@ import org.apache.logging.log4j.LogManager;
 final class ZinkPreflight {
     record Selection(Path vendor, VulkanSupport.Result result) {}
 
-    static Selection select(Path game, List<Path> vendors) throws IOException {
+    static Selection select(Path game, List<Path> vendors) throws IOException { return select(game, vendors, false); }
+    static Selection select(Path game, List<Path> vendors, boolean nativeWindow) throws IOException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(45);
         Path directory = game.resolve(".allforvulkan/preflight");
         Files.createDirectories(directory);
@@ -24,7 +25,7 @@ final class ZinkPreflight {
             if (remaining <= 0 || Thread.currentThread().isInterrupted()) break;
             int index = ++attempt;
             LogManager.getLogger("AllForVulkan").info("AFV_ZINK_VENDOR_PROBE: attempt={}, vendor={}", index, vendor);
-            result = inspect(game, vendor, remaining, "zink-probe-" + index + ".log");
+            result = inspect(game, vendor, remaining, "zink-probe-" + index + ".log", nativeWindow);
             Path log = game.resolve(".allforvulkan/preflight/zink-probe-" + index + ".log");
             if (Files.isRegularFile(log)) Files.copy(log, log.resolveSibling("zink-probe.log"), StandardCopyOption.REPLACE_EXISTING);
             if (result.supported()) {
@@ -37,10 +38,10 @@ final class ZinkPreflight {
     }
 
     static VulkanSupport.Result inspect(Path game, Path vendor) throws IOException {
-        return inspect(game, vendor, TimeUnit.SECONDS.toNanos(45), "zink-probe.log");
+        return inspect(game, vendor, TimeUnit.SECONDS.toNanos(45), "zink-probe.log", false);
     }
 
-    private static VulkanSupport.Result inspect(Path game, Path vendor, long timeout, String logName) throws IOException {
+    private static VulkanSupport.Result inspect(Path game, Path vendor, long timeout, String logName, boolean nativeWindow) throws IOException {
         long deadline = System.nanoTime() + timeout;
         Path directory = game.resolve(".allforvulkan/preflight");
         Files.createDirectories(directory);
@@ -56,7 +57,7 @@ final class ZinkPreflight {
             var builder = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                     "-Xmx128m", "-Dorg.lwjgl.system.stackSize=1024", "-Dorg.lwjgl.opengl.explicitInit=true",
                     "-XX:-CreateCoredumpOnCrash", "-XX:ErrorFile=" + directory.resolve("driver-error-%p.log").toAbsolutePath(),
-                    "-jar", helper.toAbsolutePath().toString(), "--wsi");
+                    "-jar", helper.toAbsolutePath().toString(), nativeWindow ? "--window" : "--wsi");
             builder.directory(directory.toFile()).redirectErrorStream(true).redirectOutput(log.toFile());
             builder.environment().put("MESA_LOADER_DRIVER_OVERRIDE", "zink");
             builder.environment().put("GALLIUM_DRIVER", "zink");
@@ -68,6 +69,11 @@ final class ZinkPreflight {
             }
             // The helper emits only bounded diagnostic output from its private 16/31px images.
             String output = Files.readString(log);
+            if (nativeWindow) {
+                if (process.exitValue() != 0 || !output.contains("AFV_ZINK_WINDOW_PROBE_PASS"))
+                    return new VulkanSupport.Result(false, "Zink native-window preflight failed (exit " + process.exitValue() + "); see " + log);
+                return new VulkanSupport.Result(true, "Real Zink EGL window, GL 4.6, compute, color pixels and window swaps passed");
+            }
             if (process.exitValue() != 0 || !output.contains("AFV_ZINK_PROBE_PASS") || !output.contains("AFV_EXTERNAL_IMAGE_PASS")
                     || !output.contains("AFV_SHARED_COPY_LAYOUT_PASS")
                     || !output.contains("AFV_PRESENTATION_TRANSFER_PASS: copy")

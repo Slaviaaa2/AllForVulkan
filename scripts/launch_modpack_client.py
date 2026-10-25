@@ -67,6 +67,15 @@ def verify_client_mods(game, manifest):
 
 
 def launch(args):
+    native_zink = args.zink_client and args.presentation == 'native'
+    if args.presentation and not args.zink_client:
+        raise ValueError('--presentation requires --zink-client')
+    if native_zink and (args.async_present or args.frame_pipeline or args.direct_output or args.final_output_probe):
+        raise ValueError('Native presentation has no AFV bridge; bridge experiments/readback are incompatible')
+    if args.native_output_probe and not (native_zink and args.smoke):
+        raise ValueError('--native-output-probe requires --smoke --zink-client --presentation native')
+    if args.native_output_probe and args.benchmark_ticks > 0:
+        raise ValueError('Native window readback must be measured separately from FPS')
     if (args.async_present or args.frame_pipeline or args.direct_output) and not args.zink_client:
         raise ValueError('--async-present, --frame-pipeline and --direct-output require --zink-client')
     if args.iris_cycle and not (args.smoke and args.require_iris):
@@ -201,6 +210,8 @@ def launch(args):
         command += ['-Dafv.smokeDimensionInspectTicks=' + str(args.dimension_inspect_ticks)]
     if args.scene:
         command += ['-Dafv.smokeScene=true']
+    if args.native_output_probe:
+        command += ['-Dafv.smokeNativeOutput=true']
     if args.final_output_probe:
         command += ['-Dafv.smokeFinalOutput=true']
     if args.async_present:
@@ -226,7 +237,8 @@ def launch(args):
     if args.zink_client:
         if args.backend == 'OPENGL':
             raise ValueError('--zink-client cannot use OpenGL selection')
-        command += ['-Dafv.backend=' + (args.backend or 'VULKAN'), '-Dafv.expectZinkClient=true', '-Dafv.expectZink=true']
+        command += ['-Dafv.backend=' + (args.backend or 'VULKAN'), '-Dafv.presentation=' + (args.presentation or 'bridge').upper(), '-Dafv.expectZink=true']
+        command += ['-Dafv.expectZinkNative=true' if native_zink else '-Dafv.expectZinkClient=true']
         # With Iris installed, exercise the same selection as the Vulkan setting.
         # The force flag remains useful for an otherwise vanilla GL client.
         if not args.require_iris:
@@ -234,8 +246,8 @@ def launch(args):
     elif args.backend and not args.zink:
         command += ['-Dafv.backend=' + args.backend]
     if args.x11_no_modifiers:
-        if not args.zink:
-            raise ValueError('--x11-no-modifiers requires --zink')
+        if not (args.zink or args.zink_client):
+            raise ValueError('--x11-no-modifiers requires a Zink route')
         environment['LIBGL_KOPPER_DRI2'] = 'true'
     command += expand(vanilla['arguments']['jvm'] + forge['arguments']['jvm'], values)
     command += [forge['mainClass']] + expand(vanilla['arguments']['game'] + forge['arguments']['game'], values)
@@ -245,11 +257,13 @@ def launch(args):
               'profile': manifest.get('profile', 'full-modpack'),
               'mods': [{'file': m['file'], 'sha256': m['sha256']} for m in manifest['jars']],
               'afvSha256': hashlib.sha256(jar.read_bytes()).hexdigest(),
-              'route': 'AFV Vulkan presentation with Zink GL client' if args.zink_client else 'OpenGL via Zink comparison' if args.zink else 'Auto; see AFV_BACKEND',
+              'route': 'Zink native window presentation; no AFV bridge' if native_zink else 'AFV Vulkan presentation with Zink GL client' if args.zink_client else 'OpenGL via Zink comparison' if args.zink else 'Auto; see AFV_BACKEND',
               'benchmarkTicks': args.benchmark_ticks, 'warmupTicks': args.warmup_ticks,
               'uncapped': args.uncapped, 'requireIris': args.require_iris, 'validationScene': args.scene}
     if 'dependency_lock' in manifest:
         record['dependencyLock'] = manifest['dependency_lock']
+    record['presentation'] = 'native' if native_zink else 'bridge' if args.zink_client else None
+    record['nativeOutputProbe'] = args.native_output_probe
     record['debugGlErrors'] = args.debug_gl
     record['finalOutputProbe'] = args.final_output_probe
     record['asyncPresent'] = args.async_present or args.frame_pipeline
@@ -293,17 +307,21 @@ def launch(args):
     passed = code == 0 and (not args.smoke or 'AFV_SMOKE_PASS' in text)
     passed = passed and 'Caught error loading resourcepacks' not in text and 'AFV_SMOKE_FAIL' not in text
     if args.zink_client:
-        passed = passed and 'AFV_ZINK_CLIENT_PRESENT_PASS' in text
+        passed = passed and ('AFV_ZINK_NATIVE_SWAP_PASS' in text if native_zink else 'AFV_ZINK_CLIENT_PRESENT_PASS' in text)
     if args.iris_cycle:
         passed = passed and 'AFV_IRIS_CYCLE_PASS' in text
     if args.window_cycle:
-        passed = passed and 'AFV_WINDOW_CYCLE_PASS' in text and 'AFV_SURFACE_RECOVERY_PASS' in text
+        passed = passed and 'AFV_WINDOW_CYCLE_PASS' in text and (native_zink or 'AFV_SURFACE_RECOVERY_PASS' in text)
     if args.dimension_cycle:
         passed = passed and 'AFV_DIMENSION_CYCLE_PASS' in text
     if args.expect_backend:
         passed = passed and bool(re.search(r'AFV_BACKEND: requested=[A-Z]+, active=' + args.expect_backend + r',', text))
-    if args.zink_client and args.smoke:
+    if args.zink_client and args.smoke and not native_zink:
         passed = passed and 'AFV_ZINK_TRANSFER_REUSE_PASS' in text
+    if native_zink:
+        passed = passed and 'AFV_ZINK_NATIVE_READY:' in text and (not args.smoke or 'AFV_ZINK_NATIVE_SMOKE_PASS:' in text)
+    if args.native_output_probe:
+        passed = passed and 'AFV_ZINK_NATIVE_OUTPUT_PASS:' in text
     if args.frame_pipeline:
         passed = passed and f'AFV_FRAME_PIPELINE: slots=3, depth={args.pipeline_depth},' in text and 'AFV_FRAME_PIPELINE_STATS:' in text
     if args.direct_output:
@@ -352,6 +370,8 @@ if __name__ == '__main__':
     parser.add_argument('--frame-pipeline', action='store_true', help='Experimental: three GL producer slots with worker-owned Vulkan acquire/transfer/present')
     parser.add_argument('--pipeline-depth', type=int, choices=(1, 2, 3), default=1, help='Maximum outstanding Vulkan jobs in frame-pipeline mode (default: 1)')
     parser.add_argument('--direct-output', action='store_true', help='Experimental Linux x86_64: route GL default framebuffer directly into the shared Vulkan image')
+    parser.add_argument('--presentation', choices=('bridge', 'native'), help='Zink presentation owner: AFV shared-image bridge or direct Mesa/Zink window')
+    parser.add_argument('--native-output-probe', action='store_true', help='Diagnostic only: check a bounded GL window region before native swaps; cannot benchmark simultaneously')
     parser.add_argument('--direct-output-layout', choices=('general', 'attachment'), default='attachment', help='Direct-output handoff: general reference or attachment/transfer-specific layouts')
     parser.add_argument('--debug-gl', action='store_true', help='Log bounded synchronous GL errors for client-bridge diagnosis')
     shader = parser.add_mutually_exclusive_group()

@@ -39,5 +39,8 @@
   "afv.backend.save": "Save",
   "afv.backend.saved": "Saved. Restart Minecraft to apply.",
   "afv.backend.error": "Could not save: %s",
-  "afv.backend.restart": "Renderer changes require restarting Minecraft."
+  "afv.backend.restart": "Renderer changes require restarting Minecraft.",
+  "afv.presentation.title": "Presentation",
+  "afv.presentation.native": "Direct Zink (experimental)",
+  "afv.presentation.bridge": "AFV shared images"
 }

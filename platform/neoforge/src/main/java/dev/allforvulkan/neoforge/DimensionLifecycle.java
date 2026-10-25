@@ -30,7 +30,7 @@ final class DimensionLifecycle {
     private long firstFrame;
 
     DimensionLifecycle(Minecraft client) {
-        if (!BackendBootstrap.zinkClient()) throw new IllegalStateException("Dimension cycle requires the actual Zink/Vulkan presenter");
+        if (!BackendBootstrap.usesZink()) throw new IllegalStateException("Dimension cycle requires the actual Zink/Vulkan presenter");
         this.client = client;
         server = client.getSingleplayerServer();
         if (server == null || !server.getWorldData().getLevelName().startsWith("AFV-Smoke-"))
@@ -48,8 +48,8 @@ final class DimensionLifecycle {
         ResourceKey<Level> expected = ROUTE.get(step);
         if (client.level == null || client.player == null || client.screen != null || !client.level.dimension().equals(expected)
                 || !client.level.hasChunkAt(client.player.blockPosition())) { stableTicks = 0; return false; }
-        if (stableTicks++ == 0) firstFrame = ZinkClientSession.presentedFrames();
-        if (stableTicks < 120 || ZinkClientSession.presentedFrames() - firstFrame < 120) return false;
+        if (stableTicks++ == 0) firstFrame = ZinkClientSession.completedFrames();
+        if (stableTicks < 120 || ZinkClientSession.completedFrames() - firstFrame < 120) return false;
         int inspection = Math.max(0, Integer.getInteger("afv.smokeDimensionInspectTicks", 0));
         if (!validated) {
             validate(expected);
@@ -60,8 +60,8 @@ final class DimensionLifecycle {
         if (inspectTicks++ < inspection) return false;
         // Validate again after an inspection interval, before the world is changed.
         if (inspection > 0) validate(expected);
-        Initializer.LOGGER.info("AFV_DIMENSION_STAGE_PASS: {}, actual client chunks, Iris dimension/pipeline, same GL context, {} Vulkan frames",
-                expected.location(), ZinkClientSession.presentedFrames() - firstFrame);
+        Initializer.LOGGER.info("AFV_DIMENSION_STAGE_PASS: {}, actual client chunks, Iris dimension/pipeline, same GL context, {} completed presentation calls",
+                expected.location(), ZinkClientSession.completedFrames() - firstFrame);
         if (++step == ROUTE.size()) {
             Initializer.LOGGER.info("AFV_DIMENSION_CYCLE_PASS: Overworld -> Nether -> End -> Nether -> Overworld, three distinct dimension pipelines, pack={}", pack);
             return true;

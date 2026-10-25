@@ -11,6 +11,7 @@ import java.io.IOException;
 public final class BackendScreen extends Screen {
     private final Screen parent;
     private BackendBootstrap.Mode selected = BackendBootstrap.requested();
+    private BackendBootstrap.Presentation selectedPresentation = BackendBootstrap.presentation();
     private Component status;
     private MultiLineLabel detail;
 
@@ -28,25 +29,28 @@ public final class BackendScreen extends Screen {
         detail = MultiLineLabel.create(font, Component.literal(BackendBootstrap.reason()), Math.min(width - 40, 440));
         addRenderableWidget(CycleButton.<BackendBootstrap.Mode>builder(BackendScreen::label)
                 .withValues(BackendBootstrap.Mode.values()).withInitialValue(selected)
-                .create(width / 2 - 140, height / 2 - 20, 280, 20, Component.translatable("afv.backend.renderer"), (button, value) -> selected = value));
+                .create(width / 2 - 140, height - 110, 280, 20, Component.translatable("afv.backend.renderer"), (button, value) -> selected = value));
+        addRenderableWidget(CycleButton.<BackendBootstrap.Presentation>builder(value -> Component.translatable(value == BackendBootstrap.Presentation.NATIVE ? "afv.presentation.native" : "afv.presentation.bridge"))
+                .withValues(BackendBootstrap.Presentation.values()).withInitialValue(selectedPresentation)
+                .create(width / 2 - 140, height - 85, 280, 20, Component.translatable("afv.presentation.title"), (button, value) -> selectedPresentation = value));
         addRenderableWidget(Button.builder(Component.translatable("afv.backend.save"), button -> {
             try {
-                BackendBootstrap.save(selected);
+                BackendBootstrap.save(selected, selectedPresentation);
                 status = Component.translatable("afv.backend.saved");
             } catch (IOException | RuntimeException failure) {
                 status = Component.translatable("afv.backend.error", failure.getMessage());
             }
-        }).bounds(width / 2 - 140, height / 2 + 10, 135, 20).build());
+        }).bounds(width / 2 - 140, height - 55, 135, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> onClose())
-                .bounds(width / 2 + 5, height / 2 + 10, 135, 20).build());
+                .bounds(width / 2 + 5, height - 55, 135, 20).build());
     }
 
     @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
         graphics.drawCenteredString(font, title, width / 2, 25, 0xFFFFFF);
         graphics.drawCenteredString(font, status, width / 2, 47, 0xFFFFFF);
-        detail.renderCentered(graphics, width / 2, 66, 12, 0xB0B0B0);
-        graphics.drawCenteredString(font, Component.translatable("afv.backend.restart"), width / 2, height / 2 + 44, 0xFFD080);
+        if (height >= 250) detail.renderCentered(graphics, width / 2, 66, 12, 0xB0B0B0);
+        graphics.drawCenteredString(font, Component.translatable("afv.backend.restart"), width / 2, height - 25, 0xFFD080);
     }
 
     @Override public void onClose() { minecraft.setScreen(parent); }

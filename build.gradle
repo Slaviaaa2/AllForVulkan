@@ -72,6 +72,7 @@ neoForge {
             if (project.hasProperty('afvVulkanLibrary')) systemProperty 'org.lwjgl.vulkan.libname', project.property('afvVulkanLibrary')
             systemProperty 'afv.zinkInterop', System.getProperty('afv.zinkInterop', 'false')
             systemProperty 'afv.zinkClient', System.getProperty('afv.zinkClient', 'false')
+            if (System.getProperty('afv.presentation') != null) systemProperty 'afv.presentation', System.getProperty('afv.presentation')
             systemProperty 'afv.expectZinkClient', System.getProperty('afv.expectZinkClient', 'false')
             if (System.getProperty('afv.mesaEglVendor') != null) systemProperty 'afv.mesaEglVendor', System.getProperty('afv.mesaEglVendor')
             systemProperty 'afv.zinkEffect', System.getProperty('afv.zinkEffect', 'identity')

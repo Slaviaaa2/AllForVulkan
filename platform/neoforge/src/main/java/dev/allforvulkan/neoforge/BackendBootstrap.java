@@ -16,9 +16,11 @@ import java.util.stream.Collectors;
 /** Decides before either mixin configuration changes Minecraft's renderer. */
 public final class BackendBootstrap {
     public enum Mode { AUTO, VULKAN, OPENGL }
+    public enum Presentation { BRIDGE, NATIVE }
     private static final Set<String> BASE_MODS = Set.of("minecraft", "neoforge", "allforvulkan");
-    private static boolean initialized, vulkan, zinkClient, presentationFailure;
+    private static boolean initialized, vulkan, zinkClient, zinkNative, presentationFailure;
     private static Mode requested = Mode.AUTO;
+    private static Presentation presentation = Presentation.BRIDGE;
     private static String reason = "Not initialized";
     private static Path config, pending;
     private BackendBootstrap() {}
@@ -35,13 +37,18 @@ public final class BackendBootstrap {
             if (Files.isRegularFile(config)) try (Reader input = Files.newBufferedReader(config)) { settings.load(input); }
             String value = System.getProperty("afv.backend", settings.getProperty("backend", "AUTO"));
             requested = Mode.valueOf(value.trim().toUpperCase(Locale.ROOT));
+            presentation = Presentation.valueOf(System.getProperty("afv.presentation", settings.getProperty("presentation", "BRIDGE")).trim().toUpperCase(Locale.ROOT));
             if (requested == Mode.OPENGL) { reason = "OpenGL selected in settings"; return; }
             Set<String> mods = FMLLoader.getLoadingModList().getMods().stream().map(mod -> mod.getModId()).collect(Collectors.toSet());
             // Do not replace a third-party mod's terrain/GL hooks with the
             // native renderer. Preserve the existing client pipeline and let
             // the real GL driver translate it, including unfamiliar mods.
             boolean moddedClient = mods.stream().anyMatch(mod -> !BASE_MODS.contains(mod));
-            boolean clientBridge = Boolean.getBoolean("afv.zinkClient") || moddedClient;
+            boolean clientBridge = Boolean.getBoolean("afv.zinkClient") || moddedClient || presentation == Presentation.NATIVE;
+            boolean nativeWindow = clientBridge && presentation == Presentation.NATIVE;
+            if (nativeWindow && (Boolean.getBoolean("afv.experimentalDirectOutput") || Boolean.getBoolean("afv.experimentalFramePipeline")
+                    || Boolean.getBoolean("afv.experimentalAsyncPresent") || Boolean.getBoolean("afv.smokeFinalOutput")))
+                throw new IllegalArgumentException("Native Zink presentation cannot use AFV bridge experiments or bridge readback");
             if (net.neoforged.fml.loading.FMLConfig.getBoolConfigValue(net.neoforged.fml.loading.FMLConfig.ConfigValue.EARLY_WINDOW_CONTROL)) {
                 reason = "OpenGL selected: save Auto or Vulkan in AFV settings and restart to prepare the Vulkan window";
                 return;
@@ -59,13 +66,18 @@ public final class BackendBootstrap {
                     Files.deleteIfExists(pending);
                     return;
                 }
-                var selection = ZinkPreflight.select(FMLLoader.getGamePath(), MesaVendors.discover());
+                var selection = ZinkPreflight.select(FMLLoader.getGamePath(), MesaVendors.discover(), nativeWindow);
                 if (selection.vendor() == null) {
                     reason = "OpenGL fallback: " + selection.result().detail();
                     Files.deleteIfExists(pending);
                     return;
                 }
                 MesaEnvironment.configure(selection.vendor().toString());
+                if (nativeWindow) {
+                    zinkNative = true;
+                    reason = "Zink native Vulkan presentation: " + selection.result().detail();
+                    return;
+                }
             }
             var result = VulkanSupport.probe(clientBridge || Boolean.getBoolean("afv.zinkInterop"), clientBridge);
             zinkClient = result.supported() && clientBridge;
@@ -73,24 +85,30 @@ public final class BackendBootstrap {
             reason = (zinkClient ? "Vulkan presentation with Zink client: " : vulkan ? "Vulkan preflight passed: " : "OpenGL fallback: ") + result.detail();
             if (!result.supported()) { MesaEnvironment.restore(); Files.deleteIfExists(pending); }
         } catch (IOException | RuntimeException | LinkageError failure) {
-            vulkan = zinkClient = false;
+            vulkan = zinkClient = zinkNative = false;
             MesaEnvironment.restore();
             reason = "OpenGL fallback: " + failure.getClass().getSimpleName() + ": " + failure.getMessage();
         } finally {
-            LogManager.getLogger("AllForVulkan").info("AFV_BACKEND: requested={}, active={}, reason={}", requested, vulkan || zinkClient ? "Vulkan" : "OpenGL", reason);
+            LogManager.getLogger("AllForVulkan").info("AFV_BACKEND: requested={}, active={}, reason={}", requested, vulkan || zinkClient || zinkNative ? "Vulkan" : "OpenGL", reason);
         }
     }
 
     public static boolean vulkan() { initialize(); return vulkan; }
     public static boolean zinkClient() { initialize(); return zinkClient; }
-    public static boolean usesVulkan() { initialize(); return vulkan || zinkClient; }
+    public static boolean zinkNative() { initialize(); return zinkNative; }
+    public static boolean usesZink() { initialize(); return zinkClient || zinkNative; }
+    public static Presentation presentation() { initialize(); return presentation; }
+    public static boolean usesVulkan() { initialize(); return vulkan || zinkClient || zinkNative; }
     public static Mode requested() { initialize(); return requested; }
     public static String reason() { initialize(); return reason; }
 
-    public static void save(Mode mode) throws IOException {
+    public static void save(Mode mode) throws IOException { save(mode, presentation()); }
+    public static void save(Mode mode, Presentation selectedPresentation) throws IOException {
         initialize();
         Properties settings = new Properties();
+        if (Files.isRegularFile(config)) try (Reader input = Files.newBufferedReader(config)) { settings.load(input); }
         settings.setProperty("backend", mode.name());
+        settings.setProperty("presentation", selectedPresentation.name());
         Files.createDirectories(config.getParent());
         Path temporary = Files.createTempFile(config.getParent(), "afv-backend-", ".tmp");
         try {
@@ -104,12 +122,12 @@ public final class BackendBootstrap {
     }
 
     public static void renderingStable() {
-        if (presentationFailure || (!vulkan && !zinkClient)) return;
+        if (presentationFailure || (!vulkan && !zinkClient && !zinkNative)) return;
         try { Files.deleteIfExists(pending); }
         catch (IOException failure) { LogManager.getLogger("AllForVulkan").warn("Cannot clear Vulkan startup recovery marker", failure); }
     }
     public static void presentationFailed(Throwable failure) {
-        if (!zinkClient || pending == null) return;
+        if ((!zinkClient && !zinkNative) || pending == null) return;
         presentationFailure = true;
         try { Files.writeString(pending, "Vulkan presentation failed: " + failure.getClass().getSimpleName() + "\n"); }
         catch (IOException markerFailure) { LogManager.getLogger("AllForVulkan").warn("Cannot save Vulkan presentation recovery marker", markerFailure); }

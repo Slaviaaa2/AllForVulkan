@@ -16,8 +16,8 @@ final class WindowLifecycle {
     private final long device;
 
     WindowLifecycle(Minecraft client, int tick) {
-        if (!BackendBootstrap.zinkClient()) throw new IllegalStateException("Window cycle requires the real Zink/Vulkan presenter");
-        device = net.vulkanmod.vulkan.Vulkan.getVkDevice().address();
+        if (!BackendBootstrap.usesZink()) throw new IllegalStateException("Window cycle requires the real Zink/Vulkan presenter");
+        device = BackendBootstrap.zinkClient() ? net.vulkanmod.vulkan.Vulkan.getVkDevice().address() : 0;
         this.client = client;
         window = client.getWindow().getWindow();
         context = eglGetCurrentContext();
@@ -27,7 +27,7 @@ final class WindowLifecycle {
         Initializer.LOGGER.info("AFV_WINDOW_CYCLE_BEGIN: requested actual window iconification");
     }
     boolean tick(int tick) {
-        long frames = ZinkClientSession.presentedFrames();
+        long frames = ZinkClientSession.completedFrames();
         if (context == 0 || eglGetCurrentContext() != context) throw new IllegalStateException("Window cycle replaced the existing GL context");
         if (step == 0) {
             if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) == 0) {
@@ -35,7 +35,7 @@ final class WindowLifecycle {
                 return false;
             }
             ZinkClientSession.awaitPresentation();
-            frames = ZinkClientSession.presentedFrames();
+            frames = ZinkClientSession.completedFrames();
             changedTick = tick; changedFrame = frames; step = 1;
             return false;
         }
@@ -57,6 +57,9 @@ final class WindowLifecycle {
         } else if (step == 3) {
             client.getWindow().updateVsync(vsync);
             Initializer.LOGGER.info("AFV_WINDOW_VSYNC_PASS: alternate synchronization mode rendered");
+        } else if (step == 4 && BackendBootstrap.zinkNative()) {
+            Initializer.LOGGER.info("AFV_WINDOW_CYCLE_PASS: native Zink iconify, restore, VSync changes, same GL context; WSI owned by Mesa");
+            return true;
         } else if (step == 4) {
             previousSurfaceGeneration = ZinkClientSession.recoveredSurfaces();
             ZinkClientSession.requestSurfaceRecreation();

@@ -19,9 +19,11 @@ VulkanModタグ `0.5.5`（`f23855f2675f1efb52fb8aa2c26bc23dccfb5543`）を起点
 
 MOD一覧のAFV設定から **「自動」「Vulkan」「OpenGL」** を選択できます。変更は再起動後に適用します。起動前にVulkan 1.2・必要な機能／拡張・論理デバイス作成を調べ、使えない場合はAFVの描画Mixinを適用せずOpenGLで起動します。起動途中の異常終了時も次回はOpenGLで復旧します。他のMODがある場合、「自動」「Vulkan」は下記のLinux向けZinkクライアント経路を検査し、未対応時はOpenGLを選びます。既知のIris/Sodiumだけでなく、未知のMODでも既存のGL描画処理を保持するための方針です。
 
-**Zinkクライアント経路**は、Minecraft・Iris・Sodiumの実OpenGL呼び出しをMesa/Zinkで実行し、最終default framebufferを外部メモリと双方向GPUセマフォでAFV所有のVulkanデバイスへ渡して表示します。画面全体のCPU転送は行いません。GL資源・MRT・影・シェーダーpassは既存のIris/Sodiumと実GLドライバーが管理します。この経路ではAFV独自の地形レンダラーを使用しません。Linuxとインストール済みMesa EGL/Zinkが必要です。別プロセスで実GL 4.6・compute・画像共有と、同じGPUの実surface／swapchain作成を検査し、検査の失敗・異常終了・タイムアウト時はOpenGLを選びます。ドライバー内部のクラッシュや全環境での無事故を保証するものではありません。
+**AFV共有表示経路**は、Minecraft・Iris・Sodiumの実OpenGL呼び出しをMesa/Zinkで実行し、最終default framebufferを外部メモリと双方向GPUセマフォでAFV所有のVulkanデバイスへ渡して表示します。画面全体のCPU転送は行いません。GL資源・MRT・影・シェーダーpassは既存のIris/Sodiumと実GLドライバーが管理します。この経路ではAFV独自の地形レンダラーを使用しません。Linuxとインストール済みMesa EGL/Zinkが必要です。別プロセスで実GL 4.6・compute・画像共有と、同じGPUの実surface／swapchain作成を検査し、検査の失敗・異常終了・タイムアウト時はOpenGLを選びます。ドライバー内部のクラッシュや全環境での無事故を保証するものではありません。
 
 Iris/Sodiumとの互換性は開発中です。診断機能と再現手順は[検証ガイド](docs/VALIDATION.md)を参照してください。
+
+**Zink直接表示（実験）** は、設定の「表示経路」または `-Dafv.presentation=NATIVE` で選択できます。Zink自身がウィンドウへ表示し、AFV側の別Vulkanデバイス・共有画像・追加の画面転送を省きます。Iris等のGL描画は維持します。既定は従来のAFV共有表示です。速度差は環境ごとの比較測定が必要です。[詳細と測定方法](docs/DEVELOPMENT.md#experiment-native-zink-window-presentation)。
 
 性能実験として、JVM引数 `-Dafv.experimentalAsyncPresent=true` でVulkan表示処理を専用スレッドへ移し、その間に次のGLフレームを進められます。Zinkクライアント経路用で、標準はOFFです。比較には同一JAR・同一描画条件を使用してください。測定方法は[検証ガイド](docs/VALIDATION.md)を参照してください。
 

@@ -6,5 +6,8 @@
   "afv.backend.save": "保存",
   "afv.backend.saved": "保存しました。Minecraftの再起動後に適用されます。",
   "afv.backend.error": "保存できませんでした: %s",
-  "afv.backend.restart": "描画方式の変更にはMinecraftの再起動が必要です。"
+  "afv.backend.restart": "描画方式の変更にはMinecraftの再起動が必要です。",
+  "afv.presentation.title": "表示経路",
+  "afv.presentation.native": "Zink直接表示（実験）",
+  "afv.presentation.bridge": "AFV共有表示"
 }

@@ -59,6 +59,7 @@ public final class ZinkClientSession {
         if (presenter != null) presenter.prepareDirectFrame();
     }
     public static void setVsync(boolean enabled) { vsync = enabled; if (presenter != null) presenter.setVsync(enabled); }
+    public static long completedFrames() { return BackendBootstrap.zinkNative() ? ZinkNativeSession.completedSwaps() : presentedFrames(); }
     public static long presentedFrames() { return presenter == null ? 0 : presenter.presentedFrames(); }
     public static boolean asynchronousPresentation() { return presenter != null && presenter.asynchronousPresentation(); }
     public static boolean framePipeline() { return presenter != null && presenter.framePipeline(); }
@@ -68,7 +69,7 @@ public final class ZinkClientSession {
     public static String directOutputLayout() { return presenter == null ? "copy" : presenter.directOutputLayout(); }
     public static long droppedFrames() { return presenter == null ? 0 : presenter.droppedFrames(); }
     public static int pendingFrames() { return presenter == null ? 0 : presenter.pendingFrames(); }
-    public static void awaitPresentation() { if (presenter != null) presenter.awaitPresentation(); }
+    public static void awaitPresentation() { if (presenter != null) presenter.awaitPresentation(); else if (BackendBootstrap.zinkNative()) ZinkNativeSession.awaitRendering(); }
     public static long verifiedFinalOutputFrames() { return presenter == null ? 0 : presenter.verifiedFinalOutputFrames(); }
     public static long reusedTransferFrames() { return presenter == null ? 0 : presenter.reusedTransferFrames(); }
     public static long recordedTransferCommands() { return presenter == null ? 0 : presenter.recordedTransferCommands(); }

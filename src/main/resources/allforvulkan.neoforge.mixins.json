@@ -4,6 +4,6 @@
   "package": "dev.allforvulkan.neoforge.mixin",
   "plugin": "net.vulkanmod.mixin.MixinPlugin",
   "compatibilityLevel": "JAVA_21",
-  "client": ["NeoForgeWindowMixin", "EglValidationMixin", "PackValidationMixin", "ZinkClientWindowMixin", "ZinkClientFrameMixin", "ZinkClientGameMixin"],
+  "client": ["NeoForgeWindowMixin", "EglValidationMixin", "PackValidationMixin", "ZinkClientWindowMixin", "ZinkClientFrameMixin", "ZinkClientGameMixin", "ZinkNativeFrameMixin"],
   "injectors": {"defaultRequire": 1}
 }

@@ -112,7 +112,7 @@ public final class ClientSmokeTest {
                 if (benchmarkUntil == 0) {
                     if (Boolean.getBoolean("afv.smokeIris")) dev.allforvulkan.validation.IrisAssertions.requireActive();
                     benchmarkUntil = ticks + duration;
-                    benchmarkPresentBaseline = ZinkClientSession.presentedFrames();
+                    benchmarkPresentBaseline = ZinkClientSession.completedFrames();
                     benchmarkDropBaseline = ZinkClientSession.droppedFrames();
                     dev.allforvulkan.validation.FrameBenchmark.begin();
                 }
@@ -121,6 +121,8 @@ public final class ClientSmokeTest {
                 conditions.put("renderer", BackendBootstrap.vulkan() ? "AFV Vulkan" : org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_RENDERER));
                 conditions.put("backendReason", BackendBootstrap.reason());
                 conditions.put("zinkClient", BackendBootstrap.zinkClient());
+                conditions.put("zinkNative", BackendBootstrap.zinkNative());
+                if (BackendBootstrap.zinkNative()) conditions.put("completedGlSwaps", ZinkNativeSession.completedSwaps() - benchmarkPresentBaseline);
                 conditions.put("asyncPresent", ZinkClientSession.asynchronousPresentation());
                 conditions.put("framePipeline", ZinkClientSession.framePipeline());
                 conditions.put("pipelineDepth", ZinkClientSession.pipelineDepth());
@@ -159,6 +161,7 @@ public final class ClientSmokeTest {
             if (phase == 1) {
                 if (BackendBootstrap.vulkan()) Initializer.LOGGER.info("AFV_SMOKE_WORLD: visible sections={}, submitted terrain draws={}",
                         WorldRenderer.getInstance().getVisibleSectionsCount(), DrawBuffers.getSubmittedDraws() - drawBaseline);
+                else if (BackendBootstrap.zinkNative()) Initializer.LOGGER.info("AFV_SMOKE_ZINK_NATIVE_WORLD: player and world active, {} completed window swaps", ZinkNativeSession.completedSwaps());
                 else if (BackendBootstrap.zinkClient()) Initializer.LOGGER.info("AFV_SMOKE_ZINK_CLIENT_WORLD: player and world active, {} Vulkan presentations", ZinkClientSession.presentedFrames());
                 else Initializer.LOGGER.info("AFV_SMOKE_OPENGL_WORLD: player and world active");
                 boolean alreadyTarget = client.getWindow().getWidth() == 960 && client.getWindow().getHeight() == 540;
@@ -205,7 +208,7 @@ public final class ClientSmokeTest {
 
     private static long cycleFrames() {
         if (dev.allforvulkan.bridge.DirectDefaultFramebuffer.ENABLED) return ZinkClientSession.directOutputFrames();
-        return BackendBootstrap.zinkClient() ? ZinkClientSession.presentedFrames() : renderedFrames;
+        return BackendBootstrap.usesZink() ? ZinkClientSession.completedFrames() : renderedFrames;
     }
 
     private static void disconnect(Minecraft client) {
@@ -250,6 +253,13 @@ public final class ClientSmokeTest {
     }
 
     private static void pass(Minecraft client) {
+        if (Boolean.getBoolean("afv.expectZinkNative")) {
+            if (!BackendBootstrap.zinkNative() || ZinkNativeSession.completedSwaps() < 120)
+                throw new IllegalStateException("AFV_SMOKE_FAIL: native Zink route did not swap 120 frames");
+            if (Boolean.getBoolean("afv.smokeNativeOutput") && ZinkNativeSession.verifiedOutput() == 0)
+                throw new IllegalStateException("AFV_SMOKE_FAIL: native window output was not checked");
+            Initializer.LOGGER.info("AFV_ZINK_NATIVE_SMOKE_PASS: {} completed GL window swaps, {} verified output regions", ZinkNativeSession.completedSwaps(), ZinkNativeSession.verifiedOutput());
+        }
         if (Boolean.getBoolean("afv.expectZinkClient")) {
             if (!BackendBootstrap.zinkClient() || ZinkClientSession.presentedFrames() < 120)
                 throw new IllegalStateException("AFV_SMOKE_FAIL: Zink client did not present through AFV Vulkan");

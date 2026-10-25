@@ -8,7 +8,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Explicit comparison harness only; does not enable AFV's Vulkan renderer. */
+/** EGL frontend for native Zink presentation and the explicit GL comparison. */
 @Mixin(Window.class)
 public abstract class EglValidationMixin {
     @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/neoforged/fml/loading/ImmediateWindowHandler;setupMinecraftWindow(Ljava/util/function/IntSupplier;Ljava/util/function/IntSupplier;Ljava/util/function/Supplier;Ljava/util/function/LongSupplier;)J"))
@@ -20,6 +20,15 @@ public abstract class EglValidationMixin {
     private org.lwjgl.opengl.GLCapabilities afv$eglFunctions() {
         // GLX's default loader may resolve the other vendor's entrypoints.
         org.lwjgl.opengl.GL.create(org.lwjgl.egl.EGL10::eglGetProcAddress);
-        return org.lwjgl.opengl.GL.createCapabilities();
+        var capabilities = org.lwjgl.opengl.GL.createCapabilities();
+        if (dev.allforvulkan.neoforge.BackendBootstrap.zinkNative())
+            dev.allforvulkan.neoforge.ZinkNativeSession.open(GLFW.glfwGetCurrentContext());
+        return capabilities;
     }
+    @Inject(method = "close", at = @At("HEAD"))
+    private void afv$nativeClose(CallbackInfo ci) {
+        if (dev.allforvulkan.neoforge.BackendBootstrap.zinkNative())
+            dev.allforvulkan.neoforge.ZinkNativeSession.close();
+    }
+
 }
