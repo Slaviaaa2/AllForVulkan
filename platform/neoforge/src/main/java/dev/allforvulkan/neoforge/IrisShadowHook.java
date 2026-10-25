@@ -26,6 +26,9 @@ public final class IrisShadowHook {
     private static int fallbackLines;
     private static int loggedMismatch = -2;
     private static int mismatchLogs;
+    private static boolean matched;
+
+    public static boolean matched() { return matched; }
 
     private IrisShadowHook() {}
 
@@ -44,6 +47,7 @@ public final class IrisShadowHook {
         try {
             replace();
         } catch (RuntimeException failure) {
+            matched = false;
             fallback(failure.getMessage());
         }
     }
@@ -52,6 +56,7 @@ public final class IrisShadowHook {
         ShadowProbe.Frame frame = ShadowProbe.readFrame();
         if (frame == null) return;
         if (Boolean.getBoolean("afv.irisShadowForceFallback")) {
+            matched = false;
             fallback("forced");
             return;
         }
@@ -59,6 +64,7 @@ public final class IrisShadowHook {
         if (mesh.subset()) {
             byte[] chosen = ShadowImage.replacementNear(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution());
             if (chosen != mesh.rgba()) {
+                matched = false;
                 int mismatches = mesh.rgba() == null ? -1
                         : ShadowImage.nearMismatches(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE);
                 if (mesh.rgba() != null && mismatches != loggedMismatch && mismatchLogs < 5) {
@@ -70,6 +76,7 @@ public final class IrisShadowHook {
                 fallback(mesh.rgba() == null ? mesh.detail() : "mesh mismatch " + mismatches + " " + mesh.detail());
                 return;
             }
+            matched = true;
             upload(frame.texture(), frame.resolution(), chosen);
             if (!loggedPass) {
                 String meshLine = "AFV_IRIS_SHADOW_MESH: " + mesh.detail();
@@ -82,9 +89,11 @@ public final class IrisShadowHook {
         var image = ShadowConstantPass.render(frame.resolution());
         byte[] chosen = ShadowImage.replacement(frame.rgba(), image.rgba(), frame.resolution(), frame.resolution());
         if (chosen != image.rgba()) {
+            matched = false;
             fallback(image.rgba() == null ? image.detail() : "center mismatch");
             return;
         }
+        matched = true;
         upload(frame.texture(), frame.resolution(), chosen);
         pass("AFV_IRIS_SHADOW_PASS: " + image.detail());
     }

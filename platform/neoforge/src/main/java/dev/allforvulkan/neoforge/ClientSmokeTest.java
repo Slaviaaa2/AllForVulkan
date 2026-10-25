@@ -174,8 +174,8 @@ public final class ClientSmokeTest {
                 if (!dev.allforvulkan.validation.ShadowProbe.capture()) return;
                 String summary = dev.allforvulkan.validation.ShadowProbe.summary();
                 if (mesh && distinctColors(summary) < 2 && stableTicks < 900) return;
-                if (mesh) System.out.println("AFV_SHADOW_MESH_DRAWS_AT_CAPTURE: last="
-                        + ShadowMeshCapture.lastSections() + " max=" + ShadowMeshCapture.maxSections());
+                if (mesh) System.out.println("AFV_SHADOW_MESH_CAPTURE: matched=" + IrisShadowHook.matched()
+                        + " last=" + ShadowMeshCapture.lastSections() + " max=" + ShadowMeshCapture.maxSections());
                 Initializer.LOGGER.info("AFV_SHADOW_PROBE_PASS: {}", summary);
                 System.out.println("AFV_SHADOW_PROBE_PASS: " + summary);
                 pass(client);

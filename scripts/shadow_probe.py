@@ -144,6 +144,8 @@ def launch(instance, iris_shadow, force_fallback, mesh, timeout):
             raise SystemExit('Vulkan did not replay a Sodium shadow mesh')
         if iris_shadow and not force_fallback:
             require_stable_mesh(text)
+            if 'AFV_SHADOW_MESH_CAPTURE: matched=true' not in text:
+                raise SystemExit('The captured shadow frame was not a Vulkan replay')
     else:
         require_constant(passed[-1])
     if 'AFV_IRIS_SHADOW_HOOK' not in text:
