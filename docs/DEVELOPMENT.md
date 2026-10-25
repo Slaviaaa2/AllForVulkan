@@ -706,6 +706,14 @@ named clears are handled at that boundary. Real EGL FBO 0 retains the default
 selector/metadata contract; alias attachments never become application-visible
 through binding/attachment queries. Invalidation may retain undefined contents.
 
+Core and extension entrypoints are routed by explicit symbol names. In particular,
+`glGetFramebufferParameterivEXT` is an EXT DSA object query, not an alias of the
+core binding-target query, and remains on the real driver. EXT DSA default
+read/draw selector updates are mirrored onto the shared target without changing
+application bindings. Named operations on explicit FBOs retain their driver's
+validation and object state. The direct-output GPU probe checks these contracts
+when EXT DSA is available, including `GL_NONE` and re-enabling output.
+
 The direct target has RGBA8 color and private depth24/stencil8 storage, matching
 the current EGL config. Other shared color formats keep the copy path. Vulkan
 performs the vertical flip since there is no longer a GL copy to fuse it with.
@@ -749,3 +757,16 @@ should describe user-visible changes, requirements, supported scope and known is
 Keep machine-specific logs, private modpack details and working notes outside the
 tracked source tree. Do not distribute third-party mod or shader JARs/ZIPs without
 their applicable redistribution permissions.
+
+To exercise the direct-output router on a standalone Mesa/Zink context:
+
+```sh
+./gradlew :native-bridge:run -Dafv.experimentalDirectOutput=true
+```
+
+The probe reports whether EXT DSA is advertised and tested or skipped. The
+extension query-resolution regression check runs independently of that support.
+On Linux x86_64, `check` also runs `verifyDirectOutputDispatch`: a driver-independent
+native test of extension ABI separation, default selector mirroring, explicit FBO
+isolation, bindings and driver-error preservation. It does not establish actual
+EXT DSA support on a driver that does not advertise the extension.

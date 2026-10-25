@@ -15,6 +15,7 @@ dependencies {
 application { mainClass = 'dev.allforvulkan.bridge.ZinkProbe' }
 tasks.named('run', JavaExec) {
     systemProperty 'org.lwjgl.system.stackSize', '1024'
+    systemProperty 'afv.experimentalDirectOutput', System.getProperty('afv.experimentalDirectOutput', 'false')
     // These variables affect this probe subprocess only, never the game or shell.
     environment 'MESA_LOADER_DRIVER_OVERRIDE', 'zink'
     environment 'GALLIUM_DRIVER', 'zink'
@@ -57,6 +58,24 @@ if (System.getProperty('os.name').toLowerCase().contains('linux') &&
                     'src/main/c/direct_framebuffer.c', '-o', output.absolutePath
         }
     }
+    def nativeChecks = layout.buildDirectory.file('native-checks/direct-framebuffer-checks')
+    def compileDirectOutputChecks = tasks.register('compileDirectOutputChecks', Exec) {
+        inputs.files 'src/main/c/direct_framebuffer.c', 'src/test/c/direct_framebuffer_checks.c'
+        outputs.file nativeChecks
+        doFirst {
+            def output = nativeChecks.get().asFile
+            output.parentFile.mkdirs()
+            def jdk = nativeJava.get().metadata.installationPath.asFile
+            commandLine 'cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+                    '-I' + jdk + '/include', '-I' + jdk + '/include/linux',
+                    'src/test/c/direct_framebuffer_checks.c', '-o', output.absolutePath
+        }
+    }
+    tasks.register('verifyDirectOutputDispatch', Exec) {
+        dependsOn compileDirectOutputChecks
+        doFirst { commandLine nativeChecks.get().asFile.absolutePath }
+    }
+    tasks.named('check') { dependsOn 'verifyDirectOutputDispatch' }
     sourceSets.main.resources.srcDir nativeOutput
     tasks.named('processResources') { dependsOn compileDirectOutput }
 }

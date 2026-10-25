@@ -138,35 +138,50 @@ static void hook_DrawBuffers(I count, const U *buffers) {
         real_DrawBuffer(selector(default_draw));
     }
 }
+/* Core DSA and EXT DSA have distinct names and validation contracts. Mirror
+ * only a change to the real default framebuffer; explicit FBOs stay untouched. */
+static void sync_read_selector(void) {
+    if (!alias) return;
+    U current = binding(READ);
+    real_BindFramebuffer(READ,0);
+    real_GetIntegerv(READ_BUFFER,&default_read);
+    real_BindFramebuffer(READ,current);
+    real_NamedFramebufferReadBuffer(alias,selector(default_read));
+}
+static void sync_draw_selector(void) {
+    if (!alias) return;
+    U current = binding(DRAW);
+    real_BindFramebuffer(DRAW,0);
+    real_GetIntegerv(DRAW_BUFFER,&default_draw);
+    real_BindFramebuffer(DRAW,current);
+    real_NamedFramebufferDrawBuffer(alias,selector(default_draw));
+}
 static void hook_NamedFramebufferReadBuffer(U framebuffer,U mode) {
     real_NamedFramebufferReadBuffer(framebuffer,mode);
-    if (alias && framebuffer == 0) {
-        U current = binding(READ);
-        real_BindFramebuffer(READ,0);
-        real_GetIntegerv(READ_BUFFER,&default_read);
-        real_BindFramebuffer(READ,current);
-        real_NamedFramebufferReadBuffer(alias,selector(default_read));
-    }
+    if (framebuffer == 0) sync_read_selector();
 }
 static void hook_NamedFramebufferDrawBuffer(U framebuffer,U mode) {
     real_NamedFramebufferDrawBuffer(framebuffer,mode);
-    if (alias && framebuffer == 0) {
-        U current = binding(DRAW);
-        real_BindFramebuffer(DRAW,0);
-        real_GetIntegerv(DRAW_BUFFER,&default_draw);
-        real_BindFramebuffer(DRAW,current);
-        real_NamedFramebufferDrawBuffer(alias,selector(default_draw));
-    }
+    if (framebuffer == 0) sync_draw_selector();
 }
 static void hook_NamedFramebufferDrawBuffers(U framebuffer,I count,const U *buffers) {
     real_NamedFramebufferDrawBuffers(framebuffer,count,buffers);
-    if (alias && framebuffer == 0) {
-        U current = binding(DRAW);
-        real_BindFramebuffer(DRAW,0);
-        real_GetIntegerv(DRAW_BUFFER,&default_draw);
-        real_BindFramebuffer(DRAW,current);
-        real_NamedFramebufferDrawBuffer(alias,selector(default_draw));
-    }
+    if (framebuffer == 0) sync_draw_selector();
+}
+PROC(void, FramebufferReadBufferEXT, (U,U));
+PROC(void, FramebufferDrawBufferEXT, (U,U));
+PROC(void, FramebufferDrawBuffersEXT, (U,I,const U*));
+static void hook_FramebufferReadBufferEXT(U framebuffer,U mode) {
+    real_FramebufferReadBufferEXT(framebuffer,mode);
+    if (framebuffer == 0) sync_read_selector();
+}
+static void hook_FramebufferDrawBufferEXT(U framebuffer,U mode) {
+    real_FramebufferDrawBufferEXT(framebuffer,mode);
+    if (framebuffer == 0) sync_draw_selector();
+}
+static void hook_FramebufferDrawBuffersEXT(U framebuffer,I count,const U *buffers) {
+    real_FramebufferDrawBuffersEXT(framebuffer,count,buffers);
+    if (framebuffer == 0) sync_draw_selector();
 }
 static void hook_BlitNamedFramebuffer(U source,U destination,I sx0,I sy0,I sx1,I sy1,I dx0,I dy0,I dx1,I dy1,U mask,U filter) {
     if (alias) {
@@ -200,11 +215,50 @@ SCOPED(FramebufferParameteri,(U target,U pname,I value),(target,pname,value))
 SCOPED(InvalidateFramebuffer,(U target,I count,const U *attachments),(target,count,attachments))
 SCOPED(InvalidateSubFramebuffer,(U target,I count,const U *attachments,I x,I y,I w,I h),(target,count,attachments,x,y,w,h))
 
+/* Explicit extension entrypoints. Do not infer equivalence by stripping a
+ * suffix: GetFramebufferParameterivEXT takes an object name, while the core
+ * GetFramebufferParameteriv takes a binding target. The EXT named query can
+ * pass straight through because real FBO 0 owns the virtual default selectors. */
+#define EXT_SCOPED(N,PARAMS,ARGS) PROC(void,N,PARAMS); SCOPED(N,PARAMS,ARGS)
+EXT_SCOPED(GetFramebufferAttachmentParameterivEXT,(U target,U attachment,U pname,I *data),(target,attachment,pname,data))
+EXT_SCOPED(FramebufferTexture1DEXT,(U target,U attachment,U textarget,U texture,I level),(target,attachment,textarget,texture,level))
+EXT_SCOPED(FramebufferTexture2DEXT,(U target,U attachment,U textarget,U texture,I level),(target,attachment,textarget,texture,level))
+EXT_SCOPED(FramebufferTexture3DEXT,(U target,U attachment,U textarget,U texture,I level,I layer),(target,attachment,textarget,texture,level,layer))
+EXT_SCOPED(FramebufferTextureLayerEXT,(U target,U attachment,U texture,I level,I layer),(target,attachment,texture,level,layer))
+EXT_SCOPED(FramebufferTextureEXT,(U target,U attachment,U texture,I level),(target,attachment,texture,level))
+EXT_SCOPED(FramebufferTextureARB,(U target,U attachment,U texture,I level),(target,attachment,texture,level))
+EXT_SCOPED(FramebufferTextureLayerARB,(U target,U attachment,U texture,I level,I layer),(target,attachment,texture,level,layer))
+EXT_SCOPED(FramebufferRenderbufferEXT,(U target,U attachment,U rbtarget,U renderbuffer),(target,attachment,rbtarget,renderbuffer))
+#undef EXT_SCOPED
+PROC(void, BindFramebufferEXT, (U,U));
+PROC(void, DeleteFramebuffersEXT, (I,const U*));
+PROC(void, DrawBuffersARB, (I,const U*));
+static void hook_BindFramebufferEXT(U target,U framebuffer) {
+    if (alias && framebuffer == 0) { framebuffer = alias; binds++; }
+    real_BindFramebufferEXT(target,framebuffer);
+}
+static void hook_DeleteFramebuffersEXT(I count,const U *framebuffers) {
+    real_DeleteFramebuffersEXT(count,framebuffers);
+    if (alias) {
+        if (binding(DRAW) == 0) real_BindFramebuffer(DRAW,alias);
+        if (binding(READ) == 0) real_BindFramebuffer(READ,alias);
+    }
+}
+static void hook_DrawBuffersARB(I count,const U *buffers) {
+    U old = default_scope(DRAW);
+    real_DrawBuffersARB(count,buffers);
+    if (old) {
+        real_GetIntegerv(DRAW_BUFFER,&default_draw);
+        restore(DRAW,old);
+        real_DrawBuffer(selector(default_draw));
+    }
+}
+
 JNIEXPORT jlong JNICALL Java_dev_allforvulkan_bridge_DirectDefaultFramebuffer_resolve
   (JNIEnv *env,jclass type,jlong name,jlong address) {
     (void)env; (void)type;
     const char *symbol = (const char *)(uintptr_t)name;
-#define MAP(N) if (!strcmp(symbol,"gl" #N) || !strcmp(symbol,"gl" #N "EXT") || !strcmp(symbol,"gl" #N "ARB")) { \
+#define MAP(N) if (!strcmp(symbol,"gl" #N)) { \
     if (!real_##N) real_##N = (__typeof__(real_##N))(uintptr_t)address; \
     return (jlong)(uintptr_t)&hook_##N; }
     MAP(BindFramebuffer)
@@ -218,6 +272,12 @@ JNIEXPORT jlong JNICALL Java_dev_allforvulkan_bridge_DirectDefaultFramebuffer_re
     MAP(FramebufferTexture1D) MAP(FramebufferTexture2D) MAP(FramebufferTexture3D) MAP(FramebufferTextureLayer)
     MAP(FramebufferTexture) MAP(FramebufferRenderbuffer) MAP(FramebufferParameteri)
     MAP(InvalidateFramebuffer) MAP(InvalidateSubFramebuffer)
+    MAP(FramebufferReadBufferEXT) MAP(FramebufferDrawBufferEXT) MAP(FramebufferDrawBuffersEXT)
+    MAP(BindFramebufferEXT) MAP(DeleteFramebuffersEXT) MAP(DrawBuffersARB)
+    MAP(GetFramebufferAttachmentParameterivEXT)
+    MAP(FramebufferTexture1DEXT) MAP(FramebufferTexture2DEXT) MAP(FramebufferTexture3DEXT)
+    MAP(FramebufferTextureLayerEXT) MAP(FramebufferTextureEXT)
+    MAP(FramebufferTextureARB) MAP(FramebufferTextureLayerARB) MAP(FramebufferRenderbufferEXT)
 #undef MAP
     return address;
 }

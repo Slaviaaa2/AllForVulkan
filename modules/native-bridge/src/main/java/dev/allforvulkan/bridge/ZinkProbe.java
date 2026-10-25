@@ -36,6 +36,7 @@ public final class ZinkProbe {
             }
             IndexedStateProbe.run(context);
             DefaultFramebufferProbe.run(context);
+            if (DirectDefaultFramebuffer.ENABLED) DirectDefaultFramebufferProbe.run();
             computeRoundTrip();
             ExternalImageProbe.run();
             if (java.util.Arrays.asList(args).contains("--wsi")) {
