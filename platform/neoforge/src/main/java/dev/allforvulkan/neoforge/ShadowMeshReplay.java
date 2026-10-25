@@ -26,9 +26,8 @@ public final class ShadowMeshReplay {
     private static int atlasWidth;
     private static int atlasHeight;
     private static byte[] cached;
-    private static int cachedGeneration = -1;
+    private static int cachedKey = Integer.MIN_VALUE;
     private static int cachedSize;
-    private static int cachedVertices = -1;
     private static String cachedDetail = "";
     private static int clipLogs;
     private static int loggedVertices = -1;
@@ -42,8 +41,8 @@ public final class ShadowMeshReplay {
         ShadowMeshCapture.Snapshot snapshot = ShadowMeshCapture.snapshot();
         if (!ShadowMeshCapture.hasMatrices()) return new Image(true, null, "no shadow draw");
         if (snapshot.vertexCount() == 0) return new Image(true, null, "no shadow vertices");
-        if (cached != null && cachedGeneration == snapshot.generation() && cachedSize == size
-                && cachedVertices == snapshot.vertexCount())
+        int key = cacheKey(snapshot);
+        if (cached != null && cachedKey == key && cachedSize == size)
             return new Image(true, cached, cachedDetail);
         if (!readAtlas()) return new Image(true, null, "block atlas could not be read");
         int bits = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac") ? 4 : 8;
@@ -59,9 +58,8 @@ public final class ShadowMeshReplay {
         if (rendered.skipped() || rendered.rgba() == null)
             return new Image(true, null, rendered.detail() == null ? "shadow mesh draw failed" : rendered.detail());
         cached = rendered.rgba();
-        cachedGeneration = snapshot.generation();
+        cachedKey = key;
         cachedSize = size;
-        cachedVertices = snapshot.vertexCount();
         cachedDetail = rendered.detail() + ", sections=" + snapshot.draws().size() + ", stride=" + snapshot.stride();
         return new Image(true, cached, cachedDetail);
     }
@@ -85,6 +83,26 @@ public final class ShadowMeshReplay {
             offset += mesh.vertices().length;
         }
         return vertices;
+    }
+
+    /** The camera snap and the region offset both move while the uploaded bytes stay put. */
+    private static int cacheKey(ShadowMeshCapture.Snapshot snapshot) {
+        int hash = snapshot.generation() * 31 + snapshot.vertexCount();
+        hash = mix(hash, snapshot.modelView());
+        hash = mix(hash, snapshot.projection());
+        for (var draw : snapshot.draws()) {
+            hash = 31 * hash + Float.floatToIntBits(draw.regionX());
+            hash = 31 * hash + Float.floatToIntBits(draw.regionY());
+            hash = 31 * hash + Float.floatToIntBits(draw.regionZ());
+            hash = 31 * hash + draw.vertices();
+        }
+        return hash;
+    }
+
+    private static int mix(int hash, float[] matrix) {
+        if (matrix == null) return hash * 31;
+        for (float value : matrix) hash = 31 * hash + Float.floatToIntBits(value);
+        return hash;
     }
 
     /** One line per mesh size, so a fully clipped replay is visible without a device. */
