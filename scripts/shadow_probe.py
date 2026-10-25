@@ -80,7 +80,7 @@ def ensure_display():
     raise RuntimeError('Xvfb did not open :99')
 
 
-def launch(instance, iris_shadow, timeout):
+def launch(instance, iris_shadow, force_fallback, timeout):
     display = ensure_display()
     command = [
         './gradlew', 'runClient', '--console=plain',
@@ -88,6 +88,7 @@ def launch(instance, iris_shadow, timeout):
         '-Dafv.smokeTest=true', '-Dafv.smokeWorld=true', '-Dafv.smokeIris=true',
         '-Dafv.shadowProbe=true', '-Dafv.backend=OPENGL',
         '-Dafv.irisShadow=' + ('true' if iris_shadow else 'false'),
+        '-Dafv.irisShadowForceFallback=' + ('true' if force_fallback else 'false'),
     ]
     environment = dict(**{key: value for key, value in __import__('os').environ.items()})
     environment.update({
@@ -98,7 +99,8 @@ def launch(instance, iris_shadow, timeout):
         'XDG_RUNTIME_DIR': '/tmp/runtime-afv',
     })
     Path('/tmp/runtime-afv').mkdir(exist_ok=True)
-    log = instance / ('shadow-on.log' if iris_shadow else 'shadow-off.log')
+    log_name = 'shadow-fallback.log' if force_fallback else 'shadow-on.log' if iris_shadow else 'shadow-off.log'
+    log = instance / log_name
     instance.mkdir(parents=True, exist_ok=True)
     try:
         with log.open('w') as handle:
@@ -115,6 +117,16 @@ def launch(instance, iris_shadow, timeout):
         raise SystemExit('Shadow probe failed with exit ' + str(completed.returncode) + '\n' + tail)
     print(passed[-1])
     require_constant(passed[-1])
+    if 'AFV_IRIS_SHADOW_HOOK' not in text:
+        extra = '\n'.join(line for line in text.splitlines() if 'AFV_IRIS_SHADOW' in line)
+        raise SystemExit('Iris renderShadows hook did not run\n' + extra)
+    if force_fallback:
+        if 'AFV_IRIS_SHADOW_FALLBACK' not in text or 'AFV_IRIS_SHADOW_PASS' in text:
+            raise SystemExit('Forced fallback did not leave Iris\'s shadow image in place')
+    elif iris_shadow and 'AFV_IRIS_SHADOW_PASS' not in text:
+        raise SystemExit('Vulkan shadow pass did not run:\n' + '\n'.join(line for line in text.splitlines() if 'AFV_IRIS_SHADOW' in line))
+    elif not iris_shadow and 'AFV_IRIS_SHADOW_PASS' in text:
+        raise SystemExit('The shadow hook ran while afv.irisShadow was off')
     return log
 
 
@@ -148,7 +160,7 @@ def compare(off, on, tolerance):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=('off', 'on', 'diff'), default='off')
+    parser.add_argument('--mode', choices=('off', 'on', 'diff', 'fallback'), default='off')
     parser.add_argument('--instance', type=Path, default=ROOT / 'run-shadow-probe')
     parser.add_argument('--timeout', type=int, default=2700)
     parser.add_argument('--tolerance', type=int, default=8)
@@ -156,9 +168,10 @@ def main():
     instance = args.instance if args.instance.is_absolute() else ROOT / args.instance
     if args.mode == 'diff':
         compare(instance / 'afv-shadow-off.rgba', instance / 'afv-shadow-on.rgba', args.tolerance)
+        compare(instance / 'afv-shadow-off.rgba', instance / 'afv-shadow-fallback.rgba', args.tolerance)
         return
     prepare(instance)
-    launch(instance, args.mode == 'on', args.timeout)
+    launch(instance, args.mode in ('on', 'fallback'), args.mode == 'fallback', args.timeout)
 
 
 if __name__ == '__main__':

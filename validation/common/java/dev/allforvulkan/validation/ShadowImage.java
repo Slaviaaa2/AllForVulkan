@@ -62,6 +62,14 @@ public final class ShadowImage {
         return (width - width / 4 - width / 4) * (height - height / 4 - height / 4);
     }
 
+    /** The Vulkan image when its center matches, otherwise the GL image. A null Vulkan image keeps GL. */
+    public static byte[] replacement(byte[] gl, byte[] vulkan, int width, int height) {
+        if (gl == null) return null;
+        if (vulkan == null || vulkan.length != gl.length) return gl;
+        if (centerMismatches(gl, vulkan, width, height, TOLERANCE) != 0) return gl;
+        return vulkan;
+    }
+
     private static int channel(byte left, byte right) {
         return Math.abs((left & 0xff) - (right & 0xff));
     }

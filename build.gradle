@@ -53,6 +53,7 @@ neoForge {
             systemProperty 'afv.smokeIris', System.getProperty('afv.smokeIris', 'false')
             systemProperty 'afv.shadowProbe', System.getProperty('afv.shadowProbe', 'false')
             systemProperty 'afv.irisShadow', System.getProperty('afv.irisShadow', 'false')
+            systemProperty 'afv.irisShadowForceFallback', System.getProperty('afv.irisShadowForceFallback', 'false')
             systemProperty 'afv.smokeIrisCycle', System.getProperty('afv.smokeIrisCycle', 'false')
             systemProperty 'afv.smokeWindowCycle', System.getProperty('afv.smokeWindowCycle', 'false')
             systemProperty 'afv.smokeDimensions', System.getProperty('afv.smokeDimensions', 'false')

@@ -23,7 +23,13 @@ public final class ShadowImageChecks {
         var loaded = ShadowImage.read(path);
         require(loaded.width() == width && loaded.height() == height, "header was not preserved");
         require(ShadowImage.centerMismatches(left, loaded.rgba(), width, height, 0) == 0, "round trip changed pixels");
-        System.out.println("AFV_SHADOW_IMAGE_PASS: center half, tolerance, round trip");
+        byte[] other = fill(width, height, (byte) 128, (byte) 64, (byte) 192, (byte) 255);
+        other[0] = 1;
+        require(ShadowImage.replacement(left, other, width, height) == other, "matching center was not replaced");
+        byte[] white = fill(width, height, (byte) 255, (byte) 255, (byte) 255, (byte) 255);
+        require(ShadowImage.replacement(white, other, width, height) == white, "mismatched center replaced the GL image");
+        require(ShadowImage.replacement(left, null, width, height) == left, "missing Vulkan image replaced the GL image");
+        System.out.println("AFV_SHADOW_IMAGE_PASS: center half, tolerance, round trip, fallback");
     }
 
     private static byte[] fill(int width, int height, byte r, byte g, byte b, byte a) {

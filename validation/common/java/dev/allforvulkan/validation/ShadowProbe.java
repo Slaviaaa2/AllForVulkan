@@ -13,34 +13,44 @@ public final class ShadowProbe {
 
     private ShadowProbe() {}
 
+    public record Frame(int texture, int resolution, String format, byte[] rgba) {}
+
     public static String summary() { return summary; }
 
-    /** False until Iris has a shadow color texture. Throws if that texture cannot be read. */
-    public static boolean capture() {
+    /** Null until Iris has a shadow color texture. Throws if that texture cannot be read. */
+    public static Frame readFrame() {
         int texture;
         int resolution;
+        String format;
         try {
             Object pipeline = IrisAssertions.requireActive();
             Object targets = field(pipeline, "shadowRenderTargets");
-            if (targets == null) {
-                waiting("Iris has no shadow targets yet");
-                return false;
-            }
+            if (targets == null) return null;
             texture = (int) targets.getClass().getMethod("getColorTextureId", int.class).invoke(targets, 0);
             resolution = (int) targets.getClass().getMethod("getResolution").invoke(targets);
-            Object format = targets.getClass().getMethod("getColorTextureFormat", int.class).invoke(targets, 0);
-            formatName = format == null ? "unknown" : format.toString();
+            Object formatValue = targets.getClass().getMethod("getColorTextureFormat", int.class).invoke(targets, 0);
+            format = formatValue == null ? "unknown" : formatValue.toString();
         } catch (ReflectiveOperationException failure) {
             throw new IllegalStateException("AFV_SHADOW_PROBE_FAIL: cannot reach Iris shadow targets", failure);
         }
-        if (texture <= 0 || resolution <= 0) {
+        if (texture <= 0 || resolution <= 0) return null;
+        return new Frame(texture, resolution, format, read(texture, resolution));
+    }
+
+    /** False until Iris has a shadow color texture. Throws if that texture cannot be read. */
+    public static boolean capture() {
+        Frame frame = readFrame();
+        if (frame == null) {
             waiting("shadow texture is not allocated");
             return false;
         }
-        byte[] rgba = read(texture, resolution);
+        int resolution = frame.resolution();
+        formatName = frame.format();
+        byte[] rgba = frame.rgba();
+        boolean hook = Boolean.parseBoolean(System.getProperty("afv.irisShadow", "false"));
         Path output = Path.of("afv-shadow-off.rgba");
-        String hook = System.getProperty("afv.irisShadow", "false");
-        if (Boolean.parseBoolean(hook)) output = Path.of("afv-shadow-on.rgba");
+        if (Boolean.getBoolean("afv.irisShadowForceFallback")) output = Path.of("afv-shadow-fallback.rgba");
+        else if (hook) output = Path.of("afv-shadow-on.rgba");
         try {
             ShadowImage.write(output, resolution, resolution, rgba);
         } catch (java.io.IOException failure) {
@@ -53,7 +63,7 @@ public final class ShadowProbe {
             if ((rgba[i] | rgba[i + 1] | rgba[i + 2]) != 0) nonzero++;
         summary = "width=" + resolution + " height=" + resolution
                 + " format=" + formatName
-                + " hook=" + Boolean.parseBoolean(hook)
+                + " hook=" + hook
                 + " file=" + output
                 + " nonzero=" + nonzero + "/" + (resolution * resolution)
                 + " center=" + (rgba[index] & 255) + "," + (rgba[index + 1] & 255) + ","

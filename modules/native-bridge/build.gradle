@@ -78,6 +78,15 @@ tasks.register('verifyIrisSubsetDraw', JavaExec) {
     systemProperty 'afv.compositeDevice', System.getProperty('afv.compositeDevice', '')
 }
 tasks.named('check') { dependsOn 'verifyIrisSubsetDraw' }
+tasks.register('verifyShadowConstant', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.framegraph.ShadowConstantPassChecks'
+    systemProperty 'org.lwjgl.system.stackSize', '1024'
+    systemProperty 'afv.requireCompositeDevice', System.getProperty('afv.requireCompositeDevice', 'false')
+    systemProperty 'afv.compositeDevice', System.getProperty('afv.compositeDevice', '')
+}
+tasks.named('check') { dependsOn 'verifyShadowConstant' }
 
 // Optional direct-output router; other platforms retain the ordinary copy path.
 if (System.getProperty('os.name').toLowerCase().contains('linux') &&

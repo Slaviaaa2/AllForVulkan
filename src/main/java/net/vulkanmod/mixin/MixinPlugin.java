@@ -38,7 +38,42 @@ public class MixinPlugin implements IMixinConfigPlugin {
             return dev.allforvulkan.neoforge.BackendBootstrap.zinkNative() || (!dev.allforvulkan.neoforge.BackendBootstrap.usesVulkan() && Boolean.getBoolean("afv.validationEgl"));
         if (mixinClassName.endsWith(".PackValidationMixin"))
             return Boolean.getBoolean("afv.validationPack");
+        if (mixinClassName.endsWith(".IrisShadowPassMixin"))
+            return irisShadowRendererPresent();
         return dev.allforvulkan.neoforge.BackendBootstrap.vulkan();
+    }
+
+    private static Boolean irisPresent;
+
+    /** Do not load ShadowRenderer. That makes Iris's own mixin fail during prepare. */
+    private static boolean irisShadowRendererPresent() {
+        if (irisPresent != null && irisPresent) return true;
+        boolean present = irisModId() || irisJar();
+        if (present) irisPresent = true;
+        return present;
+    }
+
+    private static boolean irisModId() {
+        try {
+            var mods = net.neoforged.fml.loading.FMLLoader.getLoadingModList();
+            return mods != null && mods.getMods().stream().anyMatch(mod -> "iris".equals(mod.getModId()));
+        } catch (Throwable failure) {
+            return false;
+        }
+    }
+
+    private static boolean irisJar() {
+        try {
+            var mods = net.neoforged.fml.loading.FMLLoader.getGamePath().resolve("mods");
+            try (var files = java.nio.file.Files.list(mods)) {
+                return files.anyMatch(path -> {
+                    String name = path.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+                    return name.startsWith("iris-") && name.endsWith(".jar");
+                });
+            }
+        } catch (Throwable failure) {
+            return false;
+        }
     }
 
     @Override
