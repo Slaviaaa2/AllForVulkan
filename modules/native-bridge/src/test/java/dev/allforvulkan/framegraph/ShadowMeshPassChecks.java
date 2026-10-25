@@ -33,7 +33,7 @@ public final class ShadowMeshPassChecks {
         require(Math.abs(vulkan[5] + 0.03125f) < 1e-6f, "Y scale was not flipped");
         require(Math.abs(vulkan[10] - 0.5f * ortho[10]) < 1e-6f, "projection z scale was not halved");
         require(Math.abs(vulkan[14] - (0.5f * ortho[14] + 0.5f)) < 1e-5f, "projection z bias was not applied");
-        var draw = new ShadowMeshPass.Draw(vertices, new byte[] {(byte) 255, (byte) 255, (byte) 255, (byte) 255}, 1, 1,
+        var draw = new ShadowMeshPass.Draw(vertices, new byte[][] {{(byte) 255, (byte) 255, (byte) 255, (byte) 255}}, 1, 1,
                 identity, identity, 32, 0, 0, 0, 255);
         var result = ShadowMeshPass.render(shadow, draw);
         if (result.skipped()) {
@@ -54,13 +54,13 @@ public final class ShadowMeshPassChecks {
                 1f, 1f, -0.5f, 0.5f, 0.5f, 0f, 0f, 1f, 1f,
                 -1f, 1f, -0.5f, 0.5f, 0.5f, 0f, 0f, 1f, 1f
         };
-        var negative = ShadowMeshPass.render(shadow, new ShadowMeshPass.Draw(behind, draw.texture(), 1, 1,
+        var negative = ShadowMeshPass.render(shadow, new ShadowMeshPass.Draw(behind, draw.mips(), 1, 1,
                 identity, identity, 32, 0, 0, 0, 255));
         if (negative.skipped() || negative.rgba() == null) throw new IllegalStateException(negative.detail());
         int center = pixel(negative.rgba(), 32, 16, 16);
         require(channel(center, 2) > 200 && channel(center, 0) < 40 && channel(center, 1) < 40,
                 "negative clip z was discarded " + hex(center));
-        var rejected = ShadowMeshPass.render(shadow, new ShadowMeshPass.Draw(new float[0], draw.texture(), 1, 1,
+        var rejected = ShadowMeshPass.render(shadow, new ShadowMeshPass.Draw(new float[0], draw.mips(), 1, 1,
                 identity, identity, 32, 0, 0, 0, 255));
         if (rejected.skipped() || rejected.rgba() != null) throw new IllegalStateException(rejected.detail());
         System.out.println("AFV_SHADOW_MESH_DRAW_PASS: " + result.detail() + " left=" + hex(left) + " right=" + hex(right)

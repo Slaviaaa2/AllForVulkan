@@ -21,16 +21,22 @@ public final class ShadowMeshPass {
     private static final int VERTEX_FLOATS = 9;
     private static final int UNIFORM_BYTES = 256;
 
-    /** Vertices are nine floats each. The texture is one RGBA mip. Matrices are column-major. */
-    public record Draw(float[] vertices, byte[] texture, int textureWidth, int textureHeight,
+    /** Vertices are nine floats each. {@code mips} is the block atlas from mip 0 down. Matrices are column-major. */
+    public record Draw(float[] vertices, byte[][] mips, int textureWidth, int textureHeight,
                        float[] modelView, float[] projection, int size,
                        int clearRed, int clearGreen, int clearBlue, int clearAlpha) {
         String invalid() {
             if (vertices == null || vertices.length < VERTEX_FLOATS * 3 || vertices.length % VERTEX_FLOATS != 0)
                 return "mesh needs complete vertices";
-            if (texture == null || textureWidth < 1 || textureHeight < 1 || texture.length != textureWidth * textureHeight * 4)
-                return "texture must be RGBA";
-            if (textureWidth > 4096 || textureHeight > 4096) return "texture is larger than 4096";
+            if (mips == null || mips.length < 1 || mips.length > 13) return "texture mips";
+            if (textureWidth < 1 || textureHeight < 1 || textureWidth > 4096 || textureHeight > 4096)
+                return "texture is larger than 4096";
+            for (int level = 0; level < mips.length; level++) {
+                int levelWidth = Math.max(1, textureWidth >> level);
+                int levelHeight = Math.max(1, textureHeight >> level);
+                if (mips[level] == null || mips[level].length != levelWidth * levelHeight * 4)
+                    return "mip " + level + " must be RGBA";
+            }
             if (modelView == null || modelView.length != 16 || projection == null || projection.length != 16)
                 return "matrices must be 4x4";
             if (size < 1 || size > 4096) return "shadow size is outside 1..4096";
@@ -123,7 +129,7 @@ public final class ShadowMeshPass {
                 var queue = new VkQueue(queuePointer.get(0), device);
                 var memory = VkPhysicalDeviceMemoryProperties.malloc(stack);
                 vkGetPhysicalDeviceMemoryProperties(physical, memory);
-                sampler = sampler(device, stack);
+                sampler = sampler(device, stack, draw.mips().length);
                 descriptorLayout = descriptorLayout(device, stack);
                 pipelineLayout = pipelineLayout(device, stack, descriptorLayout);
                 renderPass = renderPass(device, stack);
@@ -135,9 +141,9 @@ public final class ShadowMeshPass {
                 vertexMemory = bind(device, stack, memory, vertices, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
                 writeVertices(device, vertexMemory, draw.vertices());
                 texture = Image.color(device, memory, stack, draw.textureWidth(), draw.textureHeight(),
-                        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+                        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, draw.mips().length);
                 pool = commandPool(device, stack, family);
-                upload(device, queue, memory, pool, texture, draw.texture(), draw.textureWidth(), draw.textureHeight());
+                upload(device, queue, memory, pool, texture, draw.mips(), draw.textureWidth(), draw.textureHeight());
                 byte[] rgba = draw(device, queue, memory, pool, sampler, descriptorLayout, pipelineLayout, renderPass,
                         uniform, vertices, texture, shader, draw);
                 return new Result(false, rgba, "device=" + deviceName + ", vertices=" + (draw.vertices().length / VERTEX_FLOATS)
@@ -199,9 +205,9 @@ public final class ShadowMeshPass {
                 long command = command(device, stack, pool);
                 var buffer = new VkCommandBuffer(command, device);
                 check(vkBeginCommandBuffer(buffer, VkCommandBufferBeginInfo.calloc(stack).sType$Default()), "begin mesh");
-                barrier(buffer, stack, target.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                barrier(buffer, stack, target.handle, VK_IMAGE_ASPECT_COLOR_BIT, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                         0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-                barrier(buffer, stack, depth.handle, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                barrier(buffer, stack, depth.handle, VK_IMAGE_ASPECT_DEPTH_BIT, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                         0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
                 var clear = VkClearValue.calloc(2, stack);
                 clear.get(0).color().float32(0, draw.clearRed() / 255f).float32(1, draw.clearGreen() / 255f)
@@ -216,7 +222,7 @@ public final class ShadowMeshPass {
                 vkCmdSetScissor(buffer, 0, VkRect2D.calloc(1, stack).extent(extent -> extent.set(size, size)));
                 vkCmdDraw(buffer, draw.vertices().length / VERTEX_FLOATS, 1, 0, 0);
                 vkCmdEndRenderPass(buffer);
-                barrier(buffer, stack, target.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                barrier(buffer, stack, target.handle, VK_IMAGE_ASPECT_COLOR_BIT, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                         VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
                 var region = VkBufferImageCopy.calloc(1, stack);
@@ -263,25 +269,36 @@ public final class ShadowMeshPass {
     }
 
     private static void upload(VkDevice device, VkQueue queue, VkPhysicalDeviceMemoryProperties memory, long pool,
-                               Image texture, byte[] rgba, int width, int height) {
+                               Image texture, byte[][] mips, int width, int height) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            long staging = buffer(device, stack, rgba.length, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+            int bytes = 0;
+            for (byte[] level : mips) bytes += level.length;
+            long staging = buffer(device, stack, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
             long stagingMemory = bind(device, stack, memory, staging, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
             try {
                 var mapped = stack.mallocPointer(1);
-                check(vkMapMemory(device, stagingMemory, 0, rgba.length, 0, mapped), "map texture");
-                MemoryUtil.memByteBuffer(mapped.get(0), rgba.length).put(rgba);
+                check(vkMapMemory(device, stagingMemory, 0, bytes, 0, mapped), "map texture");
+                ByteBuffer packed = MemoryUtil.memByteBuffer(mapped.get(0), bytes);
+                for (byte[] level : mips) packed.put(level);
                 vkUnmapMemory(device, stagingMemory);
                 long command = command(device, stack, pool);
                 var buffer = new VkCommandBuffer(command, device);
                 check(vkBeginCommandBuffer(buffer, VkCommandBufferBeginInfo.calloc(stack).sType$Default()), "begin upload");
-                barrier(buffer, stack, texture.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                barrier(buffer, stack, texture.handle, VK_IMAGE_ASPECT_COLOR_BIT, mips.length,
+                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                         0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-                var region = VkBufferImageCopy.calloc(1, stack);
-                region.imageSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).layerCount(1);
-                region.imageExtent().set(width, height, 1);
-                vkCmdCopyBufferToImage(buffer, staging, texture.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, region);
-                barrier(buffer, stack, texture.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                var regions = VkBufferImageCopy.calloc(mips.length, stack);
+                int offset = 0;
+                for (int level = 0; level < mips.length; level++) {
+                    var region = regions.get(level);
+                    region.bufferOffset(offset);
+                    region.imageSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(level).layerCount(1);
+                    region.imageExtent().set(Math.max(1, width >> level), Math.max(1, height >> level), 1);
+                    offset += mips[level].length;
+                }
+                vkCmdCopyBufferToImage(buffer, staging, texture.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, regions);
+                barrier(buffer, stack, texture.handle, VK_IMAGE_ASPECT_COLOR_BIT, mips.length,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                         VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
                 check(vkEndCommandBuffer(buffer), "end upload");
                 submit(device, queue, stack, command);
@@ -375,12 +392,12 @@ public final class ShadowMeshPass {
         }
     }
 
-    private static void barrier(VkCommandBuffer command, MemoryStack stack, long image, int aspect, int from, int to,
+    private static void barrier(VkCommandBuffer command, MemoryStack stack, long image, int aspect, int levels, int from, int to,
                                 int srcAccess, int dstAccess, int srcStage, int dstStage) {
         var barrier = VkImageMemoryBarrier.calloc(1, stack).sType$Default().image(image)
                 .oldLayout(from).newLayout(to).srcAccessMask(srcAccess).dstAccessMask(dstAccess)
                 .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED).dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
-        barrier.subresourceRange().aspectMask(aspect).levelCount(1).layerCount(1);
+        barrier.subresourceRange().aspectMask(aspect).levelCount(levels).layerCount(1);
         vkCmdPipelineBarrier(command, srcStage, dstStage, 0, null, null, barrier);
     }
 
@@ -447,12 +464,13 @@ public final class ShadowMeshPass {
         return handle.get(0);
     }
 
-    private static long sampler(VkDevice device, MemoryStack stack) {
+    /** Matches the block atlas: nearest texel, linear blend between mip levels. */
+    private static long sampler(VkDevice device, MemoryStack stack, int levels) {
         var handle = stack.mallocLong(1);
         check(vkCreateSampler(device, VkSamplerCreateInfo.calloc(stack).sType$Default()
-                .magFilter(VK_FILTER_NEAREST).minFilter(VK_FILTER_NEAREST)
+                .magFilter(VK_FILTER_NEAREST).minFilter(VK_FILTER_NEAREST).mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
                 .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE).addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
-                .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE).minLod(0).maxLod(0), null, handle), "sampler");
+                .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE).minLod(0).maxLod(Math.max(0, levels - 1)), null, handle), "sampler");
         return handle.get(0);
     }
 
@@ -565,18 +583,23 @@ public final class ShadowMeshPass {
         }
 
         static Image color(VkDevice device, VkPhysicalDeviceMemoryProperties memory, MemoryStack stack, int width, int height, int usage) {
-            return create(device, memory, stack, width, height, FORMAT, usage, VK_IMAGE_ASPECT_COLOR_BIT);
+            return color(device, memory, stack, width, height, usage, 1);
+        }
+
+        static Image color(VkDevice device, VkPhysicalDeviceMemoryProperties memory, MemoryStack stack,
+                           int width, int height, int usage, int levels) {
+            return create(device, memory, stack, width, height, levels, FORMAT, usage, VK_IMAGE_ASPECT_COLOR_BIT);
         }
 
         static Image depth(VkDevice device, VkPhysicalDeviceMemoryProperties memory, MemoryStack stack, int size) {
-            return create(device, memory, stack, size, size, DEPTH_FORMAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
+            return create(device, memory, stack, size, size, 1, DEPTH_FORMAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
         }
 
         private static Image create(VkDevice device, VkPhysicalDeviceMemoryProperties memory, MemoryStack stack,
-                                    int width, int height, int format, int usage, int aspect) {
+                                    int width, int height, int levels, int format, int usage, int aspect) {
             var handle = stack.mallocLong(1);
             var info = VkImageCreateInfo.calloc(stack).sType$Default().imageType(VK_IMAGE_TYPE_2D).format(format)
-                    .mipLevels(1).arrayLayers(1).samples(VK_SAMPLE_COUNT_1_BIT).tiling(VK_IMAGE_TILING_OPTIMAL)
+                    .mipLevels(levels).arrayLayers(1).samples(VK_SAMPLE_COUNT_1_BIT).tiling(VK_IMAGE_TILING_OPTIMAL)
                     .usage(usage).sharingMode(VK_SHARING_MODE_EXCLUSIVE).initialLayout(VK_IMAGE_LAYOUT_UNDEFINED);
             info.extent().set(width, height, 1);
             check(vkCreateImage(device, info, null, handle), "image");
@@ -590,7 +613,7 @@ public final class ShadowMeshPass {
             check(vkBindImageMemory(device, image, allocated, 0), "bind image");
             var view = stack.mallocLong(1);
             var viewInfo = VkImageViewCreateInfo.calloc(stack).sType$Default().image(image).viewType(VK_IMAGE_VIEW_TYPE_2D).format(format);
-            viewInfo.subresourceRange().aspectMask(aspect).levelCount(1).layerCount(1);
+            viewInfo.subresourceRange().aspectMask(aspect).levelCount(levels).layerCount(1);
             check(vkCreateImageView(device, viewInfo, null, view), "image view");
             return new Image(image, allocated, view.get(0));
         }

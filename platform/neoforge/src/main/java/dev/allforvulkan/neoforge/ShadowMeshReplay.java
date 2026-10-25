@@ -22,7 +22,7 @@ public final class ShadowMeshReplay {
     private static int clearGreen = 255;
     private static int clearBlue = 255;
     private static int clearAlpha = 255;
-    private static byte[] atlas;
+    private static byte[][] atlas;
     private static int atlasWidth;
     private static int atlasHeight;
     private static byte[] cached;
@@ -175,18 +175,27 @@ public final class ShadowMeshReplay {
             int width = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_WIDTH);
             int height = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_HEIGHT);
             if (width < 1 || height < 1 || width > 4096 || height > 4096) return false;
-            int max = GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, GL12.GL_TEXTURE_MAX_LEVEL);
-            if (max < 0) max = 0;
-            var buffer = org.lwjgl.BufferUtils.createByteBuffer(width * height * 4);
+            int maxLevel = GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, GL12.GL_TEXTURE_MAX_LEVEL);
+            if (maxLevel < 0 || maxLevel > 12) maxLevel = 0;
+            var levels = new java.util.ArrayList<byte[]>();
             GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
-            GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
-            if (GL11.glGetError() != GL11.GL_NO_ERROR) return false;
-            byte[] rgba = new byte[width * height * 4];
-            buffer.get(rgba);
-            atlas = rgba;
+            for (int level = 0; level <= maxLevel; level++) {
+                int levelWidth = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, level, GL11.GL_TEXTURE_WIDTH);
+                int levelHeight = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, level, GL11.GL_TEXTURE_HEIGHT);
+                if (levelWidth < 1 || levelHeight < 1) break;
+                var buffer = org.lwjgl.BufferUtils.createByteBuffer(levelWidth * levelHeight * 4);
+                GL11.glGetTexImage(GL11.GL_TEXTURE_2D, level, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
+                if (GL11.glGetError() != GL11.GL_NO_ERROR) break;
+                byte[] rgba = new byte[levelWidth * levelHeight * 4];
+                buffer.get(rgba);
+                levels.add(rgba);
+            }
+            if (levels.isEmpty()) return false;
+            atlas = levels.toArray(byte[][]::new);
             atlasWidth = width;
             atlasHeight = height;
-            return max >= 0;
+            System.out.println("AFV_SHADOW_MESH_ATLAS: " + width + "x" + height + " mips=" + atlas.length);
+            return true;
         } finally {
             GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, pack);
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, previous);
