@@ -84,6 +84,52 @@ public final class ShadowImage {
         return mismatches;
     }
 
+    /** Strict mismatches after the integer shift that lines the images up best, within four texels. */
+    public static String bestShift(byte[] left, byte[] right, int width, int height, int tolerance) {
+        if (left == null || right == null || left.length != right.length) return " shift=unavailable";
+        int best = Integer.MAX_VALUE;
+        int bestDx = 0;
+        int bestDy = 0;
+        int origin = strict(left, right, width, height, tolerance, 0, 0);
+        for (int dy = -4; dy <= 4; dy++) {
+            for (int dx = -4; dx <= 4; dx++) {
+                int mismatches = strict(left, right, width, height, tolerance, dx, dy);
+                if (mismatches < best) {
+                    best = mismatches;
+                    bestDx = dx;
+                    bestDy = dy;
+                }
+            }
+        }
+        return " strict=" + origin + " shift=" + bestDx + "," + bestDy + " shifted=" + best;
+    }
+
+    private static int strict(byte[] left, byte[] right, int width, int height, int tolerance, int dx, int dy) {
+        int mismatches = 0;
+        for (int y = 0; y < height; y++) {
+            int sy = y + dy;
+            if (sy < 0 || sy >= height) {
+                mismatches += width;
+                continue;
+            }
+            for (int x = 0; x < width; x++) {
+                int sx = x + dx;
+                if (sx < 0 || sx >= width) {
+                    mismatches++;
+                    continue;
+                }
+                int index = (y * width + x) * 4;
+                int other = (sy * width + sx) * 4;
+                if (channel(left[index], right[other]) > tolerance
+                        || channel(left[index + 1], right[other + 1]) > tolerance
+                        || channel(left[index + 2], right[other + 2]) > tolerance
+                        || channel(left[index + 3], right[other + 3]) > tolerance)
+                    mismatches++;
+            }
+        }
+        return mismatches;
+    }
+
     /** Up to {@code limit} GL pixels that have no Vulkan sample within one texel. */
     public static String nearMismatchSummary(byte[] left, byte[] right, int width, int height, int tolerance, int limit) {
         if (left == null || right == null || left.length != right.length) return " unavailable";

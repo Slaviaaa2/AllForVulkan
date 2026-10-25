@@ -27,8 +27,11 @@ public final class IrisShadowHook {
     private static int loggedMismatch = -2;
     private static int mismatchLogs;
     private static boolean matched;
+    private static String lastResult = "none";
 
     public static boolean matched() { return matched; }
+
+    public static String lastResult() { return lastResult; }
 
     private IrisShadowHook() {}
 
@@ -73,10 +76,13 @@ public final class IrisShadowHook {
                     System.out.println("AFV_SHADOW_MESH_MISMATCH:" + ShadowImage.nearMismatchSummary(
                             frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 8));
                 }
+                lastResult = "mismatch " + mismatches + (mesh.rgba() == null ? ""
+                        : ShadowImage.bestShift(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE));
                 fallback(mesh.rgba() == null ? mesh.detail() : "mesh mismatch " + mismatches + " " + mesh.detail());
                 return;
             }
             matched = true;
+            lastResult = "match";
             upload(frame.texture(), frame.resolution(), chosen);
             if (!loggedPass) {
                 String meshLine = "AFV_IRIS_SHADOW_MESH: " + mesh.detail();
