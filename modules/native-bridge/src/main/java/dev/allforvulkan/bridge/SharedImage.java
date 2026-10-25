@@ -267,7 +267,8 @@ public final class SharedImage implements AutoCloseable {
             glSignalSemaphoreEXT(glFromGl, stack.mallocInt(0), stack.ints(texture),
                     stack.ints(access.glSignal));
             // EXT_semaphore already flushes immediately after signaling.
-            checkGl("submit shared game image");
+            // Release frames do not also call glGetError; --debug-gl still does.
+            if (GlDiagnostics.errorsEnabled()) checkGl("submit shared game image");
         }
     }
     /** Record acquire in a submission waiting on readyForVulkan at TRANSFER. */

@@ -4,6 +4,7 @@
 #include "../../main/c/direct_framebuffer.c"
 
 static U draw_binding = 3, read_binding = 4;
+static int driver_gets;
 static U draw_modes[16], read_modes[16];
 static I pending_error, core_queries, ext_queries, ext_draws, ext_reads;
 static void bind_framebuffer(U target,U framebuffer) {
@@ -12,6 +13,7 @@ static void bind_framebuffer(U target,U framebuffer) {
     if (target == READ || target == 0x8D40u) read_binding = framebuffer;
 }
 static void get_integer(U pname,I *value) {
+    driver_gets++;
     switch (pname) {
     case DRAW_BINDING: *value = (I)draw_binding; break;
     case READ_BINDING: *value = (I)read_binding; break;
@@ -85,6 +87,22 @@ int main(void) {
     hook_FramebufferDrawBufferEXT(0,0xDEADu);
     assert(pending_error == 0x500 && draw_modes[0] == front_left && draw_modes[9] == COLOR0);
     assert(draw_binding == 3 && read_binding == 4 && ext_draws == 4 && ext_reads == 3);
+    resolve_symbol("glBindFramebuffer",(uintptr_t)bind_framebuffer);
+    resolve_symbol("glGetIntegerv",(uintptr_t)get_integer);
+    alias = 9;
+    draw_binding = 3;
+    read_binding = 4;
+    draw_valid = read_valid = 0;
+    hook_BindFramebuffer(DRAW,0);
+    driver_gets = 0;
+    I got = -1;
+    hook_GetIntegerv(DRAW_BINDING,&got);
+    assert(got == 0 && driver_gets == 0);
+    hook_GetIntegerv(READ_BINDING,&got);
+    assert(got == 4 && driver_gets == 1);
+    driver_gets = 0;
+    hook_GetIntegerv(READ_BINDING,&got);
+    assert(got == 4 && driver_gets == 0);
     puts("AFV_DIRECT_EXT_DISPATCH_PASS: distinct ABI, default selectors, explicit FBO isolation, bindings and driver errors");
     return 0;
 }

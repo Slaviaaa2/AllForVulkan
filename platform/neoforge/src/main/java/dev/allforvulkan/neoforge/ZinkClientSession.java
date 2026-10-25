@@ -14,6 +14,8 @@ public final class ZinkClientSession {
     private static ZinkPresenter presenter;
     private static boolean vsync = true;
     private static long window;
+    private static int observedWidth = -1, observedHeight = -1;
+    private static boolean observedIconified, observationInstalled;
     private ZinkClientSession() {}
     public static void open(long handle) {
         if (context != null) throw new IllegalStateException("Zink client already initialized");
@@ -36,6 +38,7 @@ public final class ZinkClientSession {
         }
         presenter = new ZinkPresenter(context, handle);
         presenter.setVsync(vsync);
+        if (observationInstalled) presenter.noteWindow(observedWidth, observedHeight, observedIconified);
         Initializer.LOGGER.info("AFV_ZINK_CLIENT_READY: frontend={}, Vulkan presentation device={}",
                 org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_RENDERER),
                 net.vulkanmod.vulkan.device.DeviceManager.deviceProperties.deviceNameString());
@@ -43,20 +46,55 @@ public final class ZinkClientSession {
     public static void present(long handle) {
         if (handle != window || presenter == null) throw new IllegalStateException("Wrong Zink presentation window");
         dev.allforvulkan.validation.GlDebugTrace.installIfRequested();
-        try { presenter.present(); }
+        try {
+            if (observationInstalled) presenter.noteWindow(observedWidth, observedHeight, observedIconified);
+            presenter.present();
+        }
         catch (RuntimeException | LinkageError failure) { BackendBootstrap.presentationFailed(failure); throw failure; }
+    }
+    /** Chains the callbacks installed by the end of window construction. Later frames reuse this cache. */
+    public static void observeWindow(long handle) {
+        if (handle == 0 || handle != window || observationInstalled) return;
+        var previousSize = org.lwjgl.glfw.GLFW.glfwSetFramebufferSizeCallback(handle, null);
+        org.lwjgl.glfw.GLFW.glfwSetFramebufferSizeCallback(handle, (observed, width, height) -> {
+            observedWidth = width;
+            observedHeight = height;
+            if (previousSize != null) previousSize.invoke(observed, width, height);
+        });
+        var previousIcon = org.lwjgl.glfw.GLFW.glfwSetWindowIconifyCallback(handle, null);
+        org.lwjgl.glfw.GLFW.glfwSetWindowIconifyCallback(handle, (observed, iconified) -> {
+            observedIconified = iconified;
+            if (previousIcon != null) previousIcon.invoke(observed, iconified);
+        });
+        try (var stack = MemoryStack.stackPush()) {
+            var width = stack.mallocInt(1); var height = stack.mallocInt(1);
+            org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(handle, width, height);
+            observedWidth = width.get(0);
+            observedHeight = height.get(0);
+            observedIconified = org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(handle, org.lwjgl.glfw.GLFW.GLFW_ICONIFIED) != 0;
+        }
+        observationInstalled = true;
+        if (presenter != null) presenter.noteWindow(observedWidth, observedHeight, observedIconified);
     }
     public static void prepareFrame() {
         if (context == null) return;
-        try (var stack = MemoryStack.stackPush()) {
-            var width = stack.mallocInt(1); var height = stack.mallocInt(1);
-            org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window, width, height);
-            if (width.get(0) > 0 && height.get(0) > 0 && (context.width() != width.get(0) || context.height() != height.get(0))) {
-                context.resize(width.get(0), height.get(0));
-                Initializer.LOGGER.info("AFV_ZINK_CLIENT_DRAWABLE: {}x{}, same GL context", context.width(), context.height());
+        int width = observedWidth, height = observedHeight;
+        if (!observationInstalled) {
+            try (var stack = MemoryStack.stackPush()) {
+                var widthBuffer = stack.mallocInt(1); var heightBuffer = stack.mallocInt(1);
+                org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window, widthBuffer, heightBuffer);
+                width = widthBuffer.get(0);
+                height = heightBuffer.get(0);
             }
         }
-        if (presenter != null) presenter.prepareDirectFrame();
+        if (width > 0 && height > 0 && (context.width() != width || context.height() != height)) {
+            context.resize(width, height);
+            Initializer.LOGGER.info("AFV_ZINK_CLIENT_DRAWABLE: {}x{}, same GL context", context.width(), context.height());
+        }
+        if (presenter != null) {
+            if (observationInstalled) presenter.noteWindow(width, height, observedIconified);
+            presenter.prepareDirectFrame();
+        }
     }
     public static void setVsync(boolean enabled) { vsync = enabled; if (presenter != null) presenter.setVsync(enabled); }
     public static long completedFrames() { return BackendBootstrap.zinkNative() ? ZinkNativeSession.completedSwaps() : presentedFrames(); }

@@ -506,13 +506,16 @@ A pack's fallback OpenGL result does not satisfy the separate Vulkan integration
 goal. The full copy pins the pack's own NeoForge/Iris/Sodium versions; the small
 Iris baseline uses its independent lock file.
 
-Opt-in benchmarks warm up the fixed-seed flat world, set a fixed camera and
-record RenderFrameEvent.Post intervals for the requested client ticks. JSON
-contains renderer, resolution, camera, render/simulation distances, vsync, frame
-limit, sample duration, average FPS and median/p95/p99 intervals. These include
-pacing/presentation, not GPU-only times. A single synthetic-scene run does not establish real-world modpack performance. Verify identical hardware/ICD and settings before
-comparing: Xephyr may expose llvmpipe to normal GL even while Vulkan uses the
-physical GPU. Such results cannot establish a Vulkan speedup.
+Opt-in benchmarks warm up the fixed-seed flat world and record RenderFrameEvent.Post
+intervals for the requested client ticks. `--benchmark-camera orbit` walks a
+fixed orbit after the world settles; the default camera stays at the spawn view.
+JSON contains renderer, resolution, camera, render/simulation distances, vsync,
+frame limit, sample duration, average FPS, and p1/median/p95/p99 intervals.
+These include pacing/presentation, not GPU-only times. A single synthetic-scene
+run does not establish real-world modpack performance. The desktop comparison is
+[BENCHMARK.md](BENCHMARK.md). Xephyr may expose llvmpipe to normal GL even while
+Vulkan uses the physical GPU, and its present time can dominate the sample.
+Such results cannot establish a Vulkan speedup.
 
 A dedicated X11 server may be used for isolated client tests. Set `DISPLAY` and
 `XAUTHORITY` for the test subprocess to match that server. A real window manager
@@ -633,25 +636,41 @@ the lock provenance in the launch/benchmark metadata. Use its existing
 FPS samples must still use the same documented scene/settings and no final-output
 readback. A different dependency pair is a separate profile, not an AFV speedup.
 
-## Experiment: overlap Vulkan presentation with GL frame production
+## Vulkan presentation overlapped with the next GL frame
 
-`-Dafv.experimentalAsyncPresent=true` (private launcher: `--async-present`) moves
-`vkQueuePresentKHR` onto an AFV-owned worker. After submitting the current transfer,
-the render thread can produce the next GL frame while the native presentation
-call runs. At the next presentation boundary it joins the prior result before
-any AFV queue submission, image acquisition, swapchain access or recreation.
-Only one native request may be outstanding. The worker builds its native structs
-on its own MemoryStack from captured scalar handles; no render-thread stack
-pointer crosses threads. GL calls, Iris passes and GL/Vulkan image ownership
-remain on the existing paths.
+The Zink client bridge runs `vkQueuePresentKHR` on an AFV-owned worker by default.
+After submitting the current transfer, the render thread can produce the next GL
+frame while the native presentation call runs. At the next presentation boundary
+it joins the prior result before any AFV queue submission, image acquisition,
+swapchain access, or recreation. Only one native request may be outstanding.
+The worker builds its native structs on its own MemoryStack from captured scalar
+handles; no render-thread stack pointer crosses threads. GL calls, Iris passes,
+and GL/Vulkan image ownership remain on the existing paths.
 
-The default is synchronous. Compare OFF/ON using the same JAR, profile, scene and
-short benchmark protocol. `asyncPresent` is recorded in launch and benchmark
-metadata. `AFV_PRESENT_DISPATCH_STATS` reports completed calls and cumulative
+`-Dafv.asyncPresent=false` (private launcher: `--sync-present`) forces the
+synchronous call. `-Dafv.experimentalAsyncPresent=true` (`--async-present`) is
+the older explicit ON switch and still wins over the default. An explicit
+property beats the legacy one. The frame-pipeline experiment already owns a
+worker, so it stays asynchronous. `asyncPresent` is recorded in launch and
+benchmark metadata: `false` for the sync switch, `true` for an explicit async
+request or the frame pipeline, and `default-on` when neither switch is set.
+
+Release frames do not call `glGetError`. That call flushes the GL stream.
+`--debug-gl` (`afv.debugGlClient`) restores the drain for diagnosis. Setup-time
+GL checks stay. `GlBlitScope` still reads scissor, sRGB, and the read buffer on
+the blit path because Iris and the indexed-state probe can change them; those
+queries are part of producing the same image, not a leftover per-frame poll.
+Window size and iconify state come from GLFW callbacks installed beside
+Minecraft's own callbacks. The first observation seeds the cache; a present that
+happens before that seed polls GLFW once.
+
+`AFV_PRESENT_DISPATCH_STATS` reports completed calls and cumulative
 native-call/join averages for the entire run (including startup/lifecycle stages),
 not GPU time or just the benchmark window. Native result handling stays on the
 render thread; only completed successful/suboptimal requests count as presented.
 The window-cycle probe drains pre-iconify work before measuring suspension.
+Compare sync and async with [BENCHMARK.md](BENCHMARK.md). A nested-server delta
+is not a desktop result.
 
 The [Vulkan presentation contract](https://docs.vulkan.org/refpages/latest/refpages/source/vkQueuePresentKHR.html)
 permits a blocking present call, making overlap a measurable hypothesis. The
