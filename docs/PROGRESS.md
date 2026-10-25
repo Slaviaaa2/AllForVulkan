@@ -55,7 +55,7 @@ Verified here, under Xvfb and llvmpipe: `AFV_SHADOW_PROBE_PASS: width=32 height=
 
 The property `afv.irisShadow` is forwarded and defaults to false. Nothing in the game reads it yet, so this run cannot enable a Vulkan shadow pass. The active renderer is unchanged. World draws stay on OpenGL for this probe and on Zink for a normal Iris launch.
 
-GitHub Actions still had no recorded runs. `.github/workflows/build.yml` now runs `./gradlew check` before `./gradlew build` on pull requests and pushes. That does not include the client harness.
+`.github/workflows/build.yml` runs `./gradlew check` before `./gradlew build` on pull requests and pushes. That does not include the client harness. A runner with no Vulkan driver gets `vkCreateInstance` error -9. Those headless device tasks skip unless `-Dafv.requireCompositeDevice=true`.
 
 ## Next
 
