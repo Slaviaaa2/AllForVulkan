@@ -142,6 +142,8 @@ def launch(instance, iris_shadow, force_fallback, mesh, timeout):
         require_varied(passed[-1])
         if iris_shadow and not force_fallback and 'AFV_IRIS_SHADOW_MESH' not in text:
             raise SystemExit('Vulkan did not replay a Sodium shadow mesh')
+        if iris_shadow and not force_fallback:
+            require_stable_mesh(text)
     else:
         require_constant(passed[-1])
     if 'AFV_IRIS_SHADOW_HOOK' not in text:
@@ -155,6 +157,19 @@ def launch(instance, iris_shadow, force_fallback, mesh, timeout):
     elif not iris_shadow and 'AFV_IRIS_SHADOW_PASS' in text:
         raise SystemExit('The shadow hook ran while afv.irisShadow was off')
     return log
+
+
+def require_stable_mesh(text):
+    """An early one-section match does not count once a later frame disagrees."""
+    last_pass = -1
+    last_mismatch = -1
+    for index, line in enumerate(text.splitlines()):
+        if 'AFV_IRIS_SHADOW_PASS' in line:
+            last_pass = index
+        if 'AFV_SHADOW_MESH_MISMATCH' in line:
+            last_mismatch = index
+    if last_mismatch > last_pass:
+        raise SystemExit('Shadow mesh replay mismatched after it had matched')
 
 
 def require_varied(line):

@@ -45,6 +45,13 @@ class ShadowProbeDiffTest(unittest.TestCase):
         self.assertIn('const int shadowMapResolution = 32;', text)
         self.assertIn('const vec4 shadowcolor0ClearColor', text)
 
+    def test_mesh_match_must_outlast_later_frames(self):
+        shadow_probe.require_stable_mesh('AFV_SHADOW_MESH_MISMATCH: early\nAFV_IRIS_SHADOW_PASS: ok\n')
+        with self.assertRaises(SystemExit):
+            shadow_probe.require_stable_mesh('AFV_IRIS_SHADOW_PASS: ok\nAFV_SHADOW_MESH_MISMATCH: later\n')
+        fragment = Path(__file__).resolve().parents[1] / 'tests/shaderpacks/AFV-Shadow-Mesh/shaders/shadow.fsh'
+        self.assertIn('const float shadowDistance = 32.0;', fragment.read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

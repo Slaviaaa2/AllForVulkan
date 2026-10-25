@@ -28,6 +28,7 @@ public final class ShadowMeshReplay {
     private static byte[] cached;
     private static int cachedGeneration = -1;
     private static int cachedSize;
+    private static int cachedVertices = -1;
     private static String cachedDetail = "";
     private static int clipLogs;
     private static int loggedVertices = -1;
@@ -41,7 +42,8 @@ public final class ShadowMeshReplay {
         ShadowMeshCapture.Snapshot snapshot = ShadowMeshCapture.snapshot();
         if (!ShadowMeshCapture.hasMatrices()) return new Image(true, null, "no shadow draw");
         if (snapshot.vertexCount() == 0) return new Image(true, null, "no shadow vertices");
-        if (cached != null && cachedGeneration == snapshot.generation() && cachedSize == size)
+        if (cached != null && cachedGeneration == snapshot.generation() && cachedSize == size
+                && cachedVertices == snapshot.vertexCount())
             return new Image(true, cached, cachedDetail);
         if (!readAtlas()) return new Image(true, null, "block atlas could not be read");
         int bits = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac") ? 4 : 8;
@@ -59,6 +61,7 @@ public final class ShadowMeshReplay {
         cached = rendered.rgba();
         cachedGeneration = snapshot.generation();
         cachedSize = size;
+        cachedVertices = snapshot.vertexCount();
         cachedDetail = rendered.detail() + ", sections=" + snapshot.draws().size() + ", stride=" + snapshot.stride();
         return new Image(true, cached, cachedDetail);
     }
