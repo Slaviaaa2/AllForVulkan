@@ -55,6 +55,36 @@ public final class FramePresentDispatcherChecks {
         closed.close(); closed.close();
         try { closed.submit(() -> 0); throw new AssertionError("Closed dispatcher accepted a request"); }
         catch (IllegalStateException expected) { }
+        var ringEntered = new CountDownLatch(1);
+        var ringRelease = new CountDownLatch(1);
+        var order = new java.util.concurrent.atomic.AtomicInteger();
+        try (var ring = new FramePresentDispatcher(true, 3)) {
+            try {
+                for (int slot = 0; slot < 3; slot++) {
+                    int expected = slot;
+                    ring.submit(() -> {
+                        require(order.getAndIncrement() == expected, "Consumer reordered ring jobs");
+                        if (expected == 0) { ringEntered.countDown(); await(ringRelease); }
+                        return expected;
+                    });
+                }
+                require(ringEntered.await(2, TimeUnit.SECONDS), "Ring worker missing");
+                require(ring.pendingCount() == 3 && !ring.completionReady(), "Producer did not retain three bounded jobs");
+                try { ring.submit(() -> 99); throw new AssertionError("Ring capacity exceeded"); }
+                catch (IllegalStateException expected) { }
+            } finally { ringRelease.countDown(); }
+            for (int slot = 0; slot < 3; slot++) require(ring.complete() == slot, "Collected ring out of order");
+            require(ring.pendingCount() == 0, "Ring slot retained after completion");
+        }
+        var drained = new java.util.concurrent.atomic.AtomicInteger();
+        var drain = new FramePresentDispatcher(true, 3);
+        var firstFailure = new IllegalStateException("first ring failure");
+        drain.submit(() -> { throw firstFailure; });
+        drain.submit(drained::incrementAndGet);
+        drain.submit(drained::incrementAndGet);
+        try { drain.close(); throw new AssertionError("Drain failure swallowed"); }
+        catch (IllegalStateException actual) { require(actual == firstFailure, "Drain replaced first failure"); }
+        require(drained.get() == 2, "Shutdown abandoned queued resource users");
         System.out.println("AFV_PRESENT_DISPATCH_PASS: sync/async threads, overlap, one pending request, failure propagation, interrupted drain, shutdown");
     }
     private static void await(CountDownLatch latch) {

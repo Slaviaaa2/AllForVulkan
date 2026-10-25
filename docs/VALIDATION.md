@@ -1053,3 +1053,95 @@ manifest.json,result.json}`、更新画面と対象metadataは
 このセクションは描画進行を変える性能実験の実装・比較であり、標準はOFFのまま。
 JVM引数`-Dafv.experimentalAsyncPresent=true`で試せる。描画本体と画像転送は同じ経路を
 保ち、効果があった仮説として保持する。全GPU・全packでの性能向上を示すものではない。
+
+## 実験: GL producerとVulkan転送consumerの3段リング（2026-10-25）
+
+表示APIだけをworkerへ移す前節の方式に加え、画像取得・fence待ち・転送submit・表示を
+まとめて1本のconsumerへ渡す方式を実装した。GL側は3枚の共有画像を順に使い、
+未完了jobを最大3件に制限して次のGL描画を先行させる。SharedImageのGL操作は所有する
+描画threadに残し、consumerへはnative handleの値を渡す。WSIが取得できない場合も、
+GL signalを消費して画像をGLへ返す記録済みcommandを実行する。
+
+実験用`afv.experimentalFramePipeline`で選択し、表示APIだけの非同期方式と同じJARで
+比較する。FPSには完了した実Vulkan表示数、破棄数、未完了job数を添える。producerの
+FPSだけが増えた場合を表示スループットの改善と誤認しない。dispatcherの時間は、この
+方式では画像取得・転送・表示job全体であり、前方式のnative present時間と区別する。
+
+最初の実装（未完了3件）を同一JARで表示だけの非同期方式と比較した。条件は前節と
+同じIris／Sodium最小構成、指定Complementary、固定scene／視点、960×540、距離12、
+VSyncなし、追加600 ticks待機、400 ticks計測、最終出力readbackなし。
+renderer／scene／待機／解像度／距離／VSync／frame制限／camera／display／focus／計測方式と
+JAR／MOD／shader／shader設定のhashが一致した。
+
+| 最初の同一JAR比較（各1回） | 平均描画FPS | 完了Vulkan表示/秒 | median ms | p95 ms | 破棄数 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 表示だけ非同期 | 60.77 | 60.82 | 16.28 | 19.44 | 0 |
+| 取得・転送・表示非同期、未完了3件 | 70.50 | 70.50 | 1.90 | 50.86 | 0 |
+
+平均は+16.01%だがp95時間は+161.69%悪化し、producer frameのまとまりが生じた。
+両方ともIris off→on／shader-only reload、resource reload、resize、iconify／復帰、
+VSync切替、実surface再作成、disconnect／正常終了は通過した。
+この結果を滑らかさの改善とは扱わず、次にGPU共有画像3枚とCPU未完了数を分離する
+実装を追加した。`afv.experimentalPipelineDepth=1|2|3`（launcher `--pipeline-depth`）で
+最大未完了jobを選択し、既定1件として同じworker構成で比較する。
+未完了数はGPU共有画像数を変更せず、描画threadが次の出力コピーを始める前の合流だけを
+変える。3枚を使い回すため、深さを下げても各slotのGPU semaphore／fence契約は保つ。
+
+最初のJAR SHA-256は`4e7c81785bfe850f8d8d1f13ac4dab3e6cd83b43decc65410145c61fff1fafb7`。
+証跡はローカル`frame-pipeline-{baseline,on}-{launch.log,client.log,preflight.log,
+manifest.json,benchmark.json}`、`frame-pipeline-depth3-comparison.json`。
+この測定は専用の入れ子X上の参考値で、通常desktopのDTFuel約80 FPSとは比較しない。
+完了表示数は`vkQueuePresentKHR`が成功／suboptimalを返した数であり、compositorや
+monitorが実際に表示した固有画像数や入力遅延を測定した値ではない。
+
+続いて先行量を独立設定できるJARをビルドし、表示だけの非同期方式→未完了1件→2件を
+同一JAR・上記と同じ条件で各1回比較した。条件とJAR／MOD／shader／設定hashは全件一致。
+
+| 先行量調整後の同一JAR比較 | 平均描画FPS | 完了Vulkan表示/秒 | median ms | p95 ms | 破棄数 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 表示だけ非同期 | 62.75 | 62.80 | 15.86 | 18.06 | 0 |
+| 取得・転送・表示非同期、未完了1件 | 62.00 | 62.05 | 15.84 | 19.23 | 0 |
+| 取得・転送・表示非同期、未完了2件 | 65.86 | 65.96 | 14.06 | 32.97 | 0 |
+
+1件は平均-1.19%／p95時間+6.50%、2件は平均+4.97%／p95時間+82.58%。
+1件では改善が確認できず、2件も平均と引き換えにフレーム間隔が悪化した。
+最初の3件比較とはJARが異なるため、二つのA/Bを合算した改善率は示さない。
+いずれもworld、resize、Iris off→on／shader-only reload、resource reload、iconify／復帰、
+VSync切替／復帰、実surface再作成、同一context／device／Iris維持、disconnect／正常終了が
+通過した。実験全体は標準OFFを維持し、有効時の先行量の既定を1件とする。
+追加の共有画像と深いqueueだけでは、滑らかさを伴う改善にならないという結果を得た。
+
+ビルド／baselineコンパイル、dispatcherの3件上限・FIFO実行／回収・例外後の全件drainを
+含む検査、配布JAR検査、launcher構文検査、差分空白検査は通過した。
+調整後JAR SHA-256は`98e610f923d2bcf553a13050fa429626392b59228d41827faf92b2d05a659059`。
+証跡はローカル`frame-pipeline-depth-build.log`、`frame-pipeline-depth-comparison.json`、
+`frame-pipeline-{depth-baseline,depth1,depth2}-{launch.log,client.log,preflight.log,
+manifest.json,benchmark.json}`。反復統計、通常desktop、DTFuel全構成のFPS比較は含まない。
+
+同じ調整後JARをDTFuel 0.1.10全204 MOD・NeoForge 21.1.251・指定Complementaryで、
+最大未完了3件・最終出力readback診断付きで検証した。AUTO→Vulkan、world、resize、
+Iris off→on／shader-only reload、全resource reload、実iconify／復帰、VSync切替／復帰、
+実surface再作成、同一GL context／VkDevice／有効Irisの維持、disconnectと正常終了を
+通過した。最終出力markerを3539回照合し、転送commandを7040回再利用（記録147個、
+所有権return用commandを含む）した。全実行ではproduced／presentedとも7084、破棄0。
+worker全jobの平均15.47 ms、合流待ち平均0.21 msは起動・診断・全切替を含むため、
+通常時のGPU時間やFPS改善率には使わない。元shader ZIPのSHA-256と9設定値の一致も
+確認した。既知のpack側producer GL警告は残り、全MOD機能・全GPUの完全互換は未証明。
+
+最初の全pack試験はsurface再作成後、完了報告前にexec process groupが終了143となった。
+原因は特定できず、正常終了や新しいゲームcrash reportは記録されていないため、
+その回を未完了として別保存した。再試験は実行寿命から分離した所有するwrapperで
+終了codeも保存し、launcherの`AFV_PRODUCTION_PASS: exit=0`と全完了markerを確認した。
+再試験補助scriptの文字置換ミスで起動前に構文errorになった試行は修正してから起動して
+おり、描画本体の変更・JAR再ビルドはしていない。
+
+各回のpack更新通知は現在の専用Minecraft window ID／PID／bounds／stackingを確認し、
+client領域だけを取得して表示された「Not now」で継続した。pack更新は行っていない。
+再試験のclient領域854×480では、worldの石・ガラス・葉・牛・手持ち・HUD／minimapを
+目視した。画像はresize／Iris-cycle途中のものなので、画像単独でshader有効状態は主張
+しない。指定packの有効状態はIris pipeline照合とcycleの検査で確認した。
+元pack・既存save・提供shaderは変更していない。
+
+証跡はローカル`dtfuel-frame-pipeline-{launch.log,client.log,preflight.log,manifest.json,
+result.json,launch-exit.json}`、対象metadata付き`dtfuel-frame-pipeline-{update-prompt,world}.png`。
+未完了回は`dtfuel-frame-pipeline-interrupted-*`に分離した。

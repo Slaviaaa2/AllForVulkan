@@ -30,6 +30,7 @@ public final class ClientSmokeTest {
     private static int resizeWidth, resizeHeight;
     private static boolean benchmarkFinished;
     private static long drawBaseline;
+    private static long benchmarkPresentBaseline, benchmarkDropBaseline;
     private static CompletableFuture<Void> reload;
     private static CompletableFuture<Void> scene;
     private static dev.allforvulkan.validation.IrisLifecycle irisCycle;
@@ -107,6 +108,8 @@ public final class ClientSmokeTest {
                 if (benchmarkUntil == 0) {
                     if (Boolean.getBoolean("afv.smokeIris")) dev.allforvulkan.validation.IrisAssertions.requireActive();
                     benchmarkUntil = ticks + duration;
+                    benchmarkPresentBaseline = ZinkClientSession.presentedFrames();
+                    benchmarkDropBaseline = ZinkClientSession.droppedFrames();
                     dev.allforvulkan.validation.FrameBenchmark.begin();
                 }
                 if (ticks < benchmarkUntil) return;
@@ -115,6 +118,13 @@ public final class ClientSmokeTest {
                 conditions.put("backendReason", BackendBootstrap.reason());
                 conditions.put("zinkClient", BackendBootstrap.zinkClient());
                 conditions.put("asyncPresent", ZinkClientSession.asynchronousPresentation());
+                conditions.put("framePipeline", ZinkClientSession.framePipeline());
+                conditions.put("pipelineDepth", ZinkClientSession.pipelineDepth());
+                if (BackendBootstrap.zinkClient()) {
+                    conditions.put("completedVulkanPresents", ZinkClientSession.presentedFrames() - benchmarkPresentBaseline);
+                    conditions.put("droppedVulkanFrames", ZinkClientSession.droppedFrames() - benchmarkDropBaseline);
+                    conditions.put("pendingVulkanJobs", ZinkClientSession.pendingFrames());
+                }
                 conditions.put("validationScene", Boolean.getBoolean("afv.smokeScene"));
                 conditions.put("warmupTicks", warmup);
                 conditions.put("width", client.getWindow().getWidth());

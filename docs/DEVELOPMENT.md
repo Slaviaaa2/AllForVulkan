@@ -668,3 +668,39 @@ The window-cycle probe drains pre-iconify work before measuring suspension.
 The [Vulkan presentation contract](https://docs.vulkan.org/refpages/latest/refpages/source/vkQueuePresentKHR.html)
 permits a blocking present call, making overlap a measurable hypothesis. The
 experiment does not execute concurrent host operations on AFV's queue/swapchain.
+
+## Experiment: three-slot GL producer / Vulkan transfer consumer
+
+`-Dafv.experimentalFramePipeline=true` (launcher: `--frame-pipeline`) extends the
+worker experiment to the entire acquire/transfer/present operation. Three shared
+images form a bounded FIFO ring. The render thread copies the current final GL
+output and captures scalar semaphore handles. One worker waits for that slot's
+fence, acquires a WSI image, submits the cached transfer, then presents. Before
+submitting another job the producer collects the oldest when the look-ahead limit
+is reached. `afv.experimentalPipelineDepth` (launcher `--pipeline-depth`) selects
+1–3 outstanding jobs, independently of the three-image GPU ring; the default is 1.
+Depth 3 experimentally increased average throughput but bunched producer frames,
+so a deeper CPU queue must not be equated with smooth frame delivery.
+All AFV queue and swapchain work stays on that consumer until
+the main thread drains it for resource recreation. GL calls and SharedImage's
+owner-thread methods stay on the render thread.
+
+If WSI acquisition times out or rejects the surface, a cached ownership-return
+command still consumes the GL signal and returns that image to GL. Otherwise the
+producer would block forever on its next ring traversal. Unpresented jobs are
+counted separately. Ring return commands are freed alongside transfer commands
+after draining jobs and the device. Readback diagnostic state and reuse counters
+are collected on the consumer with atomic totals; no GL diagnostic call runs there.
+
+The default remains the original synchronous path; `--async-present` alone is
+the one-job present-only experiment. Compare that experiment against
+`--frame-pipeline` with the same JAR. Benchmark metadata now includes the completed
+Vulkan-present delta, dropped-frame delta and pending-job count, so producer FPS
+can be checked against actual presentation throughput. Divide
+`completedVulkanPresents` by the reported sample seconds. The pipeline's dispatcher
+time is an entire acquire/transfer/present job, while the present-only mode times
+just the native present operation; those averages are not equivalent GPU timings.
+Completed presents count successful/suboptimal returns from `vkQueuePresentKHR`;
+they do not prove how many distinct images the compositor/monitor displayed, or
+measure input-to-photon latency. The producer frame-time percentiles remain a
+separate measure of CPU frame delivery.

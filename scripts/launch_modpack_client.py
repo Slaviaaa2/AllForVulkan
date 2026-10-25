@@ -67,8 +67,8 @@ def verify_client_mods(game, manifest):
 
 
 def launch(args):
-    if args.async_present and not args.zink_client:
-        raise ValueError('--async-present requires --zink-client')
+    if (args.async_present or args.frame_pipeline) and not args.zink_client:
+        raise ValueError('--async-present and --frame-pipeline require --zink-client')
     if args.iris_cycle and not (args.smoke and args.require_iris):
         raise ValueError('--iris-cycle requires --smoke --require-iris')
     if args.window_cycle and not (args.smoke and args.zink_client):
@@ -205,6 +205,8 @@ def launch(args):
         command += ['-Dafv.smokeFinalOutput=true']
     if args.async_present:
         command += ['-Dafv.experimentalAsyncPresent=true']
+    if args.frame_pipeline:
+        command += ['-Dafv.experimentalFramePipeline=true', '-Dafv.experimentalPipelineDepth=' + str(args.pipeline_depth)]
     if args.debug_gl:
         command += ['-Dafv.debugGlClient=true']
     if args.mesa_egl_vendor:
@@ -248,7 +250,9 @@ def launch(args):
         record['dependencyLock'] = manifest['dependency_lock']
     record['debugGlErrors'] = args.debug_gl
     record['finalOutputProbe'] = args.final_output_probe
-    record['asyncPresent'] = args.async_present
+    record['asyncPresent'] = args.async_present or args.frame_pipeline
+    record['framePipeline'] = args.frame_pipeline
+    record['pipelineDepth'] = args.pipeline_depth if args.frame_pipeline else 0
     record['irisCycle'] = args.iris_cycle
     record['windowCycle'] = args.window_cycle
     record['dimensionCycle'] = args.dimension_cycle
@@ -296,6 +300,8 @@ def launch(args):
         passed = passed and bool(re.search(r'AFV_BACKEND: requested=[A-Z]+, active=' + args.expect_backend + r',', text))
     if args.zink_client and args.smoke:
         passed = passed and 'AFV_ZINK_TRANSFER_REUSE_PASS' in text
+    if args.frame_pipeline:
+        passed = passed and f'AFV_FRAME_PIPELINE: slots=3, depth={args.pipeline_depth},' in text and 'AFV_FRAME_PIPELINE_STATS:' in text
     if args.benchmark_ticks > 0:
         benchmark = game / 'afv-benchmark.json'
         if 'AFV_BENCHMARK_RESULT:' not in text or not benchmark.is_file():
@@ -334,6 +340,8 @@ if __name__ == '__main__':
     parser.add_argument('--scene', action='store_true', help='Build a shader validation scene in the new smoke world')
     parser.add_argument('--final-output-probe', action='store_true', help='Verify a last default-framebuffer draw reaches the Vulkan shared image')
     parser.add_argument('--async-present', action='store_true', help='Experimental: overlap native Vulkan presentation with the next GL frame')
+    parser.add_argument('--frame-pipeline', action='store_true', help='Experimental: three GL producer slots with worker-owned Vulkan acquire/transfer/present')
+    parser.add_argument('--pipeline-depth', type=int, choices=(1, 2, 3), default=1, help='Maximum outstanding Vulkan jobs in frame-pipeline mode (default: 1)')
     parser.add_argument('--debug-gl', action='store_true', help='Log bounded synchronous GL errors for client-bridge diagnosis')
     shader = parser.add_mutually_exclusive_group()
     shader.add_argument('--shader-fixture', type=Path)

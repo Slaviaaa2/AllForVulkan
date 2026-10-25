@@ -1,21 +1,27 @@
 package dev.allforvulkan.bridge;
 
 import java.util.Map;
+import java.util.ArrayDeque;
 import java.util.concurrent.*;
 import java.util.function.IntSupplier;
 
-/** One outstanding native present, overlapping only the next frame's GL work.
- * Complete it before touching the AFV queue/swapchain or destroying resources. */
+/** Ordered, bounded jobs on one native queue worker. The render thread owns
+ * collection; drain every job before accessing/recreating its resources. */
 public final class FramePresentDispatcher implements AutoCloseable {
     private record Result(int code, long nativeNanos) {}
     private final Thread owner = Thread.currentThread();
     private final ExecutorService worker;
-    private Future<Result> pending;
-    private Result immediate;
+    private final ArrayDeque<Future<Result>> pending = new ArrayDeque<>();
+    private final int capacity;
     private boolean closed;
     private long calls, nativeNanos, joinNanos;
 
     public FramePresentDispatcher(boolean asynchronous) {
+        this(asynchronous, 1);
+    }
+    public FramePresentDispatcher(boolean asynchronous, int capacity) {
+        if (capacity < 1 || (!asynchronous && capacity != 1)) throw new IllegalArgumentException("Invalid presentation capacity");
+        this.capacity = capacity;
         worker = asynchronous ? Executors.newSingleThreadExecutor(task -> {
             var thread = new Thread(task, "AFV-Present");
             thread.setDaemon(true);
@@ -24,38 +30,39 @@ public final class FramePresentDispatcher implements AutoCloseable {
     }
 
     public boolean asynchronous() { return worker != null; }
+    public int pendingCount() { assertOwner(); return pending.size(); }
+    public boolean completionReady() { assertOwner(); return !pending.isEmpty() && pending.peekFirst().isDone(); }
 
     public void submit(IntSupplier nativePresent) {
         assertOwner();
-        if (closed || pending != null || immediate != null)
+        if (closed || pending.size() >= capacity)
             throw new IllegalStateException("Present dispatcher closed or still pending");
-        if (worker == null) immediate = invoke(nativePresent);
-        else pending = worker.submit(() -> invoke(nativePresent));
+        pending.addLast(worker == null ? CompletableFuture.completedFuture(invoke(nativePresent))
+                : worker.submit(() -> invoke(nativePresent)));
     }
 
     /** Returns a completed VkResult, or null if no request is outstanding. */
     public Integer complete() {
         assertOwner();
-        Result result = immediate;
-        immediate = null;
-        if (pending != null) {
+        if (pending.isEmpty()) return null;
+        var next = pending.removeFirst();
+        Result result;
+        {
             long start = System.nanoTime();
             boolean interrupted = false;
             try {
                 // Queue/swapchain resources cannot be released until the native
                 // call actually ends. Restore interruption after draining it.
                 for (;;) {
-                    try { result = pending.get(); break; }
+                    try { result = next.get(); break; }
                     catch (InterruptedException retry) { interrupted = true; }
                 }
             } catch (ExecutionException failure) { throw propagate(failure.getCause()); }
             finally {
-                pending = null;
-                joinNanos += System.nanoTime() - start;
+                if (worker != null) joinNanos += System.nanoTime() - start;
                 if (interrupted) Thread.currentThread().interrupt();
             }
         }
-        if (result == null) return null;
         calls++;
         nativeNanos += result.nativeNanos();
         return result.code();
@@ -63,7 +70,7 @@ public final class FramePresentDispatcher implements AutoCloseable {
 
     public Map<String, Object> statistics() {
         assertOwner();
-        return Map.of("mode", asynchronous() ? "async" : "sync", "calls", calls,
+        return Map.of("mode", asynchronous() ? "async" : "sync", "calls", calls, "capacity", capacity,
                 "nativeAverageMs", calls == 0 ? 0d : nativeNanos / (calls * 1_000_000d),
                 "joinAverageMs", calls == 0 ? 0d : joinNanos / (calls * 1_000_000d));
     }
@@ -83,7 +90,16 @@ public final class FramePresentDispatcher implements AutoCloseable {
     @Override public void close() {
         assertOwner();
         if (closed) return;
-        try { complete(); }
-        finally { closed = true; if (worker != null) worker.shutdown(); }
+        Throwable failure = null;
+        try {
+            while (!pending.isEmpty()) {
+                try { complete(); }
+                catch (RuntimeException | Error next) {
+                    if (failure == null) failure = next;
+                    else if (failure != next) failure.addSuppressed(next);
+                }
+            }
+        } finally { closed = true; if (worker != null) worker.shutdown(); }
+        if (failure != null) throw propagate(failure);
     }
 }

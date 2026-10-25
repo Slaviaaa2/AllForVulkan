@@ -58,6 +58,8 @@ neoForge {
             systemProperty 'afv.smokeScene', System.getProperty('afv.smokeScene', 'false')
             systemProperty 'afv.smokeFinalOutput', System.getProperty('afv.smokeFinalOutput', 'false')
             systemProperty 'afv.experimentalAsyncPresent', System.getProperty('afv.experimentalAsyncPresent', 'false')
+            systemProperty 'afv.experimentalFramePipeline', System.getProperty('afv.experimentalFramePipeline', 'false')
+            systemProperty 'afv.experimentalPipelineDepth', System.getProperty('afv.experimentalPipelineDepth', '1')
             systemProperty 'afv.debugGlClient', System.getProperty('afv.debugGlClient', 'false')
             systemProperty 'afv.validationEgl', System.getProperty('afv.validationEgl', 'false')
             systemProperty 'afv.validationPack', System.getProperty('afv.validationPack', 'false')

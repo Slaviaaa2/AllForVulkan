@@ -58,6 +58,10 @@ public final class ZinkClientSession {
     public static void setVsync(boolean enabled) { vsync = enabled; if (presenter != null) presenter.setVsync(enabled); }
     public static long presentedFrames() { return presenter == null ? 0 : presenter.presentedFrames(); }
     public static boolean asynchronousPresentation() { return presenter != null && presenter.asynchronousPresentation(); }
+    public static boolean framePipeline() { return presenter != null && presenter.framePipeline(); }
+    public static int pipelineDepth() { return presenter == null ? 0 : presenter.pipelineDepth(); }
+    public static long droppedFrames() { return presenter == null ? 0 : presenter.droppedFrames(); }
+    public static int pendingFrames() { return presenter == null ? 0 : presenter.pendingFrames(); }
     public static void awaitPresentation() { if (presenter != null) presenter.awaitPresentation(); }
     public static long verifiedFinalOutputFrames() { return presenter == null ? 0 : presenter.verifiedFinalOutputFrames(); }
     public static long reusedTransferFrames() { return presenter == null ? 0 : presenter.reusedTransferFrames(); }
