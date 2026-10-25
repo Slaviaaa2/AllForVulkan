@@ -25,7 +25,7 @@ Iris/Sodiumとの互換性は開発中です。診断機能と再現手順は[�
 
 **Zink直接表示（実験）** は、設定の「表示経路」または `-Dafv.presentation=NATIVE` で選択できます。Zink自身がウィンドウへ表示し、AFV側の別Vulkanデバイス・共有画像・追加の画面転送を省きます。Iris等のGL描画は維持します。既定は従来のAFV共有表示です。速度差は環境ごとの比較測定が必要です。[詳細と測定方法](docs/DEVELOPMENT.md#experiment-native-zink-window-presentation)。
 
-性能実験として、JVM引数 `-Dafv.experimentalAsyncPresent=true` でVulkan表示処理を専用スレッドへ移し、その間に次のGLフレームを進められます。Zinkクライアント経路用で、標準はOFFです。比較には同一JAR・同一描画条件を使用してください。測定方法は[検証ガイド](docs/VALIDATION.md)を参照してください。
+Zinkクライアントの共有表示では、`vkQueuePresentKHR` を専用スレッドで前フレームの表示と次のGLフレームに重ねます。標準はONです。同期に戻すには `-Dafv.asyncPresent=false`、検証launcherでは `--sync-present` を使います。`-Dafv.experimentalAsyncPresent=true` は明示的にONを記録する旧指定です。比較は同一JAR・同一描画条件で、実デスクトップの手順 [BENCHMARK.md](docs/BENCHMARK.md) に従ってください。ネストしたXサーバ上の数値は効果の根拠にしません。
 
 さらに `-Dafv.experimentalFramePipeline=true`（検証launcherでは `--frame-pipeline`）で、画像取得・転送・表示をまとめて専用スレッドへ渡し、3枚の共有画像でGL描画を先行させる実験を選べます。この設定は非同期表示も含みます。未完了jobは既定で1件、`-Dafv.experimentalPipelineDepth=1|2|3`（`--pipeline-depth`）で比較できます。標準はOFFで、比較測定には描画FPSと実際に完了したVulkan表示数の両方を記録します。
 
@@ -35,8 +35,12 @@ Iris/Sodiumとの互換性は開発中です。診断機能と再現手順は[�
 
 Linux向け実験機能 `-Dafv.zinkInterop=true` は別の経路で、AFV独自の地形描画からワールドの色と深度をGPU共有画像でZinkへ渡し、GLSL後処理からVulkanへ戻します。処理位置はワールド描画後・手元の深度クリアとGUI描画の前です。`-Dafv.zinkEffect=invert` / `depth` で診断用の色反転／深度表示を選べます。こちらの経路にIrisの地形・影・複数passを統合する機能は開発中です。**Iris全機能・全シェーダーパック・全GPUの完全互換は未確認**です。
 
+設定の「シェーダー経路」または `-Dafv.shaderBackend=direct` は、Zinkを通さないフレームグラフの実験スイッチです。現在の実装はスケジューラと、ゲーム外の合成チェーンまでです。Irisのパスはまだ載っていないため、選んでも現行経路へ戻して理由を記録します。設計は [DIRECT_BACKEND.md](docs/DIRECT_BACKEND.md) を参照してください。
+
 - [ビルド・起動方法と現状](docs/DEVELOPMENT.md)
 - [検証ガイド](docs/VALIDATION.md)
+- [デスクトップ比較測定](docs/BENCHMARK.md)
+- [直接フレームグラフの設計](docs/DIRECT_BACKEND.md)
 - [ソースの由来とライセンス](NOTICE.md)
 - [開発計画](PLAN.md)
 - [共通コア・マルチローダー設計](ARCHITECTURE.md)

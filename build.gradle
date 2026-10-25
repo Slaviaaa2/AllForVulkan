@@ -232,3 +232,5 @@ tasks.register('verifyMesaVendors', JavaExec) {
     mainClass = 'dev.allforvulkan.neoforge.MesaVendorChecks'
 }
 tasks.named('check') { dependsOn 'verifyMesaVendors' }
+tasks.named('check') { dependsOn ':native-bridge:verifyFrameGraph' }
+tasks.named('check') { dependsOn ':native-bridge:verifyCompositeChain' }

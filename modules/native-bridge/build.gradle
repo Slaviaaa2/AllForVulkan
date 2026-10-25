@@ -39,6 +39,21 @@ tasks.register('verifyPresentDispatch', JavaExec) {
     mainClass = 'dev.allforvulkan.bridge.FramePresentDispatcherChecks'
 }
 tasks.named('check') { dependsOn 'verifyPresentDispatch' }
+tasks.register('verifyFrameGraph', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.framegraph.FrameGraphChecks'
+}
+tasks.register('verifyCompositeChain', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.framegraph.CompositeChainChecks'
+    systemProperty 'org.lwjgl.system.stackSize', '1024'
+    systemProperty 'afv.requireCompositeDevice', System.getProperty('afv.requireCompositeDevice', 'false')
+    systemProperty 'afv.compositeDevice', System.getProperty('afv.compositeDevice', '')
+    // Leave VK_ICD_FILENAMES to the machine. Forcing lavapipe here would hide the owner's GPU.
+}
+tasks.named('check') { dependsOn 'verifyFrameGraph', 'verifyCompositeChain' }
 
 // Optional direct-output router; other platforms retain the ordinary copy path.
 if (System.getProperty('os.name').toLowerCase().contains('linux') &&

@@ -1,6 +1,7 @@
 package dev.allforvulkan.neoforge;
 
 import dev.allforvulkan.bridge.VulkanSupport;
+import dev.allforvulkan.framegraph.ShaderBackendSelection;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.loading.FMLLoader;
 import org.apache.logging.log4j.LogManager;
@@ -17,10 +18,13 @@ import java.util.stream.Collectors;
 public final class BackendBootstrap {
     public enum Mode { AUTO, VULKAN, OPENGL }
     public enum Presentation { BRIDGE, NATIVE }
+    public enum ShaderBackend { ZINK, DIRECT }
     private static final Set<String> BASE_MODS = Set.of("minecraft", "neoforge", "allforvulkan");
     private static boolean initialized, vulkan, zinkClient, zinkNative, presentationFailure;
     private static Mode requested = Mode.AUTO;
     private static Presentation presentation = Presentation.BRIDGE;
+    private static ShaderBackend shaderBackend = ShaderBackend.ZINK;
+    private static ShaderBackendSelection.Decision shaderDecision = ShaderBackendSelection.choose("zink", false);
     private static String reason = "Not initialized";
     private static Path config, pending;
     private BackendBootstrap() {}
@@ -38,16 +42,20 @@ public final class BackendBootstrap {
             String value = System.getProperty("afv.backend", settings.getProperty("backend", "AUTO"));
             requested = Mode.valueOf(value.trim().toUpperCase(Locale.ROOT));
             presentation = Presentation.valueOf(System.getProperty("afv.presentation", settings.getProperty("presentation", "BRIDGE")).trim().toUpperCase(Locale.ROOT));
+            shaderBackend = ShaderBackend.valueOf(System.getProperty("afv.shaderBackend", settings.getProperty("shaderBackend", "ZINK")).trim().toUpperCase(Locale.ROOT));
+            shaderDecision = ShaderBackendSelection.choose(shaderBackend.name(), false);
             if (requested == Mode.OPENGL) { reason = "OpenGL selected in settings"; return; }
             Set<String> mods = FMLLoader.getLoadingModList().getMods().stream().map(mod -> mod.getModId()).collect(Collectors.toSet());
             // Do not replace a third-party mod's terrain/GL hooks with the
             // native renderer. Preserve the existing client pipeline and let
             // the real GL driver translate it, including unfamiliar mods.
             boolean moddedClient = mods.stream().anyMatch(mod -> !BASE_MODS.contains(mod));
+            shaderDecision = ShaderBackendSelection.choose(shaderBackend.name(), moddedClient);
             boolean clientBridge = Boolean.getBoolean("afv.zinkClient") || moddedClient || presentation == Presentation.NATIVE;
             boolean nativeWindow = clientBridge && presentation == Presentation.NATIVE;
+            boolean asyncForced = "true".equalsIgnoreCase(System.getProperty("afv.asyncPresent")) || Boolean.getBoolean("afv.experimentalAsyncPresent");
             if (nativeWindow && (Boolean.getBoolean("afv.experimentalDirectOutput") || Boolean.getBoolean("afv.experimentalFramePipeline")
-                    || Boolean.getBoolean("afv.experimentalAsyncPresent") || Boolean.getBoolean("afv.smokeFinalOutput")))
+                    || asyncForced || Boolean.getBoolean("afv.smokeFinalOutput")))
                 throw new IllegalArgumentException("Native Zink presentation cannot use AFV bridge experiments or bridge readback");
             if (net.neoforged.fml.loading.FMLConfig.getBoolConfigValue(net.neoforged.fml.loading.FMLConfig.ConfigValue.EARLY_WINDOW_CONTROL)) {
                 reason = "OpenGL selected: save Auto or Vulkan in AFV settings and restart to prepare the Vulkan window";
@@ -90,6 +98,8 @@ public final class BackendBootstrap {
             reason = "OpenGL fallback: " + failure.getClass().getSimpleName() + ": " + failure.getMessage();
         } finally {
             LogManager.getLogger("AllForVulkan").info("AFV_BACKEND: requested={}, active={}, reason={}", requested, vulkan || zinkClient || zinkNative ? "Vulkan" : "OpenGL", reason);
+            LogManager.getLogger("AllForVulkan").info("AFV_SHADER_BACKEND: requested={}, active={}, coverage={}, fallback={}",
+                    shaderDecision.requested(), shaderDecision.active(), shaderDecision.coverage(), shaderDecision.fallback());
         }
     }
 
@@ -98,17 +108,23 @@ public final class BackendBootstrap {
     public static boolean zinkNative() { initialize(); return zinkNative; }
     public static boolean usesZink() { initialize(); return zinkClient || zinkNative; }
     public static Presentation presentation() { initialize(); return presentation; }
+    public static ShaderBackend shaderBackend() { initialize(); return shaderBackend; }
+    public static String shaderBackendRequested() { initialize(); return shaderDecision.requested(); }
+    public static String shaderBackendActive() { initialize(); return shaderDecision.active(); }
+    public static String shaderBackendFallback() { initialize(); return shaderDecision.fallback(); }
     public static boolean usesVulkan() { initialize(); return vulkan || zinkClient || zinkNative; }
     public static Mode requested() { initialize(); return requested; }
     public static String reason() { initialize(); return reason; }
 
-    public static void save(Mode mode) throws IOException { save(mode, presentation()); }
-    public static void save(Mode mode, Presentation selectedPresentation) throws IOException {
+    public static void save(Mode mode) throws IOException { save(mode, presentation(), shaderBackend()); }
+    public static void save(Mode mode, Presentation selectedPresentation) throws IOException { save(mode, selectedPresentation, shaderBackend()); }
+    public static void save(Mode mode, Presentation selectedPresentation, ShaderBackend selectedShader) throws IOException {
         initialize();
         Properties settings = new Properties();
         if (Files.isRegularFile(config)) try (Reader input = Files.newBufferedReader(config)) { settings.load(input); }
         settings.setProperty("backend", mode.name());
         settings.setProperty("presentation", selectedPresentation.name());
+        settings.setProperty("shaderBackend", selectedShader.name());
         Files.createDirectories(config.getParent());
         Path temporary = Files.createTempFile(config.getParent(), "afv-backend-", ".tmp");
         try {
