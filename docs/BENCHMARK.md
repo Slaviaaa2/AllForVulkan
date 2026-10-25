@@ -71,7 +71,7 @@ Each client log and `afv-benchmark.json` is copied into `round-<n>-<route>/` bef
 
 - AFV bridge average FPS within 3% of `zink-gl`: presentation is not the bottleneck on that machine.
 - Native GL more than 15% faster than both `zink-gl` and `afv-bridge`: the gap is GL translation, which the presentation path does not remove.
-- `afv-direct` matching `afv-bridge`: expected. Coverage `scheduled:...` means those pack programs were recognized. Coverage `compiled:...` means those fixed shadow and gbuffer programs produced SPIR-V and were not submitted. World draws, and every program listed as unsupported or not compiled, still run on Zink. A large "direct" win in this build is a measurement bug.
+- `afv-direct` matching `afv-bridge`: expected. Coverage `scheduled:...` means those pack programs were recognized. Coverage `compiled:...` means those fixed shadow and gbuffer programs produced SPIR-V. A headless check can draw them; the game does not. World draws, and every program listed as unsupported or not compiled, still run on Zink. A large "direct" win in this build is a measurement bug.
 
 A/B the direct request against the current bridge without the other routes:
 

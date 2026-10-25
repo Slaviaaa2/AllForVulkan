@@ -59,7 +59,7 @@ The executor prefers a device named by `afv.compositeDevice`. Otherwise it takes
 - No third-party mod is loaded. The slice is not the native terrain renderer, so the current renderer stays.
 - Iris or another mod is loaded and the shader pack has no supported program. Coverage stays `composite-chain`.
 - The pack has supported programs, and none of them are the fixed texture×tint shadow or gbuffer program. Coverage is `scheduled:` plus those program names. Unsupported programs are named in the fallback string. World draws still run on Zink, so the client does not switch renderers.
-- Some shadow or gbuffer programs are exactly that fixed program (`ftransform`, `gl_MultiTexCoord0`, `gl_Color`, `texture2D(gtexture) * tint`). Those compile to SPIR-V. Coverage is `compiled:` plus their names. `final`, composites, and every other shape are listed after `not compiled:`. A shaderc error drops only that program. World draws still run on Zink. The SPIR-V is not submitted.
+- Some shadow or gbuffer programs are exactly that fixed program (`ftransform`, `gl_MultiTexCoord0`, `gl_Color`, `texture2D(gtexture) * tint`). Those compile to SPIR-V. Coverage is `compiled:` plus their names. `final`, composites, and every other shape are listed after `not compiled:`. A shaderc error drops only that program. World draws still run on Zink. The client does not submit the SPIR-V.
 
 The pack reader uses `config/iris.properties` and the file under `shaderpacks/`. A missing pack, `enableShaders=false`, or an unreadable zip leaves the plan empty and keeps the previous fallback. The reader does not follow paths outside `shaderpacks/`.
 
@@ -73,6 +73,8 @@ The fallback string is the honest label. A benchmark route that requested `direc
 
 `./gradlew :native-bridge:verifyIrisSubset` compiles the AFV-Smoke shadow and gbuffer programs with shaderc and checks the SPIR-V. Programs outside that fixed source stay uncompiled. It does not create a Vulkan device.
 
+`./gradlew :native-bridge:verifyIrisSubsetDraw` runs those three programs on a private Vulkan device. Each one samples a 1×1 texture `(64, 128, 192, 255)` with vertex tint `0.5` and must read back `(32, 64, 96, 255)`. An empty program in the same list is reported and does not cancel the others. A missing device skips unless `afv.requireCompositeDevice=true`. This is not an FPS sample, and it does not replace Iris draws in the game.
+
 Release builds of the existing Zink client no longer call `glGetError` per frame. `GlBlitScope` still queries scissor, sRGB, and the read buffer because Iris and the indexed-state probe can change them; those queries are correctness, not a missed optimization. Async present defaults on for the bridge. `--sync-present` or `-Dafv.asyncPresent=false` turns it off. Frame-pipeline depth above 1 stays off unless the frame-pipeline experiment is explicitly enabled.
 
 ## Remaining roadmap
@@ -80,7 +82,7 @@ Release builds of the existing Zink client no longer call `glGetError` per frame
 Effort below is the size of the component, not a calendar estimate.
 
 1. **Done in this change.** Scheduler, barriers, layout tracking, uniform ring, pipeline library, descriptor cache, headless composite execution, and the fallback flag.
-2. **Next, and larger.** Capture one pinned Iris version at pass boundaries and run the shadow pass on this graph. Terrain draws may stay on GL. This is a hybrid: one shadow framebuffer, its program, and its barriers, with the rest of the frame still produced by Zink. It needs a stable Iris hook for that version only.
+2. **Next, and larger.** The fixed shadow/gbuffer program already draws a stand-in triangle on a private device. Capturing one pinned Iris version at pass boundaries is what would feed that program real meshes. Terrain draws may stay on GL. This is a hybrid: one shadow framebuffer, its program, and its barriers, with the rest of the frame still produced by Zink. It needs a stable Iris hook for that version only. Cancelling Iris's shadow pass without writing the same shadow map breaks the pack, so an absent hook keeps Zink.
 3. **Largest capture.** Sodium and gbuffer draws. Retarget the draw to the graph's pipelines, or capture the draw inputs. This is not a per-call GL translator. It is the terrain vertex path, materials, and the Iris gbuffer programs.
 4. **Composite and deferred chain.** Translate the pack's fullscreen GLSL with the shaderc dependency already in the build. The merger in this scheduler already groups consecutive fullscreen passes. Complementary's composite cost would move here, after the programs and their textures are real inputs.
 5. **SSBOs, storage images, and compute dispatches.** Required for packs that leave the graphics-only composite shape. The graph's kinds and uses name them; the executor does not record them yet.

@@ -236,3 +236,4 @@ tasks.named('check') { dependsOn ':native-bridge:verifyFrameGraph' }
 tasks.named('check') { dependsOn ':native-bridge:verifyCompositeChain' }
 tasks.named('check') { dependsOn ':native-bridge:verifyIrisPackPlan' }
 tasks.named('check') { dependsOn ':native-bridge:verifyIrisSubset' }
+tasks.named('check') { dependsOn ':native-bridge:verifyIrisSubsetDraw' }

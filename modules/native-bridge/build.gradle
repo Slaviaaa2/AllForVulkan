@@ -69,6 +69,15 @@ tasks.register('verifyIrisSubset', JavaExec) {
     mainClass = 'dev.allforvulkan.framegraph.IrisSubsetChecks'
 }
 tasks.named('check') { dependsOn 'verifyIrisSubset' }
+tasks.register('verifyIrisSubsetDraw', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.framegraph.IrisSubsetPassChecks'
+    systemProperty 'org.lwjgl.system.stackSize', '1024'
+    systemProperty 'afv.requireCompositeDevice', System.getProperty('afv.requireCompositeDevice', 'false')
+    systemProperty 'afv.compositeDevice', System.getProperty('afv.compositeDevice', '')
+}
+tasks.named('check') { dependsOn 'verifyIrisSubsetDraw' }
 
 // Optional direct-output router; other platforms retain the ordinary copy path.
 if (System.getProperty('os.name').toLowerCase().contains('linux') &&
