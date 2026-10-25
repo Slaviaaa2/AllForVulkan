@@ -53,10 +53,27 @@ Iris does not read `shadowMapResolution` from `shaders.properties`. Without a sh
 
 Verified here, under Xvfb and llvmpipe: `AFV_SHADOW_PROBE_PASS: width=32 height=32 format=RGBA hook=false file=afv-shadow-off.rgba nonzero=1024/1024 center=128,64,192,255`. No crash. `./gradlew :verifyShadowImage` checks the center-half compare. The client harness is not a GitHub Actions job. A warm run finished in under a minute; the script still allows 45 minutes. No FPS.
 
-The property `afv.irisShadow` is forwarded and defaults to false. Nothing in the game reads it yet, so this run cannot enable a Vulkan shadow pass. The active renderer is unchanged. World draws stay on OpenGL for this probe and on Zink for a normal Iris launch.
+The property `afv.irisShadow` is forwarded and defaults to false. This iteration does not upload a Vulkan image. The active renderer is unchanged. World draws stay on OpenGL for this probe and on Zink for a normal Iris launch.
 
-`.github/workflows/build.yml` runs `./gradlew check` before `./gradlew build` on pull requests and pushes. That does not include the client harness. A runner with no Vulkan driver gets `vkCreateInstance` error -9. Those headless device tasks skip unless `-Dafv.requireCompositeDevice=true`.
+`.github/workflows/build.yml` runs `./gradlew check` before `./gradlew build`. The client harness is not in that job. A runner with no Vulkan ICD gets `vkCreateInstance` error -9, and those device tasks skip unless `-Dafv.requireCompositeDevice=true`. PR #6's Actions run passed after that skip.
+
+## Iteration 6 — Vulkan shadow color, flag off by default
+
+`afv.irisShadow` defaults off. The config key `irisShadow` is the same switch, and the system property wins. The hook does not cancel Iris's shadow pass.
+
+With the flag on, a private Vulkan device draws a 32×32 image of `(128, 64, 192, 255)` (AFV-Shadow's clear color) and caches those pixels. The hook reads `shadowcolor0`. It uploads only when the center half already matches within tolerance 8. A mismatch, a forced fallback, or a missing device leaves Iris's GL image in place.
+
+`ShadowRenderer.renderShadows` was not entered in this Sodium run, so that mixin never ran. The hook is `IrisRenderingPipeline.renderShadows` plus the client frame event, which is the call the harness observed. The active renderer is still OpenGL for this probe and Zink for a normal Iris launch. World draws are not captured.
+
+Verified here, under Xvfb and llvmpipe:
+
+- Flag off: `AFV_IRIS_SHADOW_HOOK`, no pass line, center `(128, 64, 192, 255)`.
+- Flag on: an early `AFV_IRIS_SHADOW_FALLBACK: center mismatch`, then `AFV_IRIS_SHADOW_PASS: device=llvmpipe (LLVM 20.1.2, 256 bits), size=32`. Center diff against the off image was 0/256.
+- Forced fallback: `AFV_IRIS_SHADOW_FALLBACK: forced`, no pass line, center diff 0/256.
+- `./gradlew :native-bridge:verifyShadowConstant -Dafv.requireCompositeDevice=true` read the same constant back from lavapipe.
+
+No FPS. Real Sodium meshes are still later. Complementary is not this pack, so a center mismatch keeps its GL shadow.
 
 ## Next
 
-Put an Iris `renderShadows` hook behind `afv.irisShadow`, still defaulting off. When the flag is on, draw the same constant at the shadow resolution on Vulkan and upload it only if the center already matches. A mismatch or a device failure leaves Iris's GL image in place. Do not cancel Iris's shadow pass. The probe's on and diff modes are the check. Real Sodium meshes are still later.
+Capture one real shadow mesh from the pinned Iris/Sodium pair and feed it to the subset draw. Until that write matches a pack that is not a constant clear, keep the flag off and do not cancel Iris's shadow pass.

@@ -24,6 +24,7 @@ public final class BackendBootstrap {
     private static Mode requested = Mode.AUTO;
     private static Presentation presentation = Presentation.BRIDGE;
     private static ShaderBackend shaderBackend = ShaderBackend.ZINK;
+    private static boolean irisShadow;
     private static ShaderBackendSelection.Decision shaderDecision = ShaderBackendSelection.choose("zink", false);
     private static String reason = "Not initialized";
     private static Path config, pending;
@@ -43,6 +44,9 @@ public final class BackendBootstrap {
             requested = Mode.valueOf(value.trim().toUpperCase(Locale.ROOT));
             presentation = Presentation.valueOf(System.getProperty("afv.presentation", settings.getProperty("presentation", "BRIDGE")).trim().toUpperCase(Locale.ROOT));
             shaderBackend = ShaderBackend.valueOf(System.getProperty("afv.shaderBackend", settings.getProperty("shaderBackend", "ZINK")).trim().toUpperCase(Locale.ROOT));
+            irisShadow = System.getProperty("afv.irisShadow") != null
+                    ? Boolean.parseBoolean(System.getProperty("afv.irisShadow"))
+                    : Boolean.parseBoolean(settings.getProperty("irisShadow", "false"));
             shaderDecision = ShaderBackendSelection.choose(shaderBackend.name(), false);
             if (requested == Mode.OPENGL) { reason = "OpenGL selected in settings"; return; }
             Set<String> mods = FMLLoader.getLoadingModList().getMods().stream().map(mod -> mod.getModId()).collect(Collectors.toSet());
@@ -112,6 +116,8 @@ public final class BackendBootstrap {
     public static boolean usesZink() { initialize(); return zinkClient || zinkNative; }
     public static Presentation presentation() { initialize(); return presentation; }
     public static ShaderBackend shaderBackend() { initialize(); return shaderBackend; }
+    /** Default off. A system property overrides the config file. The shadow pass is not cancelled either way. */
+    public static boolean irisShadow() { initialize(); return irisShadow; }
     public static String shaderBackendRequested() { initialize(); return shaderDecision.requested(); }
     public static String shaderBackendActive() { initialize(); return shaderDecision.active(); }
     public static String shaderBackendFallback() { initialize(); return shaderDecision.fallback(); }
