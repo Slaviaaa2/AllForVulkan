@@ -1145,3 +1145,92 @@ client領域だけを取得して表示された「Not now」で継続した。p
 証跡はローカル`dtfuel-frame-pipeline-{launch.log,client.log,preflight.log,manifest.json,
 result.json,launch-exit.json}`、対象metadata付き`dtfuel-frame-pipeline-{update-prompt,world}.png`。
 未完了回は`dtfuel-frame-pipeline-interrupted-*`に分離した。
+
+## 実験: GL既定フレームバッファを共有画像へ直接出力（2026-10-25）
+
+EGLのGL関数アドレス供給時にnative routerを組み込み、render threadの描画先0を
+Vulkanがexportした共有画像へ振り向ける方式を実装した。通常frameではゲームの最後の
+blit以降にMODが書き込む内容も同じ画像へ入り、従来の最終GL color copyを省略する。
+Vulkan WSI画像への転送は残る。共有画像にはdepth24／stencil8を付け、GL出力は反転せず、
+Vulkanのblitで上下を合わせる。EGL／WSIのextentが一致するlinear RGBA8が今回の対象で、
+その他は従来のcopy経路を使う。起動時など通常runTick外のframeもcopy経路を使う。
+
+native入口はLWJGLのnative関数・buffer／array overloadで共通して使われる。
+既定FBOのbinding照会は0を返し、read／draw selectorとattachment metadataは実EGLの
+FBO 0に基づく。FBO 0のattachment変更は本来のGL errorを保つ。明示FBOの削除により
+暗黙に0へ戻る場合も共有画像へ復帰する。named blit／clearも扱い、discardは未定義内容を
+保持できる。列挙した入口を対象とする実験で、任意のvendor拡張や同じthreadで別GL contextへ
+切り替えるMODなど、全GL操作を証明したものではない。
+
+起動時の実GPU検査で、整数scalar／buffer／array・boolean／floatのbinding照会、
+read／draw selector、既定attachment identity、clear／read、named clear、FBO削除後の
+既定出力、既定FBOの変更拒否、router解除後に元EGL画像が上書きされていないことを
+確認した。ビルド／baseline compile、Cの警告error扱いコンパイル、配布JAR検査、
+launcher構文検査と差分空白検査は通過。native libraryのbridge nested JARへの梱包も確認。
+
+同一JARの直接出力ON→OFFの順で各1回比較した。両方とも表示だけの非同期方式を使い、
+Iris 1.8.14-beta.1／Sodium 0.8.13最小構成、指定Complementary r5.9.3、固定scene／視点、
+960×540、距離12、VSyncなし、追加600 ticks待機、400 ticks計測、最終出力readbackなし。
+条件とJAR／MOD／shader／shader設定hashは一致した。起動時のnative router検査はON回のみで、
+FPSの試料区間より前に完了している。
+
+| 同一JAR・約20秒の単発比較 | 平均描画FPS | 完了表示API/秒 | median ms | p95 ms | p99 ms | 破棄 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 従来のGL copy | 60.88 | 60.93 | 16.20 | 19.40 | 21.87 | 0 |
+| 共有画像へ直接出力 | 62.39 | 62.44 | 16.04 | 19.02 | 20.86 | 0 |
+
+平均差は+2.49%、p95時間差は-1.94%。単発の小差なので、反復による効果の確定は行っていない。
+
+両回ともworld、resize、Iris off→on／shader-only reload、resource reload、iconify／復帰、
+VSync切替／復帰、実surface再作成、同一context／device／Iris維持、disconnectと正常終了を
+通過した。ONの全実行では直接出力4732 frame、通常runTick外などのcopy1504 frame。
+native routerはbindingを16869回、対応state queryを8回処理し、named blitは0回だった。
+named clearは起動時実GPUprobeで実行した。全実行counterはFPS区間のみの内訳ではない。
+
+JAR SHA-256は`a4ba711fafd4bf6e5b80a30102c51aa3770ae4131f32070c59ce1ccb28e92b85`。
+証跡はローカル`direct-output-{on,off}-{launch.log,client.log,preflight.log,manifest.json,
+benchmark.json,exit.json}`、`direct-output-comparison.json`、`direct-output-build{,-final}.log`。
+専用の入れ子X上の単発参考値であり、反復統計や通常desktopのDTFuel約80 FPSとの比較ではない。
+
+続く全204 MOD検証で、window resizeに対するswapchain再作成がEGL drawable更新より先に
+起きると、extent不一致によるcopy経路の選択がその後も残る問題を確認した。
+ターゲット生成時のEGL extentも保持し、次frameでdrawableが更新された時点で共有画像を
+再作成して直接出力へ戻すよう修正した。Iris lifecycleの各段階で待つframe数を、実験ONでは
+表示API数から直接出力数へ変更した。全resource reload後も60以上の直接出力frameと
+経路の有効状態を要求し、copyへ戻った状態では直接出力の検査を通過できないようにした。
+表示submit前にresizeなどで捨てた直接描画と、workerが取得できなかった表示jobも別計数に
+し、produced／presented／worker dropの関係を保つ。
+
+上記FPS比較はresize修正前の同一JARで行った値として保持し、修正後JARの計測値には
+読み替えない。修正前の全pack試行は`dtfuel-direct-output-before-resize-fix-*`に分けた。
+
+修正後JAR（SHA-256 `30c9418a1d49b414ec72c340c44dccfbd3d9213662bbef549866ab51f7943356`）を
+全204 MOD／NeoForge 21.1.251／指定Complementaryで、直接出力＋3件先行worker＋最終出力
+readback診断付きで再検証した。実GPU router probe、world、resize、Iris各modeの直接描画、
+全resource reload、実iconify／復帰、VSync切替／復帰、実surface再作成、同一GL context／
+VkDevice／有効Iris維持、disconnect、正常終了を通過した。resource reload後の直接描画は
+1834 frame、全実行の直接出力7502／copy4 frame。最終出力markerは3751回照合した。
+workerは7506 job produced／presented、worker drop0。表示submit前のresize等による破棄は
+別に6 frame記録した。shader ZIPと元の9設定値の一致も確認した。
+
+既知のpack producer GL警告は残る。readback診断なので全DTFuelの通常FPS比較には使わない。
+各起動時の更新通知は現在のwindow ID／PID／bounds／stackingを確認し、専用clientの領域
+960×540だけを取得して「Not now」で続行した。pack更新や元pack／save／提供shaderの
+変更は行っていない。証跡はローカル`dtfuel-direct-output-{launch.log,client.log,preflight.log,
+manifest.json,result.json,exit.json}`と対象metadata付き`dtfuel-direct-output-update-prompt.png`。
+修正後のビルド／baseline compileは`direct-output-resize{,-final}-build.log`。
+
+同じ修正後JARを別profileのIris 1.8.12／Sodium 0.6.13・NeoForge 21.1.251でも、
+直接出力＋同期表示で起動した。指定Complementary、元ZIP／9設定値を維持し、
+world／resize／Iris各modeの直接描画／全resource reloadに加え、Overworld→Nether→End→
+Nether→Overworldを実client chunk・Iris dimension／pipelineと照合して通過した。
+その後のiconify／復帰、VSync切替、実surface再作成、disconnectと正常終了も通過した。
+全実行の直接出力6175／copy8 frame、submit前の破棄6 frame。最終出力readbackは付けず、
+起動時native GPU probeと各stageの色画像検査を実行した。
+
+このprofileの同期表示で、追加600 ticks待機後200 ticks計測の参考値は平均54.27 FPS、
+p95 21.14 ms（542 frame／9.987秒）。異なるIris／Sodium版・同期方式・JARなので、
+前記の非同期ON／OFF比較や別artifactの過去値に対する改善率には使わない。
+証跡はローカル`iris-stable-direct-output-{launch.log,client.log,preflight.log,manifest.json,
+benchmark.json,result.json,exit.json}`。修正後の成果物検査、launcher構文、差分空白と
+対象field／呼び出しの機械検査は`direct-output-final-mechanical.log`で通過を確認した。

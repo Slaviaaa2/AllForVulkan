@@ -704,3 +704,34 @@ Completed presents count successful/suboptimal returns from `vkQueuePresentKHR`;
 they do not prove how many distinct images the compositor/monitor displayed, or
 measure input-to-photon latency. The producer frame-time percentiles remain a
 separate measure of CPU frame delivery.
+
+## Experiment: direct default-framebuffer output
+
+`afv.experimentalDirectOutput` (launcher `--direct-output`) installs a small
+Linux x86_64 native entrypoint router in the EGL FunctionProvider. Both LWJGL's
+native core entrypoints and Java/array overloads receive the same routed addresses.
+The current render thread's FBO 0 is redirected to the Vulkan-exported color
+image before the game frame, including MOD writes after Minecraft's final blit.
+Other GL threads have no active alias. Bindings, default read/draw selectors,
+bound attachment metadata, default-object mutation validation, named blits and
+named clears are handled at that boundary. Real EGL FBO 0 retains the default
+selector/metadata contract; alias attachments never become application-visible
+through binding/attachment queries. Invalidation may retain undefined contents.
+
+The direct target has RGBA8 color and private depth24/stencil8 storage, matching
+the current EGL config. Other shared color formats keep the copy path. Vulkan
+performs the vertical flip since there is no longer a GL copy to fuse it with.
+The existing final-output marker is drawn while routing is active, then GL
+signals external ownership, routing is detached and the cached Vulkan transfer
+reads that same image. A rejected frame consumes the signal using the ownership
+return command. The router is detached before resource destruction.
+
+This removes the final GL color copy; the Vulkan WSI transfer remains. Early
+loading frames outside the normal runTick use the original copy. Direct and copied
+frame counters are logged separately. Native code is built by the bridge's Gradle
+resource task with the selected JDK headers and bundled inside the bridge JAR.
+The experiment is off by default and its native router is loaded only on opt-in.
+Only the enumerated entrypoints are routed; arbitrary vendor extensions and MODs
+switching unrelated GL contexts on the same render thread require further work.
+The ordinary copy route remains available for comparison. The current direct
+target additionally requires the WSI and EGL extents to match.

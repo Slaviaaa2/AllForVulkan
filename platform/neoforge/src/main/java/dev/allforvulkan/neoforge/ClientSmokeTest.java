@@ -31,6 +31,7 @@ public final class ClientSmokeTest {
     private static boolean benchmarkFinished;
     private static long drawBaseline;
     private static long benchmarkPresentBaseline, benchmarkDropBaseline;
+    private static long directReloadBaseline;
     private static CompletableFuture<Void> reload;
     private static CompletableFuture<Void> scene;
     private static dev.allforvulkan.validation.IrisLifecycle irisCycle;
@@ -78,6 +79,9 @@ public final class ClientSmokeTest {
             if (client.getWindow().getWidth() != resizeWidth || client.getWindow().getHeight() != resizeHeight)
                 throw new IllegalStateException("AFV_SMOKE_FAIL: shader-off resize did not reach expected framebuffer size");
             stableTicks = 0;
+            if (dev.allforvulkan.bridge.DirectDefaultFramebuffer.ENABLED)
+                Initializer.LOGGER.info("AFV_DIRECT_IRIS_CYCLE_PASS: each mode rendered through the imported target");
+            directReloadBaseline = ZinkClientSession.directOutputFrames();
             reload = client.reloadResourcePacks();
             phase = 3;
             return;
@@ -120,6 +124,7 @@ public final class ClientSmokeTest {
                 conditions.put("asyncPresent", ZinkClientSession.asynchronousPresentation());
                 conditions.put("framePipeline", ZinkClientSession.framePipeline());
                 conditions.put("pipelineDepth", ZinkClientSession.pipelineDepth());
+                conditions.put("directOutput", ZinkClientSession.directOutput());
                 if (BackendBootstrap.zinkClient()) {
                     conditions.put("completedVulkanPresents", ZinkClientSession.presentedFrames() - benchmarkPresentBaseline);
                     conditions.put("droppedVulkanFrames", ZinkClientSession.droppedFrames() - benchmarkDropBaseline);
@@ -173,10 +178,17 @@ public final class ClientSmokeTest {
                     phase = 11;
                     return;
                 }
+                directReloadBaseline = ZinkClientSession.directOutputFrames();
                 reload = client.reloadResourcePacks();
                 phase = 3;
             } else if (reload.isDone()) {
                 reload.join();
+                if (dev.allforvulkan.bridge.DirectDefaultFramebuffer.ENABLED) {
+                    long frames = ZinkClientSession.directOutputFrames() - directReloadBaseline;
+                    if (!ZinkClientSession.directOutput() || frames < 60)
+                        throw new IllegalStateException("Direct output did not resume after resource reload: " + frames);
+                    Initializer.LOGGER.info("AFV_DIRECT_RELOAD_PASS: {} direct frames after resource reload", frames);
+                }
                 Initializer.LOGGER.info("AFV_SMOKE_RELOAD: resources reloaded with active world");
                 if (Boolean.getBoolean("afv.smokeDimensions")) {
                     dimensionCycle = new DimensionLifecycle(client);
@@ -191,6 +203,7 @@ public final class ClientSmokeTest {
     }
 
     private static long cycleFrames() {
+        if (dev.allforvulkan.bridge.DirectDefaultFramebuffer.ENABLED) return ZinkClientSession.directOutputFrames();
         return BackendBootstrap.zinkClient() ? ZinkClientSession.presentedFrames() : renderedFrames;
     }
 
@@ -240,6 +253,10 @@ public final class ClientSmokeTest {
             if (!BackendBootstrap.zinkClient() || ZinkClientSession.presentedFrames() < 120)
                 throw new IllegalStateException("AFV_SMOKE_FAIL: Zink client did not present through AFV Vulkan");
             Initializer.LOGGER.info("AFV_ZINK_CLIENT_SMOKE_PASS: {} real Vulkan presentations", ZinkClientSession.presentedFrames());
+            if (dev.allforvulkan.bridge.DirectDefaultFramebuffer.ENABLED) {
+                if (ZinkClientSession.directOutputFrames() < 120) throw new IllegalStateException("Direct output did not render 120 frames");
+                Initializer.LOGGER.info("AFV_DIRECT_OUTPUT_PASS: {} frames with no final GL copy", ZinkClientSession.directOutputFrames());
+            }
             if (ZinkClientSession.reusedTransferFrames() < 120 || ZinkClientSession.recordedTransferCommands() == 0)
                 throw new IllegalStateException("AFV_SMOKE_FAIL: presentation transfer commands were not reused");
             Initializer.LOGGER.info("AFV_ZINK_TRANSFER_REUSE_PASS: reused={}, recorded={}", ZinkClientSession.reusedTransferFrames(), ZinkClientSession.recordedTransferCommands());

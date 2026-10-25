@@ -28,7 +28,7 @@ public final class SharedImage implements AutoCloseable {
     private final int width, height, aspect;
     private final boolean copyOnly;
     private long image, memory, toGl, fromGl;
-    private int glMemory, glToGl, glFromGl, texture, framebuffer;
+    private int glMemory, glToGl, glFromGl, texture, framebuffer, depthStencil;
     private boolean closed;
     private int layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -163,6 +163,18 @@ public final class SharedImage implements AutoCloseable {
         } catch (Throwable failure) { glDeleteSemaphoresEXT(glSemaphore); throw failure; }
     }
     public long image() { assertOwner(); return image; }
+    /** The presentation's virtual default target also needs the EGL depth/stencil contract. */
+    public void attachDepthStencil() {
+        assertOwner();
+        if (copyOnly || aspect != VK_IMAGE_ASPECT_COLOR_BIT || depthStencil != 0)
+            throw new IllegalStateException("Depth/stencil requires a fresh renderable color image");
+        depthStencil = org.lwjgl.opengl.GL45.glCreateRenderbuffers();
+        org.lwjgl.opengl.GL45.glNamedRenderbufferStorage(depthStencil, GL_DEPTH24_STENCIL8, width, height);
+        org.lwjgl.opengl.GL45.glNamedFramebufferRenderbuffer(framebuffer, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depthStencil);
+        if (org.lwjgl.opengl.GL45.glCheckNamedFramebufferStatus(framebuffer, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            throw new IllegalStateException("Direct presentation target incomplete");
+        checkGl("attach direct presentation depth/stencil");
+    }
     public long readyForGl() { assertOwner(); return toGl; }
     public long readyForVulkan() { assertOwner(); return fromGl; }
     public int width() { return width; }
@@ -277,6 +289,7 @@ public final class SharedImage implements AutoCloseable {
         assertOwner();
         closed = true;
         if (framebuffer != 0) glDeleteFramebuffers(framebuffer);
+        if (depthStencil != 0) glDeleteRenderbuffers(depthStencil);
         if (texture != 0) glDeleteTextures(texture);
         if (glToGl != 0) glDeleteSemaphoresEXT(glToGl);
         if (glFromGl != 0) glDeleteSemaphoresEXT(glFromGl);

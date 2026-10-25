@@ -24,6 +24,8 @@ public final class ZinkClientSession {
             context = new ZinkContext(Math.max(1, width.get(0)), Math.max(1, height.get(0)));
         }
         var caps = GL.getCapabilities();
+        if (dev.allforvulkan.bridge.DirectDefaultFramebuffer.ENABLED)
+            dev.allforvulkan.bridge.DirectDefaultFramebufferProbe.run();
         if (!caps.GL_EXT_memory_object_fd || !caps.GL_EXT_semaphore_fd)
             throw new IllegalStateException("Zink client requires opaque FD memory and semaphore sharing");
         try (var stack = MemoryStack.stackPush()) {
@@ -54,12 +56,15 @@ public final class ZinkClientSession {
                 Initializer.LOGGER.info("AFV_ZINK_CLIENT_DRAWABLE: {}x{}, same GL context", context.width(), context.height());
             }
         }
+        if (presenter != null) presenter.prepareDirectFrame();
     }
     public static void setVsync(boolean enabled) { vsync = enabled; if (presenter != null) presenter.setVsync(enabled); }
     public static long presentedFrames() { return presenter == null ? 0 : presenter.presentedFrames(); }
     public static boolean asynchronousPresentation() { return presenter != null && presenter.asynchronousPresentation(); }
     public static boolean framePipeline() { return presenter != null && presenter.framePipeline(); }
     public static int pipelineDepth() { return presenter == null ? 0 : presenter.pipelineDepth(); }
+    public static boolean directOutput() { return presenter != null && presenter.directOutput(); }
+    public static long directOutputFrames() { return presenter == null ? 0 : presenter.directOutputFrames(); }
     public static long droppedFrames() { return presenter == null ? 0 : presenter.droppedFrames(); }
     public static int pendingFrames() { return presenter == null ? 0 : presenter.pendingFrames(); }
     public static void awaitPresentation() { if (presenter != null) presenter.awaitPresentation(); }

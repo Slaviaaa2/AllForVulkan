@@ -38,3 +38,25 @@ tasks.register('verifyPresentDispatch', JavaExec) {
     mainClass = 'dev.allforvulkan.bridge.FramePresentDispatcherChecks'
 }
 tasks.named('check') { dependsOn 'verifyPresentDispatch' }
+
+// Optional direct-output router; other platforms retain the ordinary copy path.
+if (System.getProperty('os.name').toLowerCase().contains('linux') &&
+        System.getProperty('os.arch') in ['amd64', 'x86_64']) {
+    def nativeOutput = layout.buildDirectory.dir('generated/direct-output')
+    def nativeLibrary = nativeOutput.map { it.file('dev/allforvulkan/bridge/native/linux-x86_64/libafv_framebuffer.so') }
+    def nativeJava = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+    def compileDirectOutput = tasks.register('compileDirectOutput', Exec) {
+        inputs.file 'src/main/c/direct_framebuffer.c'
+        outputs.file nativeLibrary
+        doFirst {
+            def output = nativeLibrary.get().asFile
+            output.parentFile.mkdirs()
+            def jdk = nativeJava.get().metadata.installationPath.asFile
+            commandLine 'cc', '-std=c11', '-O2', '-fPIC', '-shared', '-Wall', '-Wextra', '-Werror',
+                    '-I' + jdk + '/include', '-I' + jdk + '/include/linux',
+                    'src/main/c/direct_framebuffer.c', '-o', output.absolutePath
+        }
+    }
+    sourceSets.main.resources.srcDir nativeOutput
+    tasks.named('processResources') { dependsOn compileDirectOutput }
+}

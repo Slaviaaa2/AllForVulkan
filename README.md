@@ -34,6 +34,8 @@ MOD一覧のAFV設定から **「自動」「Vulkan」「OpenGL」** を選択�
 
 さらに `-Dafv.experimentalFramePipeline=true`（検証launcherでは `--frame-pipeline`）で、画像取得・転送・表示をまとめて専用スレッドへ渡し、3枚の共有画像でGL描画を先行させる実験を選べます。この設定は非同期表示も含みます。未完了jobは既定で1件、`-Dafv.experimentalPipelineDepth=1|2|3`（`--pipeline-depth`）で比較できます。標準はOFFで、比較測定には描画FPSと実際に完了したVulkan表示数の両方を記録します。
 
+`-Dafv.experimentalDirectOutput=true`（`--direct-output`）は、GLの描画先0を共有画像へ振り向け、最終GLコピーを省く別の実験です。Linux x86_64のZinkクライアント経路用で標準はOFFです。描画後のMODの書き込みも同じ共有画像へ送ります。Vulkan表示先への転送は残ります。実GPUでの入口・状態照会・描画検査を起動時に行います。
+
 Linux向け実験機能 `-Dafv.zinkInterop=true` は別の経路で、AFV独自の地形描画からワールドの色と深度をGPU共有画像でZinkへ渡し、GLSL後処理からVulkanへ戻します。処理位置はワールド描画後・手元の深度クリアとGUI描画の前です。`-Dafv.zinkEffect=invert` / `depth` で診断用の色反転／深度表示を選べます。こちらの経路にIrisの地形・影・複数passを統合する機能は開発中です。**Iris全機能・全シェーダーパック・全GPUの完全互換は未確認**です。
 
 - [ビルド・起動方法と現状](docs/DEVELOPMENT.md)

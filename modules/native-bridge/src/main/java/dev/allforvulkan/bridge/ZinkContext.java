@@ -52,7 +52,7 @@ public final class ZinkContext implements AutoCloseable {
             require(context != EGL_NO_CONTEXT, "eglCreateContext(GL 4.6 core)");
             require(eglMakeCurrent(display, surface, surface, context), "eglMakeCurrent");
             Configuration.OPENGL_EXPLICIT_INIT.set(true);
-            GL.create(org.lwjgl.egl.EGL10::eglGetProcAddress);
+            GL.create(name -> DirectDefaultFramebuffer.address(name, eglGetProcAddress(name)));
             glCreated = true;
             GL.createCapabilities();
             defaultReadBuffer = glGetBoolean(GL_DOUBLEBUFFER) ? GL_BACK : GL_FRONT;

@@ -5,6 +5,7 @@ import dev.allforvulkan.bridge.GlBlitScope;
 import dev.allforvulkan.bridge.PresentationSurface;
 import dev.allforvulkan.bridge.PresentationTransfer;
 import dev.allforvulkan.bridge.FramePresentDispatcher;
+import dev.allforvulkan.bridge.DirectDefaultFramebuffer;
 import dev.allforvulkan.bridge.SharedImage;
 import dev.allforvulkan.bridge.SurfaceFailure;
 import dev.allforvulkan.bridge.ZinkContext;
@@ -25,6 +26,9 @@ import static org.lwjgl.vulkan.KHRSwapchain.*;
  * Binary external semaphores transfer image ownership in both directions. */
 public final class ZinkPresenter implements AutoCloseable {
     private final boolean framePipeline = Boolean.getBoolean("afv.experimentalFramePipeline");
+    private final boolean directOutput = DirectDefaultFramebuffer.ENABLED;
+    private boolean useDirectTarget, directActive, directReady;
+    private long directOutputFrames, copiedOutputFrames, discardedDirectFrames;
     private final int frameSlots = framePipeline ? 3 : 2;
     private final int pipelineDepth = framePipeline ? Math.max(1, Math.min(frameSlots, Integer.getInteger("afv.experimentalPipelineDepth", 1))) : 0;
     private final ZinkContext context;
@@ -43,6 +47,7 @@ public final class ZinkPresenter implements AutoCloseable {
     private long[] images, presentReady;
     private int width, height, frame;
     private int windowWidth, windowHeight;
+    private int targetContextWidth, targetContextHeight;
     private boolean vsync = true, dirty = true, closed;
     private boolean directCopy;
     private long presented;
@@ -80,6 +85,8 @@ public final class ZinkPresenter implements AutoCloseable {
     public boolean asynchronousPresentation() { return presentation.asynchronous(); }
     public boolean framePipeline() { return framePipeline; }
     public int pipelineDepth() { return pipelineDepth; }
+    public boolean directOutput() { return useDirectTarget; }
+    public long directOutputFrames() { return directOutputFrames; }
     public long droppedFrames() { if (framePipeline) collectCompleted(); return droppedFrames; }
     public int pendingFrames() { return presentation.pendingCount(); }
     /** Explicit lifecycle barrier; normal rendering drains at the next present. */
@@ -107,6 +114,66 @@ public final class ZinkPresenter implements AutoCloseable {
         surfaceLost = dirty = true;
     }
 
+    /** Acquire GL ownership before the game draws. FBO 0 then names the imported
+     * target for the entire frame, including raw MOD writes after the final blit. */
+    public void prepareDirectFrame() {
+        if (!directOutput || directActive) return;
+        context.assertCurrentThread();
+        drainProducerErrors();
+        if (framePipeline) collectCompleted();
+        try (var stack = MemoryStack.stackPush()) {
+            var w = stack.mallocInt(1); var h = stack.mallocInt(1);
+            org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window, w, h);
+            if (w.get(0) <= 0 || h.get(0) <= 0
+                    || org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(window, org.lwjgl.glfw.GLFW.GLFW_ICONIFIED) != 0) {
+                dirty = true; return;
+            }
+            if (surfaceLost || dirty || windowWidth != w.get(0) || windowHeight != h.get(0)
+                    || targetContextWidth != context.width() || targetContextHeight != context.height()) {
+                awaitPresentation();
+                try {
+                    if (surfaceLost) recoverSurface();
+                    if (!recreate(w.get(0), h.get(0))) return;
+                } catch (SurfaceFailure failure) {
+                    if (failure.result() == VK_ERROR_SURFACE_LOST_KHR) { surfaceLost = dirty = true; return; }
+                    if (failure.result() == VK_ERROR_OUT_OF_DATE_KHR || failure.result() == VK_INCOMPLETE) { dirty = true; return; }
+                    throw failure;
+                }
+            }
+            if (useDirectTarget) {
+                int target = frames[frame].beginGlCopy(); // GENERAL, renderable image
+                DirectDefaultFramebuffer.begin(target);
+                directActive = true;
+            }
+        }
+    }
+
+    private void drainProducerErrors() {
+        for (int error, n = 0; n < 16 && (error = glGetError()) != GL_NO_ERROR; n++) {
+            if (++producerErrors <= 8) Initializer.LOGGER.warn("AFV_ZINK_CLIENT_PRODUCER_ERROR: GL 0x{} before presentation", Integer.toHexString(error));
+        }
+    }
+    private void finishDirectOutput(boolean marker) {
+        if (!directActive) return;
+        if (marker) drawFinalMarker();
+        DirectDefaultFramebuffer.end();
+        directActive = false;
+        frames[frame].endGlWrite();
+        directReady = true;
+    }
+    /** A resize/timeout can reject a rendered frame. Consume its GL signal and
+     * return ownership before replacing resources or traversing the ring again. */
+    private void discardDirectOutput() {
+        if (!directReady) return;
+        awaitPresentation();
+        try (var stack = MemoryStack.stackPush()) {
+            check(vkWaitForFences(device, fences[frame], true, -1L), "wait discarded direct slot");
+            returnSlot(frame, frames[frame].readyForVulkan(), frames[frame].readyForGl(), DeviceManager.getGraphicsQueue().queue(), stack);
+        }
+        directReady = false;
+        discardedDirectFrames++;
+    }
+
     public void present() {
         context.assertCurrentThread();
         // The previous native call may overlap the GL rendering that just
@@ -119,9 +186,8 @@ public final class ZinkPresenter implements AutoCloseable {
         } else awaitPresentation();
         // A producer's sticky GL error must not be attributed to FD import or
         // semaphore submission. Report it separately, with bounded logging.
-        for (int error, n = 0; n < 16 && (error = glGetError()) != GL_NO_ERROR; n++) {
-            if (++producerErrors <= 8) Initializer.LOGGER.warn("AFV_ZINK_CLIENT_PRODUCER_ERROR: GL 0x{} before presentation", Integer.toHexString(error));
-        }
+        drainProducerErrors();
+        finishDirectOutput(shouldCheckOutput(framePipeline ? producedFrames : presented));
         try (var stack = MemoryStack.stackPush()) {
             var w = stack.mallocInt(1); var h = stack.mallocInt(1);
             org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window, w, h);
@@ -130,9 +196,12 @@ public final class ZinkPresenter implements AutoCloseable {
                 dirty = true; return;
             }
             try {
+                boolean discard = directReady && (surfaceLost || dirty || windowWidth != w.get(0) || windowHeight != h.get(0));
+                if (discard) discardDirectOutput();
                 if (framePipeline && (surfaceLost || dirty || windowWidth != w.get(0) || windowHeight != h.get(0))) awaitPresentation();
                 if (surfaceLost) recoverSurface();
                 if ((dirty || windowWidth != w.get(0) || windowHeight != h.get(0)) && !recreate(w.get(0), h.get(0))) return;
+                if (discard) return; // The old direct image cannot be copied from the EGL pbuffer.
             } catch (SurfaceFailure failure) {
                 if (failure.result() == VK_ERROR_SURFACE_LOST_KHR) { surfaceLost = dirty = true; return; }
                 if (failure.result() == VK_ERROR_OUT_OF_DATE_KHR || failure.result() == VK_INCOMPLETE) { dirty = true; return; }
@@ -188,7 +257,7 @@ public final class ZinkPresenter implements AutoCloseable {
             presentation.submit(() -> presentNative(queue, target, ready, imageIndex));
             if (!presentation.asynchronous()) awaitPresentation();
             frame = (frame + 1) % frameSlots;
-        }
+        } finally { if (directReady) discardDirectOutput(); }
     }
 
     private boolean shouldCheckOutput(long sequence) {
@@ -196,6 +265,11 @@ public final class ZinkPresenter implements AutoCloseable {
                 && width == context.width() && height == context.height() && width >= 32 && height >= 32;
     }
     private void copyClientOutput(int slot, boolean checkOutput) {
+        if (directReady) {
+            directReady = false;
+            directOutputFrames++;
+            return; // The final output is already the Vulkan-exported image.
+        }
         if (checkOutput) drawFinalMarker();
         try (var state = new GlBlitScope(context.defaultReadBuffer())) {
             int destination = frames[slot].beginGlCopy();
@@ -203,6 +277,7 @@ public final class ZinkPresenter implements AutoCloseable {
             int error = glGetError();
             if (error != GL_NO_ERROR) throw new IllegalStateException("Client color transfer: GL error 0x" + Integer.toHexString(error));
             frames[slot].endGlWrite();
+            copiedOutputFrames++;
         }
     }
 
@@ -275,7 +350,11 @@ public final class ZinkPresenter implements AutoCloseable {
             glFinish(); // Resize/teardown only; no work or destruction for a suspended surface.
             check(vkDeviceWaitIdle(device), "drain presentation before resize");
             destroySwapchain();
-            directCopy = color.directCopy();
+            // The virtual default target matches the EGL linear RGBA8 storage.
+            // Without the GL blit, Vulkan must perform the vertical flip.
+            useDirectTarget = directOutput && sharedFormat == VK_FORMAT_R8G8B8A8_UNORM
+                    && extent.width() == context.width() && extent.height() == context.height();
+            directCopy = color.directCopy() && !useDirectTarget;
             width = extent.width(); height = extent.height();
             int count = caps.minImageCount() + 1;
             if (caps.maxImageCount() > 0) count = Math.min(count, caps.maxImageCount());
@@ -310,7 +389,10 @@ public final class ZinkPresenter implements AutoCloseable {
             presentReady = new long[images.length];
             for (int i = 0; i < images.length; i++) presentReady[i] = semaphore(stack);
             for (int i = 0; i < frameSlots; i++) {
-                frames[i] = SharedImage.forGlCopy(DeviceManager.physicalDevice, device, width, height, sharedFormat);
+                frames[i] = useDirectTarget
+                        ? new SharedImage(DeviceManager.physicalDevice, device, width, height, sharedFormat)
+                        : SharedImage.forGlCopy(DeviceManager.physicalDevice, device, width, height, sharedFormat);
+                if (useDirectTarget) frames[i].attachDepthStencil();
                 if (outputChecks != null) outputChecks[i] = new FinalOutputReadback();
             }
             var command = setupCommand;
@@ -328,8 +410,10 @@ public final class ZinkPresenter implements AutoCloseable {
             recordTransferCommands(stack);
             dirty = false;
             windowWidth = requestedWidth; windowHeight = requestedHeight;
+            targetContextWidth = context.width(); targetContextHeight = context.height();
             Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}, sharedLayout=transfer, transfer={}, asyncPresent={}", width, height, format, images.length, vsync, directCopy ? "copy" : "blit", presentation.asynchronous());
             if (framePipeline) Initializer.LOGGER.info("AFV_FRAME_PIPELINE: slots={}, depth={}, acquire/transfer/present worker, bounded FIFO", frameSlots, pipelineDepth);
+            if (directOutput) Initializer.LOGGER.info("AFV_DIRECT_OUTPUT: active={}, GL default -> imported target, colorCopySkipped={}", useDirectTarget, useDirectTarget);
             return true;
         }
     }
@@ -375,7 +459,7 @@ public final class ZinkPresenter implements AutoCloseable {
             }
         }
         recordedTransfers += count;
-        if (framePipeline) {
+        if (framePipeline || directOutput) {
             var returned = stack.mallocPointer(frameSlots);
             check(vkAllocateCommandBuffers(device, VkCommandBufferAllocateInfo.calloc(stack).sType$Default()
                     .commandPool(Vulkan.getCommandPool()).level(VK_COMMAND_BUFFER_LEVEL_PRIMARY).commandBufferCount(frameSlots), returned), "allocate slot return commands");
@@ -467,6 +551,9 @@ public final class ZinkPresenter implements AutoCloseable {
     @Override public void close() {
         if (closed) return;
         context.assertCurrentThread();
+        drainProducerErrors();
+        finishDirectOutput(false);
+        discardDirectOutput();
         Throwable pendingFailure = null;
         try { awaitPresentation(); }
         catch (RuntimeException | LinkageError failure) { pendingFailure = failure; }
@@ -485,6 +572,8 @@ public final class ZinkPresenter implements AutoCloseable {
         }
         Initializer.LOGGER.info("AFV_PRESENT_DISPATCH_STATS: {}", presentation.statistics());
         if (framePipeline) Initializer.LOGGER.info("AFV_FRAME_PIPELINE_STATS: produced={}, presented={}, dropped={}", producedFrames, presented, droppedFrames);
+        if (directOutput) Initializer.LOGGER.info("AFV_DIRECT_OUTPUT_STATS: direct={}, copied={}, discardedBeforeSubmit={}, routerBinds/namedBlits/queries={}",
+                directOutputFrames, copiedOutputFrames, discardedDirectFrames, java.util.Arrays.toString(DirectDefaultFramebuffer.statistics()));
         if (pendingFailure instanceof RuntimeException runtime) throw runtime;
         if (pendingFailure instanceof LinkageError linkage) throw linkage;
     }
