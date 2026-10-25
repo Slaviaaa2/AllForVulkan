@@ -1,6 +1,6 @@
 #version 120
 const int shadowMapResolution = 32;
-const float shadowDistance = 16.0;
+const float shadowDistance = 32.0;
 varying vec2 texcoord;
 varying vec4 tint;
 void main() {
