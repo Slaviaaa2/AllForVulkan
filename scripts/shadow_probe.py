@@ -78,8 +78,8 @@ def prepare(instance, mesh):
     (config / 'fml.toml').write_text('earlyWindowControl = false\n')
     (config / 'iris.properties').write_text('enableShaders=true\nshaderPack=' + pack_name + '\n')
     (instance / 'options.txt').write_text(
-        'onboardAccessibility:false\npauseOnLostFocus:false\nrenderDistance:2\n'
-        'simulationDistance:2\nenableVsync:false\nmaxFps:20\n')
+        'onboardAccessibility:false\npauseOnLostFocus:false\nrenderDistance:8\n'
+        'simulationDistance:5\nenableVsync:false\nmaxFps:20\n')
     marker = config / 'allforvulkan_renderer_starting'
     if marker.exists():
         marker.unlink()

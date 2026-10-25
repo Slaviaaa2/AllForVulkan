@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL30;
 import net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices;
 import net.caffeinemc.mods.sodium.client.render.chunk.compile.ChunkBuildOutput;
 import net.caffeinemc.mods.sodium.client.render.chunk.data.BuiltSectionMeshParts;
@@ -34,6 +36,9 @@ public final class ShadowMeshCapture {
     private static final float[] PROJECTION = new float[16];
     private static boolean matrices;
     private static int generation;
+    private static int lastSections;
+    private static int maxSections;
+    private static int drawLogs;
 
     private ShadowMeshCapture() {}
 
@@ -56,8 +61,9 @@ public final class ShadowMeshCapture {
 
     public static void retainDraw(ChunkRenderMatrices cameraMatrices, ChunkRenderListIterable lists,
                                   TerrainRenderPass pass, CameraTransform camera) {
-        if (!BackendBootstrap.irisShadow() || pass == null || pass.isTranslucent() || !shadows() || lists == null || camera == null)
-            return;
+        if (pass == null || pass.isTranslucent() || !shadows() || lists == null || camera == null) return;
+        if (Boolean.getBoolean("afv.shadowMesh")) noteShadowDraw(lists, camera, pass);
+        if (!BackendBootstrap.irisShadow()) return;
         if (!matrices && cameraMatrices != null && cameraMatrices.modelView() != null && cameraMatrices.projection() != null) {
             cameraMatrices.modelView().get(MODEL_VIEW);
             cameraMatrices.projection().get(PROJECTION);
@@ -91,6 +97,38 @@ public final class ShadowMeshCapture {
     }
 
     public static boolean hasMatrices() { return matrices; }
+
+    public static int lastSections() { return lastSections; }
+
+    public static int maxSections() { return maxSections; }
+
+    private static void noteShadowDraw(ChunkRenderListIterable lists, CameraTransform camera, TerrainRenderPass pass) {
+        int sections = 0;
+        var iterator = lists.iterator(false);
+        while (iterator.hasNext()) {
+            var indexes = iterator.next().sectionsWithGeometryIterator(false);
+            if (indexes == null) continue;
+            while (indexes.hasNext()) {
+                indexes.nextByteAsInt();
+                sections++;
+            }
+        }
+        boolean changed = sections != lastSections || drawLogs == 0;
+        lastSections = sections;
+        if (sections > maxSections) maxSections = sections;
+        if (!changed || drawLogs >= 8) return;
+        drawLogs++;
+        var mask = java.nio.ByteBuffer.allocateDirect(4);
+        GL11.glGetBooleanv(GL11.GL_COLOR_WRITEMASK, mask);
+        System.out.println("AFV_SHADOW_MESH_DRAWS: sections=" + sections
+                + " camera=" + camera.intX + "," + camera.intY + "," + camera.intZ
+                + " fbo=" + GL11.glGetInteger(GL30.GL_FRAMEBUFFER_BINDING)
+                + " draw0=" + GL11.glGetInteger(GL30.GL_DRAW_BUFFER0)
+                + " depthTest=" + GL11.glIsEnabled(GL11.GL_DEPTH_TEST)
+                + " cull=" + GL11.glIsEnabled(GL11.GL_CULL_FACE)
+                + " colorMask=" + (mask.get(0) != 0) + "," + (mask.get(1) != 0) + "," + (mask.get(2) != 0) + "," + (mask.get(3) != 0)
+                + " pass=" + pass);
+    }
 
     private static void store(TerrainRenderPass pass, int x, int y, int z, BuiltSectionMeshParts parts) {
         if (parts == null || parts.getVertexData() == null || parts.getVertexCounts() == null) return;

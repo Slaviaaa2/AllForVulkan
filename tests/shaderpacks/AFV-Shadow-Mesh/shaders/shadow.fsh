@@ -1,7 +1,7 @@
 #version 120
 const int shadowMapResolution = 32;
 const bool shadowcolor0Clear = true;
-const vec4 shadowcolor0ClearColor = vec4(0.0, 0.0, 0.0, 1.0);
+const vec4 shadowcolor0ClearColor = vec4(0.125, 0.0, 0.125, 1.0);
 uniform sampler2D gtexture;
 varying vec2 texcoord;
 varying vec4 tint;

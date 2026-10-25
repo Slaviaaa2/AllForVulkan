@@ -22,6 +22,7 @@ import net.vulkanmod.Initializer;
 import net.vulkanmod.render.chunk.WorldRenderer;
 import net.vulkanmod.render.chunk.buffer.DrawBuffers;
 import org.lwjgl.glfw.GLFW;
+import org.lwjgl.opengl.GL11;
 
 /** Explicitly enabled checks; never touch existing saves or close normal sessions. */
 @EventBusSubscriber(modid = "allforvulkan", value = Dist.CLIENT)
@@ -46,6 +47,7 @@ public final class ClientSmokeTest {
     /** Iris draws the player into the shadow map unless they are a spectator. The terrain mesh does not include that model. */
     private static void hideProbePlayer(Minecraft client) {
         client.player.setInvisible(true);
+        client.player.setXRot(80f);
         var server = client.getSingleplayerServer();
         if (server == null) return;
         var id = client.player.getUUID();
@@ -75,6 +77,23 @@ public final class ClientSmokeTest {
             }
             System.out.println("AFV_SHADOW_MESH_SCENE: wool columns at " + feet.getX() + "," + surface + "," + feet.getZ());
         });
+    }
+
+    private static String viewCenter(Minecraft client) {
+        var target = client.getMainRenderTarget();
+        int width = target.width;
+        int height = target.height;
+        int id = target.getColorTextureId();
+        if (id <= 0 || width < 1 || height < 1) return "no target";
+        var buffer = org.lwjgl.BufferUtils.createByteBuffer(width * height * 4);
+        int previous = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, id);
+        GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, previous);
+        int index = ((height / 2) * width + width / 2) * 4;
+        return "size=" + width + "x" + height + " center="
+                + (buffer.get(index) & 255) + "," + (buffer.get(index + 1) & 255) + ","
+                + (buffer.get(index + 2) & 255) + "," + (buffer.get(index + 3) & 255);
     }
 
     private static int distinctColors(String summary) {
@@ -149,10 +168,14 @@ public final class ClientSmokeTest {
                 boolean mesh = Boolean.getBoolean("afv.shadowMesh");
                 if (mesh) hideProbePlayer(client);
                 if (mesh && stableTicks == 40) placeShadowBlocks(client);
+                if (mesh && (stableTicks == 200 || stableTicks == 800))
+                    System.out.println("AFV_SHADOW_MESH_VIEW: tick=" + stableTicks + " " + viewCenter(client));
                 if (++stableTicks < (mesh ? 120 : 200)) return;
                 if (!dev.allforvulkan.validation.ShadowProbe.capture()) return;
                 String summary = dev.allforvulkan.validation.ShadowProbe.summary();
                 if (mesh && distinctColors(summary) < 2 && stableTicks < 900) return;
+                if (mesh) System.out.println("AFV_SHADOW_MESH_DRAWS_AT_CAPTURE: last="
+                        + ShadowMeshCapture.lastSections() + " max=" + ShadowMeshCapture.maxSections());
                 Initializer.LOGGER.info("AFV_SHADOW_PROBE_PASS: {}", summary);
                 System.out.println("AFV_SHADOW_PROBE_PASS: " + summary);
                 pass(client);
