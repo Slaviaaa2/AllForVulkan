@@ -45,6 +45,18 @@ Unmeasured: Complementary Reimagined r5.9.3, and any frame time. The desktop A/B
 
 Verified here: `./gradlew :native-bridge:verifyIrisSubsetDraw -Dafv.requireCompositeDevice=true` on lavapipe. No FPS.
 
+## Iteration 5 — read Iris shadowcolor0 in a headless client
+
+`scripts/shadow_probe.py` launches the NeoForge 1.21.1 client with the pinned Iris and Sodium jars, the AFV-Shadow pack, and a generated flat world. The backend is OpenGL (`-Dafv.backend=OPENGL`), so this run does not enter the Zink bridge and does not require Vulkan presents. Xvfb `:99` and llvmpipe provide the GL context. The probe reads `shadowcolor0` with `glGetTexImage` and writes `afv-shadow-off.rgba`.
+
+Iris does not read `shadowMapResolution` from `shaders.properties`. Without a shader `const`, the attachment is the default 1024×1024 clear of `(255, 255, 255, 255)`. AFV-Shadow sets `const int shadowMapResolution = 32` and `const vec4 shadowcolor0ClearColor` to `(128, 64, 192, 255)`. The fragment shader writes that same color. The harness rejects any other size or a center outside tolerance 8.
+
+Verified here, under Xvfb and llvmpipe: `AFV_SHADOW_PROBE_PASS: width=32 height=32 format=RGBA hook=false file=afv-shadow-off.rgba nonzero=1024/1024 center=128,64,192,255`. No crash. `./gradlew :verifyShadowImage` checks the center-half compare. The client harness is not a GitHub Actions job. A warm run finished in under a minute; the script still allows 45 minutes. No FPS.
+
+The property `afv.irisShadow` is forwarded and defaults to false. Nothing in the game reads it yet, so this run cannot enable a Vulkan shadow pass. The active renderer is unchanged. World draws stay on OpenGL for this probe and on Zink for a normal Iris launch.
+
+`.github/workflows/build.yml` runs `./gradlew check` before `./gradlew build` on pull requests and pushes. That does not include the client harness. A runner with no Vulkan driver gets `vkCreateInstance` error -9. Those headless device tasks skip unless `-Dafv.requireCompositeDevice=true`.
+
 ## Next
 
-Feed real shadow and gbuffer meshes into this pass from a pinned Iris hook, and write the shadow color back where Iris expects it. If the hook is missing, keep the Zink pass. Do not cancel Iris's shadow pass until that write exists.
+Put an Iris `renderShadows` hook behind `afv.irisShadow`, still defaulting off. When the flag is on, draw the same constant at the shadow resolution on Vulkan and upload it only if the center already matches. A mismatch or a device failure leaves Iris's GL image in place. Do not cancel Iris's shadow pass. The probe's on and diff modes are the check. Real Sodium meshes are still later.

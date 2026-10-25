@@ -51,6 +51,8 @@ neoForge {
             systemProperty 'afv.smokeInspectTicks', System.getProperty('afv.smokeInspectTicks', '0')
             systemProperty 'afv.smokeSettings', System.getProperty('afv.smokeSettings', 'false')
             systemProperty 'afv.smokeIris', System.getProperty('afv.smokeIris', 'false')
+            systemProperty 'afv.shadowProbe', System.getProperty('afv.shadowProbe', 'false')
+            systemProperty 'afv.irisShadow', System.getProperty('afv.irisShadow', 'false')
             systemProperty 'afv.smokeIrisCycle', System.getProperty('afv.smokeIrisCycle', 'false')
             systemProperty 'afv.smokeWindowCycle', System.getProperty('afv.smokeWindowCycle', 'false')
             systemProperty 'afv.smokeDimensions', System.getProperty('afv.smokeDimensions', 'false')
@@ -217,6 +219,13 @@ tasks.register('verifyTextureUpload', JavaExec) {
     mainClass = 'net.vulkanmod.gl.TextureUploadChecks'
 }
 tasks.named('check') { dependsOn 'verifyTextureUpload' }
+
+tasks.register('verifyShadowImage', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.validation.ShadowImageChecks'
+}
+tasks.named('check') { dependsOn 'verifyShadowImage' }
 
 tasks.register('verifyProjection', JavaExec) {
     dependsOn tasks.named('testClasses')

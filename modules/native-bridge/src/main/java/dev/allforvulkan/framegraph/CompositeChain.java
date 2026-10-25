@@ -58,7 +58,8 @@ public final class CompositeChain {
                     .pApplicationInfo(VkApplicationInfo.calloc(stack).sType$Default()
                             .apiVersion(VK_API_VERSION_1_2).pApplicationName(stack.UTF8("AFV composite")));
             var pointer = stack.mallocPointer(1);
-            check(vkCreateInstance(instanceInfo, null, pointer), "vkCreateInstance");
+            int created = vkCreateInstance(instanceInfo, null, pointer);
+            if (created != VK_SUCCESS) throw new Unavailable("vkCreateInstance failed: " + created);
             var instance = new VkInstance(pointer.get(0), instanceInfo);
             long deviceHandle = 0;
             VkDevice device = null;

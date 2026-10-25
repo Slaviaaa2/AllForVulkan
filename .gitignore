@@ -39,6 +39,7 @@ crash-reports/
 
 # Isolated comparison instances
 /run-iris-baseline/
+/run-shadow-probe/
 
 # Python validation helpers
 **/__pycache__/
