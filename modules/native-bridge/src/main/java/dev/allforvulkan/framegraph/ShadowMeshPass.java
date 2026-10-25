@@ -12,7 +12,8 @@ import static org.lwjgl.vulkan.VK11.*;
 import static org.lwjgl.vulkan.VK12.VK_API_VERSION_1_2;
 
 /** Draws one decoded shadow mesh with the subset program. The readback is bottom-row-first, like glGetTexImage.
- * The GL projection is flipped on Y so Vulkan's top-left framebuffer matches that order after the row flip. */
+ * The GL projection is flipped on Y so Vulkan's top-left framebuffer matches that order after the row flip.
+ * Face culling stays off, matching Iris's shadow terrain pass. */
 public final class ShadowMeshPass {
     private static final int FORMAT = VK_FORMAT_R8G8B8A8_UNORM;
     private static final int DEPTH_FORMAT = VK_FORMAT_D32_SFLOAT;
@@ -310,8 +311,8 @@ public final class ShadowMeshPass {
                     .pInputAssemblyState(VkPipelineInputAssemblyStateCreateInfo.calloc(stack).sType$Default().topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST))
                     .pViewportState(VkPipelineViewportStateCreateInfo.calloc(stack).sType$Default().viewportCount(1).scissorCount(1))
                     .pRasterizationState(VkPipelineRasterizationStateCreateInfo.calloc(stack).sType$Default()
-                            .polygonMode(VK_POLYGON_MODE_FILL).cullMode(VK_CULL_MODE_BACK_BIT)
-                            // Projection Y is negated and Vulkan's framebuffer Y points down, so GL's CCW faces stay CCW.
+                            // Iris disables face culling for shadow terrain, so both windings are drawn.
+                            .polygonMode(VK_POLYGON_MODE_FILL).cullMode(VK_CULL_MODE_NONE)
                             .frontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE).lineWidth(1))
                     .pMultisampleState(VkPipelineMultisampleStateCreateInfo.calloc(stack).sType$Default().rasterizationSamples(VK_SAMPLE_COUNT_1_BIT))
                     .pDepthStencilState(VkPipelineDepthStencilStateCreateInfo.calloc(stack).sType$Default()

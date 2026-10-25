@@ -24,6 +24,7 @@ public final class IrisShadowHook {
     private static boolean loggedFallback;
     private static String lastFallback = "";
     private static int fallbackLines;
+    private static boolean loggedMismatch;
 
     private IrisShadowHook() {}
 
@@ -59,6 +60,11 @@ public final class IrisShadowHook {
             if (chosen != mesh.rgba()) {
                 int mismatches = mesh.rgba() == null ? -1
                         : ShadowImage.nearMismatches(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE);
+                if (mesh.rgba() != null && !loggedMismatch) {
+                    loggedMismatch = true;
+                    System.out.println("AFV_SHADOW_MESH_MISMATCH:" + ShadowImage.nearMismatchSummary(
+                            frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 8));
+                }
                 fallback(mesh.rgba() == null ? mesh.detail() : "mesh mismatch " + mismatches + " " + mesh.detail());
                 return;
             }

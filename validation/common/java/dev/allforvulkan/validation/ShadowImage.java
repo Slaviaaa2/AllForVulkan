@@ -84,6 +84,26 @@ public final class ShadowImage {
         return mismatches;
     }
 
+    /** Up to {@code limit} GL pixels that have no Vulkan sample within one texel. */
+    public static String nearMismatchSummary(byte[] left, byte[] right, int width, int height, int tolerance, int limit) {
+        if (left == null || right == null || left.length != right.length) return " unavailable";
+        StringBuilder summary = new StringBuilder();
+        int found = 0;
+        for (int y = 0; y < height && found < limit; y++) {
+            for (int x = 0; x < width && found < limit; x++) {
+                if (near(left, right, width, height, x, y, tolerance)) continue;
+                int index = (y * width + x) * 4;
+                summary.append(" (").append(x).append(',').append(y).append(" gl=")
+                        .append(left[index] & 255).append(',').append(left[index + 1] & 255).append(',')
+                        .append(left[index + 2] & 255).append(',').append(left[index + 3] & 255)
+                        .append(" vk=").append(right[index] & 255).append(',').append(right[index + 1] & 255).append(',')
+                        .append(right[index + 2] & 255).append(',').append(right[index + 3] & 255).append(')');
+                found++;
+            }
+        }
+        return summary.toString();
+    }
+
     /** The Vulkan image when every pixel has a neighbor within tolerance, otherwise the GL image. */
     public static byte[] replacementNear(byte[] gl, byte[] vulkan, int width, int height) {
         if (gl == null) return null;
