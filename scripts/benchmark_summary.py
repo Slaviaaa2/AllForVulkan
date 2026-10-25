@@ -292,9 +292,11 @@ def interpret(aggregates, comparison_valid):
                 f"afv-direct requested the direct backend and fell back ({direct['fallback']}). "
                 "Those runs are still the Zink client. A large FPS difference from zink-gl on this build would be a measurement bug.")
         coverage = direct.get("coverage") or ""
-        if coverage.startswith("scheduled:"):
+        if coverage.startswith("scheduled:") or coverage.startswith("compiled:"):
+            label = "scheduled" if coverage.startswith("scheduled:") else "compiled to SPIR-V"
+            names = coverage.split(":", 1)[1]
             lines.append(
-                "afv-direct scheduled Iris programs (" + coverage.removeprefix("scheduled:") + "). "
+                "afv-direct " + label + " Iris programs (" + names + "). "
                 "World draws still run on Zink, so compare that route with afv-bridge. A large gap is a measurement bug.")
         direct_gap = _gap(direct, zink)
         if comparison_valid and direct_gap is not None and abs(direct_gap) <= 0.03:

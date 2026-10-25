@@ -51,8 +51,9 @@ public final class IrisPackPlanChecks {
 
         var scheduled = ShaderBackendSelection.choose("direct", true, plan);
         require(scheduled.fellBack() && scheduled.active().equals("zink"), scheduled.toString());
-        require(scheduled.coverage().equals("scheduled:shadow,gbuffers_textured_lit,gbuffers_terrain,final"), scheduled.coverage());
+        require(scheduled.coverage().equals("compiled:shadow,gbuffers_textured_lit,gbuffers_terrain"), scheduled.coverage());
         require(scheduled.fallback().contains("world draws stay on Zink"), scheduled.fallback());
+        require(scheduled.fallback().contains("final (outside the shadow/gbuffer texture subset)"), scheduled.fallback());
         var blocked = ShaderBackendSelection.choose("direct", true, mixed);
         require(blocked.fallback().contains("composite (compute)"), blocked.fallback());
         require(ShaderBackendSelection.choose("direct", true).coverage().equals("composite-chain"), "Empty pack changed the fallback");

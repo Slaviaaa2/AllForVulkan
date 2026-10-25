@@ -25,7 +25,7 @@ Frame intervals are `RenderFrameEvent.Post` times. They include pacing and prese
 | `afv-bridge` | Zink GL client, AFV Vulkan presentation, async present at the default | `asyncPresent=true`, `pipelineDepth=0` |
 | `afv-bridge-sync` | Same bridge with `--sync-present` | `asyncPresent=false` |
 | `afv-native` | Optional. Zink's own window, no AFV bridge | Renderer must contain zink |
-| `afv-direct` | Optional. Requests the direct frame graph | `shaderBackendRequested=direct`. A recorded fallback is valid. `shaderBackendCoverage` of `scheduled:...` names Iris programs the scheduler recognized. World draws still run on Zink |
+| `afv-direct` | Optional. Requests the direct frame graph | `shaderBackendRequested=direct`. A recorded fallback is valid. `scheduled:...` names recognized Iris programs. `compiled:...` names the fixed shadow/gbuffer programs that produced SPIR-V. World draws still run on Zink |
 
 Default routes are the first four. Add the optional ones with `--also afv-native` or `--also afv-direct`.
 
@@ -71,7 +71,7 @@ Each client log and `afv-benchmark.json` is copied into `round-<n>-<route>/` bef
 
 - AFV bridge average FPS within 3% of `zink-gl`: presentation is not the bottleneck on that machine.
 - Native GL more than 15% faster than both `zink-gl` and `afv-bridge`: the gap is GL translation, which the presentation path does not remove.
-- `afv-direct` matching `afv-bridge`: expected. Coverage `scheduled:...` means those pack programs were recognized. World draws, and every program listed as unsupported, still run on Zink. A large "direct" win in this build is a measurement bug.
+- `afv-direct` matching `afv-bridge`: expected. Coverage `scheduled:...` means those pack programs were recognized. Coverage `compiled:...` means those fixed shadow and gbuffer programs produced SPIR-V and were not submitted. World draws, and every program listed as unsupported or not compiled, still run on Zink. A large "direct" win in this build is a measurement bug.
 
 A/B the direct request against the current bridge without the other routes:
 

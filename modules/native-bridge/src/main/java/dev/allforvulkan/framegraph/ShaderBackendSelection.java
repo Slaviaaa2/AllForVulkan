@@ -24,8 +24,14 @@ public final class ShaderBackendSelection {
         if (plan == null || plan.supported().isEmpty())
             return new Decision("direct", "zink", "composite-chain",
                     "Iris/Sodium passes are outside the direct composite-chain slice; the GL client stays on Zink");
+        IrisSubset.Result subset = IrisSubset.compile(plan);
         String blocked = plan.blockedSummary();
-        String fallback = "world draws stay on Zink" + (blocked.isEmpty() ? "" : "; unsupported programs: " + blocked);
-        return new Decision("direct", "zink", "scheduled:" + plan.supportedSummary(), fallback);
+        String unsupported = blocked.isEmpty() ? "" : "; unsupported programs: " + blocked;
+        if (subset.shaders().isEmpty())
+            return new Decision("direct", "zink", "scheduled:" + plan.supportedSummary(),
+                    "world draws stay on Zink" + unsupported);
+        String skipped = subset.skippedSummary().isEmpty() ? "" : "; not compiled: " + subset.skippedSummary();
+        return new Decision("direct", "zink", "compiled:" + subset.compiledSummary(),
+                "world draws stay on Zink" + unsupported + skipped);
     }
 }

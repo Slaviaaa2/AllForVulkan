@@ -235,3 +235,4 @@ tasks.named('check') { dependsOn 'verifyMesaVendors' }
 tasks.named('check') { dependsOn ':native-bridge:verifyFrameGraph' }
 tasks.named('check') { dependsOn ':native-bridge:verifyCompositeChain' }
 tasks.named('check') { dependsOn ':native-bridge:verifyIrisPackPlan' }
+tasks.named('check') { dependsOn ':native-bridge:verifyIrisSubset' }
