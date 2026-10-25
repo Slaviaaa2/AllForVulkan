@@ -25,7 +25,7 @@ Frame intervals are `RenderFrameEvent.Post` times. They include pacing and prese
 | `afv-bridge` | Zink GL client, AFV Vulkan presentation, async present at the default | `asyncPresent=true`, `pipelineDepth=0` |
 | `afv-bridge-sync` | Same bridge with `--sync-present` | `asyncPresent=false` |
 | `afv-native` | Optional. Zink's own window, no AFV bridge | Renderer must contain zink |
-| `afv-direct` | Optional. Requests the direct frame graph | `shaderBackendRequested=direct`. A recorded fallback is valid and means the run is still Zink |
+| `afv-direct` | Optional. Requests the direct frame graph | `shaderBackendRequested=direct`. A recorded fallback is valid. `shaderBackendCoverage` of `scheduled:...` names Iris programs the scheduler recognized. World draws still run on Zink |
 
 Default routes are the first four. Add the optional ones with `--also afv-native` or `--also afv-direct`.
 
@@ -71,7 +71,23 @@ Each client log and `afv-benchmark.json` is copied into `round-<n>-<route>/` bef
 
 - AFV bridge average FPS within 3% of `zink-gl`: presentation is not the bottleneck on that machine.
 - Native GL more than 15% faster than both `zink-gl` and `afv-bridge`: the gap is GL translation, which the presentation path does not remove.
-- `afv-direct` matching `zink-gl`: expected while the fallback string is set. The direct flag does not execute Iris passes yet. A large "direct" win in this build is a measurement bug.
+- `afv-direct` matching `afv-bridge`: expected. Coverage `scheduled:...` means those pack programs were recognized. World draws, and every program listed as unsupported, still run on Zink. A large "direct" win in this build is a measurement bug.
+
+A/B the direct request against the current bridge without the other routes:
+
+```sh
+python3 scripts/benchmark_desktop.py \
+  --instance /path/to/private-client \
+  --install /path/to/CurseForge/Install \
+  --java-home /path/to/jdk21 \
+  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.1.jar \
+  --shader-pack /path/to/ComplementaryReimagined_r5.9.3.zip \
+  --display :0 \
+  --route afv-bridge --route afv-direct \
+  --output ~/afv-bench
+```
+
+`--route` replaces the default list. Omit `--route` to keep native GL, Zink, the bridge, and the synchronous bridge. `--also afv-direct` adds the direct request to those four. The same JAR is used for every route. `afv-bridge` does not pass `--shader-backend`. `afv-direct` passes `--shader-backend direct`.
 - Async versus sync is printed as a signed average-FPS gap. Treat it as a gain only when it repeats and p95 does not regress. If the bridge class is `gpu-bound`, overlap has little room to raise FPS.
 - A run is dropped when the client fails, the benchmark file is missing, VSync is on, the frame limit is capped, the renderer does not match the route, or a route changes framebuffer size between its own runs.
 - An invalidated comparison is labeled in the summary. Do not quote a route difference from that file as an AFV gain.

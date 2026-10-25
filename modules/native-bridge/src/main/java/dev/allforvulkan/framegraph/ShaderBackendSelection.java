@@ -10,11 +10,22 @@ public final class ShaderBackendSelection {
     private ShaderBackendSelection() {}
 
     public static Decision choose(String requested, boolean thirdPartyGlClient) {
+        return choose(requested, thirdPartyGlClient, IrisPackPlan.empty());
+    }
+
+    /** A pack plan names programs the scheduler understands. World draws stay on Zink
+     * until those passes have a mesh source, and unsupported programs stay on Zink too. */
+    public static Decision choose(String requested, boolean thirdPartyGlClient, IrisPackPlan plan) {
         String normalized = requested == null ? "zink" : requested.trim().toLowerCase(java.util.Locale.ROOT);
         if (!normalized.equals("direct")) return new Decision("zink", "zink", "zink-driver", "");
-        String reason = thirdPartyGlClient
-                ? "Iris/Sodium passes are outside the direct composite-chain slice; the GL client stays on Zink"
-                : "the direct slice is not the native terrain renderer; this launch keeps the current renderer";
-        return new Decision("direct", "zink", "composite-chain", reason);
+        if (!thirdPartyGlClient)
+            return new Decision("direct", "zink", "composite-chain",
+                    "the direct slice is not the native terrain renderer; this launch keeps the current renderer");
+        if (plan == null || plan.supported().isEmpty())
+            return new Decision("direct", "zink", "composite-chain",
+                    "Iris/Sodium passes are outside the direct composite-chain slice; the GL client stays on Zink");
+        String blocked = plan.blockedSummary();
+        String fallback = "world draws stay on Zink" + (blocked.isEmpty() ? "" : "; unsupported programs: " + blocked);
+        return new Decision("direct", "zink", "scheduled:" + plan.supportedSummary(), fallback);
     }
 }

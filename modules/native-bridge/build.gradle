@@ -54,6 +54,12 @@ tasks.register('verifyCompositeChain', JavaExec) {
     // Leave VK_ICD_FILENAMES to the machine. Forcing lavapipe here would hide the owner's GPU.
 }
 tasks.named('check') { dependsOn 'verifyFrameGraph', 'verifyCompositeChain' }
+tasks.register('verifyIrisPackPlan', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.allforvulkan.framegraph.IrisPackPlanChecks'
+}
+tasks.named('check') { dependsOn 'verifyIrisPackPlan' }
 
 // Optional direct-output router; other platforms retain the ordinary copy path.
 if (System.getProperty('os.name').toLowerCase().contains('linux') &&

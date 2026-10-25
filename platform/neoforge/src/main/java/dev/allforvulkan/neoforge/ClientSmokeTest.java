@@ -148,6 +148,7 @@ public final class ClientSmokeTest {
                 conditions.put("shaderBackendRequested", BackendBootstrap.shaderBackendRequested());
                 conditions.put("shaderBackendActive", BackendBootstrap.shaderBackendActive());
                 conditions.put("shaderBackendFallback", BackendBootstrap.shaderBackendFallback());
+                conditions.put("shaderBackendCoverage", BackendBootstrap.shaderBackendCoverage());
                 Initializer.LOGGER.info("AFV_BENCHMARK_END: wallMs={}", conditions.get("benchmarkEndWallMs"));
                 conditions.put("warmupTicks", warmup);
                 conditions.put("width", client.getWindow().getWidth());

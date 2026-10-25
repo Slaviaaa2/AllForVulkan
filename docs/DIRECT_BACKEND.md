@@ -54,10 +54,13 @@ The executor prefers a device named by `afv.compositeDevice`. Otherwise it takes
 
 ## In-game flag
 
-`afv.shaderBackend=zink|direct` (and the same key in the AFV settings screen) is recorded on the `AFV_SHADER_BACKEND` log line, separate from `AFV_BACKEND`. `ShaderBackendSelection` keeps the active path on Zink in both of these cases:
+`afv.shaderBackend=zink|direct` (and the same key in the AFV settings screen) is recorded on the `AFV_SHADER_BACKEND` log line, separate from `AFV_BACKEND`. `ShaderBackendSelection` keeps the active path on Zink:
 
-- Iris or any other mod is loaded. Coverage is reported as `composite-chain`, with the reason that Iris and Sodium passes are outside this slice.
 - No third-party mod is loaded. The slice is not the native terrain renderer, so the current renderer stays.
+- Iris or another mod is loaded and the shader pack has no supported program. Coverage stays `composite-chain`.
+- The pack has supported programs. Coverage is `scheduled:` plus those program names. Unsupported programs are named in the fallback string. World draws still run on Zink, so the client does not switch renderers.
+
+The pack reader uses `config/iris.properties` and the file under `shaderpacks/`. A missing pack, `enableShaders=false`, or an unreadable zip leaves the plan empty and keeps the previous fallback. The reader does not follow paths outside `shaderpacks/`.
 
 The fallback string is the honest label. A benchmark route that requested `direct` and shows that string is still a Zink run.
 

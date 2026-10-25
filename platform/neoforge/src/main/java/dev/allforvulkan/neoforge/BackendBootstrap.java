@@ -50,7 +50,10 @@ public final class BackendBootstrap {
             // native renderer. Preserve the existing client pipeline and let
             // the real GL driver translate it, including unfamiliar mods.
             boolean moddedClient = mods.stream().anyMatch(mod -> !BASE_MODS.contains(mod));
-            shaderDecision = ShaderBackendSelection.choose(shaderBackend.name(), moddedClient);
+            var packPlan = shaderBackend == ShaderBackend.DIRECT && moddedClient
+                    ? dev.allforvulkan.framegraph.IrisPackPlan.fromGameDirectory(FMLLoader.getGamePath())
+                    : dev.allforvulkan.framegraph.IrisPackPlan.empty();
+            shaderDecision = ShaderBackendSelection.choose(shaderBackend.name(), moddedClient, packPlan);
             boolean clientBridge = Boolean.getBoolean("afv.zinkClient") || moddedClient || presentation == Presentation.NATIVE;
             boolean nativeWindow = clientBridge && presentation == Presentation.NATIVE;
             boolean asyncForced = "true".equalsIgnoreCase(System.getProperty("afv.asyncPresent")) || Boolean.getBoolean("afv.experimentalAsyncPresent");
@@ -112,6 +115,7 @@ public final class BackendBootstrap {
     public static String shaderBackendRequested() { initialize(); return shaderDecision.requested(); }
     public static String shaderBackendActive() { initialize(); return shaderDecision.active(); }
     public static String shaderBackendFallback() { initialize(); return shaderDecision.fallback(); }
+    public static String shaderBackendCoverage() { initialize(); return shaderDecision.coverage(); }
     public static boolean usesVulkan() { initialize(); return vulkan || zinkClient || zinkNative; }
     public static Mode requested() { initialize(); return requested; }
     public static String reason() { initialize(); return reason; }
