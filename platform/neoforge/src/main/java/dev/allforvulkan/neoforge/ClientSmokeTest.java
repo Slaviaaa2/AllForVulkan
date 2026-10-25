@@ -99,6 +99,15 @@ public final class ClientSmokeTest {
             return;
         }
         if (phase >= 1 && phase <= 3 && client.level != null && client.player != null && client.screen == null) {
+            if (phase == 1 && Boolean.getBoolean("afv.shadowProbe")) {
+                if (++stableTicks < 200) return;
+                if (!dev.allforvulkan.validation.ShadowProbe.capture()) return;
+                String summary = dev.allforvulkan.validation.ShadowProbe.summary();
+                Initializer.LOGGER.info("AFV_SHADOW_PROBE_PASS: {}", summary);
+                System.out.println("AFV_SHADOW_PROBE_PASS: " + summary);
+                pass(client);
+                return;
+            }
             if (phase == 1 && Boolean.getBoolean("afv.smokeScene")) {
                 if (scene == null) scene = dev.allforvulkan.validation.ValidationScene.create(client.getSingleplayerServer());
                 if (!scene.isDone()) return;

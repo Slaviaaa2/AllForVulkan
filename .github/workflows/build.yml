@@ -27,6 +27,9 @@ jobs:
           distribution: 'microsoft'
       - name: make gradle wrapper executable
         run: chmod +x ./gradlew
+      # The Xvfb Iris shadow client is a local harness (scripts/shadow_probe.py), not this job.
+      - name: check
+        run: ./gradlew check
       - name: build
         run: ./gradlew build
       - name: capture build artifacts

@@ -25,5 +25,5 @@ not an AFV runtime dependency. LWJGL libraries retain their own license notices.
 The embedded native-bridge and its standalone diagnostic use system Mesa/Zink and Vulkan via
 LWJGL. Mesa binaries are not redistributed. Iris and Sodium comparison artifacts
 are downloaded from their original Modrinth CDN using pinned checksums; neither
-is included in AFV's distribution or relicensed. `tests/shaderpacks/AFV-Smoke`
+is included in AFV's distribution or relicensed. `tests/shaderpacks/AFV-Smoke`, `tests/shaderpacks/AFV-Shadow`,
 and the baseline fixture are AFV-owned test sources, not third-party shader packs.
