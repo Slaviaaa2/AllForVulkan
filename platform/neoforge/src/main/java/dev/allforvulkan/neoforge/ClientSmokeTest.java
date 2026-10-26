@@ -60,19 +60,25 @@ public final class ClientSmokeTest {
             heldTicks = 0;
             return false;
         }
-        return ++heldTicks >= 40;
+        return ++heldTicks >= 100;
     }
 
-    /** Iris draws the player into the shadow map unless they are a spectator. The terrain mesh does not include that model. */
+    /** Iris draws the player into the shadow map unless they are a spectator. The terrain mesh does not include that model.
+     * The same block keeps the off, on, and fallback images comparable. */
     private static void hideProbePlayer(Minecraft client) {
         client.player.setInvisible(true);
+        client.player.setPos(0.5, -60, 0.5);
+        client.player.setDeltaMovement(0, 0, 0);
+        client.player.setYRot(0f);
         client.player.setXRot(80f);
         var server = client.getSingleplayerServer();
         if (server == null) return;
         var id = client.player.getUUID();
         server.execute(() -> {
             var player = server.getPlayerList().getPlayer(id);
-            if (player != null && !player.isSpectator()) player.setGameMode(GameType.SPECTATOR);
+            if (player == null) return;
+            if (!player.isSpectator()) player.setGameMode(GameType.SPECTATOR);
+            if (player.distanceToSqr(0.5, -60, 0.5) > 0.01) player.teleportTo(0.5, -60, 0.5);
         });
     }
 
