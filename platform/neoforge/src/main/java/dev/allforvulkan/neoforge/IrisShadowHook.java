@@ -77,7 +77,8 @@ public final class IrisShadowHook {
                             frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 8));
                 }
                 lastResult = "mismatch " + mismatches + (mesh.rgba() == null ? ""
-                        : ShadowImage.bestShift(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE));
+                        : ShadowImage.bestShift(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE)
+                        + ShadowImage.nearMismatchSummary(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 6));
                 fallback(mesh.rgba() == null ? mesh.detail() : "mesh mismatch " + mismatches + " " + mesh.detail());
                 return;
             }

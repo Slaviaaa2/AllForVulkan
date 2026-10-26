@@ -101,7 +101,37 @@ public final class ShadowImage {
                 }
             }
         }
-        return " strict=" + origin + " shift=" + bestDx + "," + bestDy + " shifted=" + best;
+        return " strict=" + origin + " near2=" + neighborhood(left, right, width, height, tolerance, 2)
+                + " shift=" + bestDx + "," + bestDy + " shifted=" + best;
+    }
+
+    private static int neighborhood(byte[] left, byte[] right, int width, int height, int tolerance, int radius) {
+        int mismatches = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (!within(left, right, width, height, x, y, tolerance, radius)) mismatches++;
+            }
+        }
+        return mismatches;
+    }
+
+    private static boolean within(byte[] left, byte[] right, int width, int height, int x, int y, int tolerance, int radius) {
+        int index = (y * width + x) * 4;
+        for (int dy = -radius; dy <= radius; dy++) {
+            int yy = y + dy;
+            if (yy < 0 || yy >= height) continue;
+            for (int dx = -radius; dx <= radius; dx++) {
+                int xx = x + dx;
+                if (xx < 0 || xx >= width) continue;
+                int other = (yy * width + xx) * 4;
+                if (channel(left[index], right[other]) <= tolerance
+                        && channel(left[index + 1], right[other + 1]) <= tolerance
+                        && channel(left[index + 2], right[other + 2]) <= tolerance
+                        && channel(left[index + 3], right[other + 3]) <= tolerance)
+                    return true;
+            }
+        }
+        return false;
     }
 
     private static int strict(byte[] left, byte[] right, int width, int height, int tolerance, int dx, int dy) {
