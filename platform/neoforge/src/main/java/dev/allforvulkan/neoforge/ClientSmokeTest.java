@@ -196,6 +196,8 @@ public final class ClientSmokeTest {
                 if (mesh && (stableTicks == 200 || stableTicks == 800))
                     System.out.println("AFV_SHADOW_MESH_VIEW: tick=" + stableTicks + " " + viewCenter(client));
                 if (++stableTicks < (mesh ? 120 : 200)) return;
+                // A fixed wait lets every mode finish loading the same sections before the hold.
+                if (mesh && stableTicks < 500) return;
                 if (mesh && !sectionsSettled() && stableTicks < 900) return;
                 if (!dev.allforvulkan.validation.ShadowProbe.capture()) return;
                 String summary = dev.allforvulkan.validation.ShadowProbe.summary();
