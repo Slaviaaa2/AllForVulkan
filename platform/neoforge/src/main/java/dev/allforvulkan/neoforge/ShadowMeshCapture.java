@@ -34,6 +34,7 @@ public final class ShadowMeshCapture {
     private static final float[] PROJECTION = new float[16];
     private static boolean matrices;
     private static int generation;
+    private static int passId;
     private static int lastSections;
     private static int maxSections;
     private static int renderLogs;
@@ -45,7 +46,10 @@ public final class ShadowMeshCapture {
         if (!BackendBootstrap.irisShadow()) return;
         DRAWS.clear();
         matrices = false;
+        passId++;
     }
+
+    public static int passId() { return passId; }
 
     public static void retainUpload(Iterable<?> outputs) {
         if (!BackendBootstrap.irisShadow() || outputs == null) return;
@@ -58,18 +62,19 @@ public final class ShadowMeshCapture {
         }
     }
 
-    public static void retainDraw(ChunkRenderMatrices cameraMatrices, ChunkRenderListIterable lists,
+    /** True when this call recorded opaque shadow terrain. The caller may then skip the GL draw. */
+    public static boolean retainDraw(ChunkRenderMatrices cameraMatrices, ChunkRenderListIterable lists,
                                   TerrainRenderPass pass, CameraTransform camera) {
         if (Boolean.getBoolean("afv.shadowMesh")) noteRender(pass, lists, camera);
-        if (pass == null || pass.isTranslucent() || !shadows() || lists == null || camera == null) return;
-        if (!BackendBootstrap.irisShadow()) return;
+        if (pass == null || pass.isTranslucent() || !shadows() || lists == null || camera == null) return false;
+        if (!BackendBootstrap.irisShadow()) return false;
         if (!matrices && cameraMatrices != null && cameraMatrices.modelView() != null && cameraMatrices.projection() != null) {
             cameraMatrices.modelView().get(MODEL_VIEW);
             cameraMatrices.projection().get(PROJECTION);
             matrices = true;
         }
         var sections = MESHES.get(pass);
-        if (sections == null) return;
+        if (sections == null) return false;
         var iterator = lists.iterator(false);
         while (iterator.hasNext()) {
             ChunkRenderList list = iterator.next();
@@ -88,6 +93,7 @@ public final class ShadowMeshCapture {
                 DRAWS.add(new Draw(stored.packed, stored.vertices, stored.stride, regionX, regionY, regionZ));
             }
         }
+        return true;
     }
 
     public static Snapshot snapshot() {
