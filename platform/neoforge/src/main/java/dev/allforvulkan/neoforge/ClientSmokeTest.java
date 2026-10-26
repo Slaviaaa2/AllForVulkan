@@ -78,7 +78,9 @@ public final class ClientSmokeTest {
             var player = server.getPlayerList().getPlayer(id);
             if (player == null) return;
             if (!player.isSpectator()) player.setGameMode(GameType.SPECTATOR);
-            if (player.distanceToSqr(0.5, -60, 0.5) > 0.01) player.teleportTo(0.5, -60, 0.5);
+            player.teleportTo(0.5, -60, 0.5);
+            player.setYRot(0f);
+            player.setXRot(80f);
         });
     }
 
@@ -198,6 +200,7 @@ public final class ClientSmokeTest {
                 if (++stableTicks < (mesh ? 120 : 200)) return;
                 // A fixed wait lets every mode finish loading the same sections before the hold.
                 if (mesh && stableTicks < 500) return;
+                if (mesh && ShadowMeshCapture.lastSections() < 5 && stableTicks < 900) return;
                 if (mesh && !sectionsSettled() && stableTicks < 900) return;
                 if (!dev.allforvulkan.validation.ShadowProbe.capture()) return;
                 String summary = dev.allforvulkan.validation.ShadowProbe.summary();
