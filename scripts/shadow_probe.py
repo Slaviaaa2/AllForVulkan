@@ -146,6 +146,10 @@ def launch(instance, iris_shadow, force_fallback, mesh, timeout):
             require_stable_mesh(text)
             if 'AFV_SHADOW_MESH_CAPTURE: matched=true' not in text:
                 raise SystemExit('The captured shadow frame was not a Vulkan replay')
+            if 'AFV_IRIS_SHADOW_SKIP' not in text:
+                raise SystemExit('The GL shadow terrain draw was not skipped after the replay matched')
+        if 'AFV_IRIS_SHADOW_SKIP' in text and (force_fallback or not iris_shadow):
+            raise SystemExit('The GL shadow draw was skipped while the replay was off or forced back')
     else:
         require_constant(passed[-1])
     if 'AFV_IRIS_SHADOW_HOOK' not in text:
