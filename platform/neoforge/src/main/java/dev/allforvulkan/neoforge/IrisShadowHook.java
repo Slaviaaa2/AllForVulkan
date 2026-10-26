@@ -30,6 +30,7 @@ public final class IrisShadowHook {
     private static boolean matched;
     private static boolean meshMatch;
     private static int heldVertices = -1;
+    private static int heldFingerprint;
     private static int stableFrames;
     private static int notedPass = -1;
     private static boolean loggedSkip;
@@ -39,7 +40,7 @@ public final class IrisShadowHook {
 
     public static String lastResult() { return lastResult; }
 
-    /** The GL terrain draw can be skipped once two matches in a row saw the same mesh. */
+    /** The GL terrain draw can be skipped once two matches in a row saw the same mesh and camera. */
     public static boolean skipShadowGl() {
         return meshMatch && stableFrames >= 2 && BackendBootstrap.irisShadow()
                 && !Boolean.getBoolean("afv.irisShadowForceFallback");
@@ -136,6 +137,7 @@ public final class IrisShadowHook {
         if (!subsetMatch || vertices <= 0) {
             meshMatch = false;
             heldVertices = -1;
+            heldFingerprint = 0;
             stableFrames = 0;
             notedPass = pass;
             return;
@@ -144,8 +146,10 @@ public final class IrisShadowHook {
         if (pass == notedPass) return;
         notedPass = pass;
         meshMatch = true;
-        if (vertices == heldVertices) stableFrames++;
+        int fingerprint = ShadowMeshCapture.fingerprint();
+        if (fingerprint == heldFingerprint) stableFrames++;
         else {
+            heldFingerprint = fingerprint;
             heldVertices = vertices;
             stableFrames = 1;
         }

@@ -51,6 +51,25 @@ public final class ShadowMeshCapture {
 
     public static int passId() { return passId; }
 
+    /** Camera, projection, and section placement. A repeated value means the replay inputs did not move. */
+    public static int fingerprint() {
+        int hash = mix(1, MODEL_VIEW);
+        hash = mix(hash, PROJECTION);
+        for (Draw draw : DRAWS) {
+            hash = 31 * hash + Float.floatToIntBits(draw.regionX());
+            hash = 31 * hash + Float.floatToIntBits(draw.regionY());
+            hash = 31 * hash + Float.floatToIntBits(draw.regionZ());
+            hash = 31 * hash + draw.vertices();
+        }
+        return hash;
+    }
+
+    private static int mix(int hash, float[] matrix) {
+        if (matrix == null) return hash * 31;
+        for (float value : matrix) hash = 31 * hash + Float.floatToIntBits(value);
+        return hash;
+    }
+
     public static void retainUpload(Iterable<?> outputs) {
         if (!BackendBootstrap.irisShadow() || outputs == null) return;
         for (Object output : outputs) {

@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /** Records the section draws Sodium submits while Iris is rendering shadows.
- * After the texture×tint replay has matched twice at the same size, the GL draw is skipped. */
+ * After the texture×tint replay has matched twice with the same camera and mesh, the GL draw is skipped. */
 @Mixin(targets = "net.caffeinemc.mods.sodium.client.render.chunk.DefaultChunkRenderer", remap = false)
 public class SodiumShadowMeshMixin {
     @Inject(method = "render", at = @At("HEAD"), remap = false, cancellable = true, require = 1)
