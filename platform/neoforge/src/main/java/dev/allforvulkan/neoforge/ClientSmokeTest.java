@@ -160,13 +160,7 @@ public final class ClientSmokeTest {
             phase = 1;
             stableTicks = 0;
             drawBaseline = BackendBootstrap.vulkan() ? DrawBuffers.getSubmittedDraws() : 0;
-            String name = "AFV-Smoke-" + System.currentTimeMillis();
-            client.createWorldOpenFlows().createFreshLevel(name,
-                    new LevelSettings(name, GameType.CREATIVE, false, Difficulty.PEACEFUL, true,
-                            new GameRules(), WorldDataConfiguration.DEFAULT),
-                    new WorldOptions(123456789L, false, false),
-                    registries -> registries.registryOrThrow(Registries.WORLD_PRESET)
-                            .getHolderOrThrow(WorldPresets.FLAT).value().createWorldDimensions(), client.screen);
+            openProbeWorld(client);
             return;
         }
         if (phase == 11 && client.level != null && client.player != null && client.screen == null) {
@@ -394,6 +388,25 @@ public final class ClientSmokeTest {
             if (player != null) player.connection.teleport(x, -60.0, z, yaw, 12.0f);
         });
         client.player.moveTo(x, -60.0, z, yaw, 12.0f);
+    }
+
+    /** Mesh runs share one flat world so off, on, and fallback see the same chunks. */
+    private static void openProbeWorld(Minecraft client) {
+        boolean mesh = Boolean.getBoolean("afv.shadowMesh");
+        String name = mesh ? "AFV-Shadow-Mesh" : "AFV-Smoke-" + System.currentTimeMillis();
+        var flows = client.createWorldOpenFlows();
+        if (mesh && client.getLevelSource().levelExists(name)) {
+            flows.openWorld(name, () -> {
+                throw new IllegalStateException("AFV_SMOKE_FAIL: could not reopen the shadow world");
+            });
+            return;
+        }
+        flows.createFreshLevel(name,
+                new LevelSettings(name, GameType.CREATIVE, false, Difficulty.PEACEFUL, true,
+                        new GameRules(), WorldDataConfiguration.DEFAULT),
+                new WorldOptions(123456789L, false, false),
+                registries -> registries.registryOrThrow(Registries.WORLD_PRESET)
+                        .getHolderOrThrow(WorldPresets.FLAT).value().createWorldDimensions(), client.screen);
     }
 
     private static void pass(Minecraft client) {
