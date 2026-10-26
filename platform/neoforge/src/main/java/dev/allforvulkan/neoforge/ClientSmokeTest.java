@@ -44,6 +44,25 @@ public final class ClientSmokeTest {
     private static long renderedFrames;
     private static long benchmarkBeginWallMs;
 
+    /** Chunk meshes keep arriving for a while after the first varied shadow. */
+    private static int heldSections = -1;
+    private static int heldTicks;
+
+    private static boolean sectionsSettled() {
+        int sections = ShadowMeshCapture.lastSections();
+        if (sections < 4) {
+            heldSections = sections;
+            heldTicks = 0;
+            return false;
+        }
+        if (sections != heldSections) {
+            heldSections = sections;
+            heldTicks = 0;
+            return false;
+        }
+        return ++heldTicks >= 40;
+    }
+
     /** Iris draws the player into the shadow map unless they are a spectator. The terrain mesh does not include that model. */
     private static void hideProbePlayer(Minecraft client) {
         client.player.setInvisible(true);
@@ -171,6 +190,7 @@ public final class ClientSmokeTest {
                 if (mesh && (stableTicks == 200 || stableTicks == 800))
                     System.out.println("AFV_SHADOW_MESH_VIEW: tick=" + stableTicks + " " + viewCenter(client));
                 if (++stableTicks < (mesh ? 120 : 200)) return;
+                if (mesh && !sectionsSettled() && stableTicks < 900) return;
                 if (!dev.allforvulkan.validation.ShadowProbe.capture()) return;
                 String summary = dev.allforvulkan.validation.ShadowProbe.summary();
                 if (mesh && distinctColors(summary) < 2 && stableTicks < 900) return;
