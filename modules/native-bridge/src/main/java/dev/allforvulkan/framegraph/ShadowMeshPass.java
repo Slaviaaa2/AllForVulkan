@@ -13,8 +13,9 @@ import static org.lwjgl.vulkan.VK12.VK_API_VERSION_1_2;
 
 /** Draws one decoded shadow mesh with the subset program. The readback is bottom-row-first, like glGetTexImage.
  * Iris's shadow ortho is classic OpenGL clip space, with z in [-1, 1]. Vulkan clips z to [0, 1], so that
- * projection is rewritten with {@code z' = 0.5 z + 0.5 w} and then flipped on Y. The Y flip makes Vulkan's
- * top-left framebuffer match glGetTexImage after the row flip. Face culling stays off, matching Iris's shadow terrain. */
+ * projection is rewritten with {@code z' = 0.5 z + 0.5 w}. A negative viewport height mirrors Y into the
+ * framebuffer, and the readback flips rows to match glGetTexImage. Clip Y is then nudged by an eighth of a
+ * pixel so an edge through a pixel center fills the lower pixel, as llvmpipe does. Face culling stays off. */
 public final class ShadowMeshPass {
     private static final int FORMAT = VK_FORMAT_R8G8B8A8_UNORM;
     private static final int DEPTH_FORMAT = VK_FORMAT_D32_SFLOAT;
@@ -135,7 +136,7 @@ public final class ShadowMeshPass {
                 renderPass = renderPass(device, stack);
                 uniform = buffer(device, stack, UNIFORM_BYTES, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
                 uniformMemory = bind(device, stack, memory, uniform, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-                writeUniforms(device, uniformMemory, draw.modelView(), vulkanProjection(draw.projection()));
+                writeUniforms(device, uniformMemory, draw.modelView(), vulkanProjection(draw.projection(), draw.size()));
                 long vertexBytes = (long) draw.vertices().length * 4;
                 vertices = buffer(device, stack, vertexBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
                 vertexMemory = bind(device, stack, memory, vertices, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -166,16 +167,23 @@ public final class ShadowMeshPass {
         }
     }
 
-    /** Column-major GL projection, rewritten for Vulkan clip space and a top-left framebuffer. */
+    /** Column-major GL projection, rewritten for Vulkan's zero-to-one clip and a negative viewport. */
     public static float[] vulkanProjection(float[] projection) {
+        return vulkanProjection(projection, 0);
+    }
+
+    /** {@code size > 0} nudges clip Y so a pixel center on an edge is resolved like llvmpipe.
+     * Vulkan includes the upper edge. llvmpipe includes the lower edge. An eighth of a pixel
+     * moves only that tie; edges that already sit between pixel centers stay with their pixel. */
+    public static float[] vulkanProjection(float[] projection, int size) {
         float[] flipped = projection.clone();
         for (int column = 0; column < 4; column++) {
             int base = column * 4;
             float z = flipped[base + 2];
             float w = flipped[base + 3];
-            flipped[base + 1] = -flipped[base + 1];
             flipped[base + 2] = 0.5f * z + 0.5f * w;
         }
+        if (size > 0) flipped[13] -= 0.125f * 2f / size;
         return flipped;
     }
 
@@ -218,7 +226,8 @@ public final class ShadowMeshPass {
                 vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
                 vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, stack.longs(set), null);
                 vkCmdBindVertexBuffers(buffer, 0, stack.longs(vertices), stack.longs(0));
-                vkCmdSetViewport(buffer, 0, VkViewport.calloc(1, stack).x(0).y(0).width(size).height(size).minDepth(0).maxDepth(1));
+                // Negative height puts NDC +Y at the top of the image. The row flip below then matches glGetTexImage.
+                vkCmdSetViewport(buffer, 0, VkViewport.calloc(1, stack).x(0).y(size).width(size).height(-size).minDepth(0).maxDepth(1));
                 vkCmdSetScissor(buffer, 0, VkRect2D.calloc(1, stack).extent(extent -> extent.set(size, size)));
                 vkCmdDraw(buffer, draw.vertices().length / VERTEX_FLOATS, 1, 0, 0);
                 vkCmdEndRenderPass(buffer);
