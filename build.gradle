@@ -13,6 +13,9 @@ java {
 evaluationDependsOn(':core-api')
 evaluationDependsOn(':native-bridge')
 sourceSets.main.java.srcDir 'platform/neoforge/src/main/java'
+sourceSets {
+    sodiumStub { java.srcDir 'platform/neoforge/src/sodium-stub/java' }
+}
 sourceSets { baseline }
 sourceSets.main.java.srcDir 'validation/common/java'
 sourceSets.baseline.java.srcDir 'validation/common/java'
@@ -54,6 +57,7 @@ neoForge {
             systemProperty 'afv.shadowProbe', System.getProperty('afv.shadowProbe', 'false')
             systemProperty 'afv.irisShadow', System.getProperty('afv.irisShadow', 'false')
             systemProperty 'afv.irisShadowForceFallback', System.getProperty('afv.irisShadowForceFallback', 'false')
+            systemProperty 'afv.shadowMesh', System.getProperty('afv.shadowMesh', 'false')
             systemProperty 'afv.smokeIrisCycle', System.getProperty('afv.smokeIrisCycle', 'false')
             systemProperty 'afv.smokeWindowCycle', System.getProperty('afv.smokeWindowCycle', 'false')
             systemProperty 'afv.smokeDimensions', System.getProperty('afv.smokeDimensions', 'false')
@@ -111,6 +115,7 @@ dependencies {
     testImplementation "org.lwjgl:lwjgl-opengl:${lwjglVersion}"
     testRuntimeOnly "org.lwjgl:lwjgl:${lwjglVersion}:${devNatives}"
     testRuntimeOnly "com.google.code.gson:gson:2.10.1"
+    sodiumStubCompileOnly 'org.joml:joml:1.10.5'
     implementation project(':core-api')
     jarJar project(':core-api')
     implementation project(':native-bridge')
@@ -135,6 +140,8 @@ configurations.jarJar {
     exclude group: 'org.lwjgl', module: 'lwjgl-opengl'
     exclude group: 'org.lwjgl', module: 'lwjgl-stb'
 }
+sourceSets.main.compileClasspath += sourceSets.sodiumStub.output
+tasks.named('compileJava') { dependsOn tasks.named('compileSodiumStubJava') }
 tasks.withType(JavaCompile).configureEach { options.release = 21 }
 // A standalone helper isolates unsupported Mesa/native-driver failures from Minecraft.
 def zinkProbeJar = tasks.register('zinkProbeJar', Jar) {
@@ -247,3 +254,5 @@ tasks.named('check') { dependsOn ':native-bridge:verifyCompositeChain' }
 tasks.named('check') { dependsOn ':native-bridge:verifyIrisPackPlan' }
 tasks.named('check') { dependsOn ':native-bridge:verifyIrisSubset' }
 tasks.named('check') { dependsOn ':native-bridge:verifyIrisSubsetDraw' }
+tasks.named('check') { dependsOn ':native-bridge:verifyShadowMesh' }
+tasks.named('check') { dependsOn ':native-bridge:verifyShadowMeshDraw' }

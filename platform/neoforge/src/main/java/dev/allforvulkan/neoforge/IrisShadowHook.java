@@ -22,6 +22,16 @@ public final class IrisShadowHook {
     private static boolean loggedSite;
     private static boolean loggedPass;
     private static boolean loggedFallback;
+    private static String lastFallback = "";
+    private static int fallbackLines;
+    private static int loggedMismatch = -2;
+    private static int mismatchLogs;
+    private static boolean matched;
+    private static String lastResult = "none";
+
+    public static boolean matched() { return matched; }
+
+    public static String lastResult() { return lastResult; }
 
     private IrisShadowHook() {}
 
@@ -40,6 +50,7 @@ public final class IrisShadowHook {
         try {
             replace();
         } catch (RuntimeException failure) {
+            matched = false;
             fallback(failure.getMessage());
         }
     }
@@ -48,28 +59,67 @@ public final class IrisShadowHook {
         ShadowProbe.Frame frame = ShadowProbe.readFrame();
         if (frame == null) return;
         if (Boolean.getBoolean("afv.irisShadowForceFallback")) {
+            matched = false;
             fallback("forced");
+            return;
+        }
+        var mesh = ShadowMeshReplay.render(frame.resolution());
+        if (mesh.subset()) {
+            byte[] chosen = ShadowImage.replacementNear(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution());
+            if (chosen != mesh.rgba()) {
+                matched = false;
+                int mismatches = mesh.rgba() == null ? -1
+                        : ShadowImage.nearMismatches(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE);
+                if (mesh.rgba() != null && mismatches != loggedMismatch && mismatchLogs < 5) {
+                    loggedMismatch = mismatches;
+                    mismatchLogs++;
+                    System.out.println("AFV_SHADOW_MESH_MISMATCH:" + ShadowImage.nearMismatchSummary(
+                            frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 8));
+                }
+                lastResult = "mismatch " + mismatches + (mesh.rgba() == null ? ""
+                        : ShadowImage.bestShift(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE)
+                        + ShadowImage.nearMismatchSummary(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 6));
+                fallback(mesh.rgba() == null ? mesh.detail() : "mesh mismatch " + mismatches + " " + mesh.detail());
+                return;
+            }
+            matched = true;
+            lastResult = "match";
+            upload(frame.texture(), frame.resolution(), chosen);
+            if (!loggedPass) {
+                String meshLine = "AFV_IRIS_SHADOW_MESH: " + mesh.detail();
+                Initializer.LOGGER.info(meshLine);
+                System.out.println(meshLine);
+            }
+            pass("AFV_IRIS_SHADOW_PASS: " + mesh.detail());
             return;
         }
         var image = ShadowConstantPass.render(frame.resolution());
         byte[] chosen = ShadowImage.replacement(frame.rgba(), image.rgba(), frame.resolution(), frame.resolution());
         if (chosen != image.rgba()) {
+            matched = false;
             fallback(image.rgba() == null ? image.detail() : "center mismatch");
             return;
         }
+        matched = true;
         upload(frame.texture(), frame.resolution(), chosen);
+        pass("AFV_IRIS_SHADOW_PASS: " + image.detail());
+    }
+
+    private static void pass(String summary) {
         if (!loggedPass) {
             loggedPass = true;
-            String summary = "AFV_IRIS_SHADOW_PASS: " + image.detail();
             Initializer.LOGGER.info(summary);
             System.out.println(summary);
         }
     }
 
     private static void fallback(String reason) {
-        if (loggedFallback || loggedPass) return;
-        loggedFallback = true;
+        if (loggedPass || fallbackLines >= 8) return;
         String summary = "AFV_IRIS_SHADOW_FALLBACK: " + (reason == null || reason.isBlank() ? "unavailable" : reason);
+        if (summary.equals(lastFallback)) return;
+        lastFallback = summary;
+        loggedFallback = true;
+        fallbackLines++;
         Initializer.LOGGER.info(summary);
         System.out.println(summary);
     }

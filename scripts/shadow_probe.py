@@ -28,6 +28,23 @@ def read_image(path):
     return width, height, data[12:]
 
 
+def near_mismatches(left, right, width, height, tolerance):
+    """A pixel matches when any texel within one step is inside the channel tolerance."""
+    if len(left) != len(right) or len(left) != width * height * 4:
+        raise ValueError('Shadow images differ in size')
+    mismatches = 0
+    for y in range(height):
+        for x in range(width):
+            index = (y * width + x) * 4
+            if not any(
+                0 <= x + dx < width and 0 <= y + dy < height and all(
+                    abs(left[index + channel] - right[((y + dy) * width + x + dx) * 4 + channel]) <= tolerance
+                    for channel in range(4))
+                for dy in (-1, 0, 1) for dx in (-1, 0, 1)):
+                mismatches += 1
+    return mismatches
+
+
 def center_mismatches(left, right, width, height, tolerance):
     if len(left) != len(right) or len(left) != width * height * 4:
         raise ValueError('Shadow images differ in size')
@@ -42,23 +59,27 @@ def center_mismatches(left, right, width, height, tolerance):
     return mismatches
 
 
-def prepare(instance):
+def prepare(instance, mesh):
+    pack_name = 'AFV-Shadow-Mesh' if mesh else 'AFV-Shadow'
     subprocess.run([sys.executable, str(ROOT / 'scripts/prepare_iris_baseline.py')], check=True, cwd=ROOT)
     mods = instance / 'mods'
     mods.mkdir(parents=True, exist_ok=True)
     for jar in (ROOT / 'run-iris-baseline' / 'mods').glob('*.jar'):
         shutil.copy2(jar, mods / jar.name)
-    pack = instance / 'shaderpacks' / 'AFV-Shadow'
+    pack = instance / 'shaderpacks' / pack_name
     if pack.exists():
         shutil.rmtree(pack)
-    shutil.copytree(ROOT / 'tests/shaderpacks/AFV-Shadow', pack)
+    shutil.copytree(ROOT / 'tests/shaderpacks' / pack_name, pack)
+    legacy = instance / 'shaderpacks' / ('AFV-Shadow' if mesh else 'AFV-Shadow-Mesh')
+    if legacy.exists():
+        shutil.rmtree(legacy)
     config = instance / 'config'
     config.mkdir(exist_ok=True)
     (config / 'fml.toml').write_text('earlyWindowControl = false\n')
-    (config / 'iris.properties').write_text('enableShaders=true\nshaderPack=AFV-Shadow\n')
+    (config / 'iris.properties').write_text('enableShaders=true\nshaderPack=' + pack_name + '\n')
     (instance / 'options.txt').write_text(
-        'onboardAccessibility:false\npauseOnLostFocus:false\nrenderDistance:2\n'
-        'simulationDistance:2\nenableVsync:false\nmaxFps:20\n')
+        'onboardAccessibility:false\npauseOnLostFocus:false\nrenderDistance:8\n'
+        'simulationDistance:5\nenableVsync:false\nmaxFps:20\n')
     marker = config / 'allforvulkan_renderer_starting'
     if marker.exists():
         marker.unlink()
@@ -80,7 +101,7 @@ def ensure_display():
     raise RuntimeError('Xvfb did not open :99')
 
 
-def launch(instance, iris_shadow, force_fallback, timeout):
+def launch(instance, iris_shadow, force_fallback, mesh, timeout):
     display = ensure_display()
     command = [
         './gradlew', 'runClient', '--console=plain',
@@ -89,6 +110,7 @@ def launch(instance, iris_shadow, force_fallback, timeout):
         '-Dafv.shadowProbe=true', '-Dafv.backend=OPENGL',
         '-Dafv.irisShadow=' + ('true' if iris_shadow else 'false'),
         '-Dafv.irisShadowForceFallback=' + ('true' if force_fallback else 'false'),
+        '-Dafv.shadowMesh=' + ('true' if mesh else 'false'),
     ]
     environment = dict(**{key: value for key, value in __import__('os').environ.items()})
     environment.update({
@@ -116,7 +138,16 @@ def launch(instance, iris_shadow, force_fallback, timeout):
         tail = '\n'.join(text.splitlines()[-80:])
         raise SystemExit('Shadow probe failed with exit ' + str(completed.returncode) + '\n' + tail)
     print(passed[-1])
-    require_constant(passed[-1])
+    if mesh:
+        require_varied(passed[-1])
+        if iris_shadow and not force_fallback and 'AFV_IRIS_SHADOW_MESH' not in text:
+            raise SystemExit('Vulkan did not replay a Sodium shadow mesh')
+        if iris_shadow and not force_fallback:
+            require_stable_mesh(text)
+            if 'AFV_SHADOW_MESH_CAPTURE: matched=true' not in text:
+                raise SystemExit('The captured shadow frame was not a Vulkan replay')
+    else:
+        require_constant(passed[-1])
     if 'AFV_IRIS_SHADOW_HOOK' not in text:
         extra = '\n'.join(line for line in text.splitlines() if 'AFV_IRIS_SHADOW' in line)
         raise SystemExit('Iris renderShadows hook did not run\n' + extra)
@@ -128,6 +159,33 @@ def launch(instance, iris_shadow, force_fallback, timeout):
     elif not iris_shadow and 'AFV_IRIS_SHADOW_PASS' in text:
         raise SystemExit('The shadow hook ran while afv.irisShadow was off')
     return log
+
+
+def require_stable_mesh(text):
+    """An early one-section match does not count once a later frame disagrees."""
+    last_pass = -1
+    last_mismatch = -1
+    for index, line in enumerate(text.splitlines()):
+        if 'AFV_IRIS_SHADOW_PASS' in line:
+            last_pass = index
+        if 'AFV_SHADOW_MESH_MISMATCH' in line:
+            last_mismatch = index
+    if last_mismatch > last_pass:
+        raise SystemExit('Shadow mesh replay mismatched after it had matched')
+
+
+def require_varied(line):
+    """AFV-Shadow-Mesh is 32x32 and the wool columns make the shadow map more than one color."""
+    import re
+    size = re.search(r'width=(\d+) height=(\d+)', line)
+    distinct = re.search(r'distinct=(\d+)', line)
+    if not size or not distinct:
+        raise SystemExit('Shadow probe pass line has no size or distinct count: ' + line)
+    width, height = int(size.group(1)), int(size.group(2))
+    if (width, height) != (32, 32):
+        raise SystemExit('Shadow map is ' + str(width) + 'x' + str(height) + ', expected 32x32: ' + line)
+    if int(distinct.group(1)) < 2:
+        raise SystemExit('Shadow map is a constant color: ' + line)
 
 
 def require_constant(line):
@@ -146,32 +204,39 @@ def require_constant(line):
         raise SystemExit('Shadow center ' + str(actual) + ' is outside tolerance of ' + str(expected))
 
 
-def compare(off, on, tolerance):
+def compare(off, on, tolerance, mesh):
     left_size = read_image(off)
     right_size = read_image(on)
     if left_size[0] != right_size[0] or left_size[1] != right_size[1]:
         raise SystemExit('Shadow resolutions differ: ' + str(left_size[:2]) + ' vs ' + str(right_size[:2]))
-    mismatches = center_mismatches(left_size[2], right_size[2], left_size[0], left_size[1], tolerance)
-    center = (left_size[0] - left_size[0] // 4 * 2) * (left_size[1] - left_size[1] // 4 * 2)
-    print(f'AFV_SHADOW_DIFF: mismatches={mismatches}/{center} tolerance={tolerance}')
+    if mesh:
+        mismatches = near_mismatches(left_size[2], right_size[2], left_size[0], left_size[1], tolerance)
+        total = left_size[0] * left_size[1]
+    else:
+        mismatches = center_mismatches(left_size[2], right_size[2], left_size[0], left_size[1], tolerance)
+        total = (left_size[0] - left_size[0] // 4 * 2) * (left_size[1] - left_size[1] // 4 * 2)
+    print(f'AFV_SHADOW_DIFF: mismatches={mismatches}/{total} tolerance={tolerance} mesh={mesh}')
     if mismatches:
-        raise SystemExit('Shadow center differs by more than the tolerance')
+        raise SystemExit('Shadow image differs by more than the tolerance')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('off', 'on', 'diff', 'fallback'), default='off')
-    parser.add_argument('--instance', type=Path, default=ROOT / 'run-shadow-probe')
+    parser.add_argument('--pack', choices=('constant', 'mesh'), default='constant')
+    parser.add_argument('--instance', type=Path)
     parser.add_argument('--timeout', type=int, default=2700)
     parser.add_argument('--tolerance', type=int, default=8)
     args = parser.parse_args()
-    instance = args.instance if args.instance.is_absolute() else ROOT / args.instance
+    instance = args.instance or (ROOT / ('run-shadow-mesh' if args.pack == 'mesh' else 'run-shadow-probe'))
+    instance = instance if instance.is_absolute() else ROOT / instance
+    mesh = args.pack == 'mesh'
     if args.mode == 'diff':
-        compare(instance / 'afv-shadow-off.rgba', instance / 'afv-shadow-on.rgba', args.tolerance)
-        compare(instance / 'afv-shadow-off.rgba', instance / 'afv-shadow-fallback.rgba', args.tolerance)
+        compare(instance / 'afv-shadow-off.rgba', instance / 'afv-shadow-on.rgba', args.tolerance, mesh)
+        compare(instance / 'afv-shadow-off.rgba', instance / 'afv-shadow-fallback.rgba', args.tolerance, mesh)
         return
-    prepare(instance)
-    launch(instance, args.mode in ('on', 'fallback'), args.mode == 'fallback', args.timeout)
+    prepare(instance, mesh)
+    launch(instance, args.mode in ('on', 'fallback'), args.mode == 'fallback', mesh, args.timeout)
 
 
 if __name__ == '__main__':

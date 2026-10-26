@@ -3,7 +3,10 @@ package dev.allforvulkan.neoforge;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
@@ -19,6 +22,7 @@ import net.vulkanmod.Initializer;
 import net.vulkanmod.render.chunk.WorldRenderer;
 import net.vulkanmod.render.chunk.buffer.DrawBuffers;
 import org.lwjgl.glfw.GLFW;
+import org.lwjgl.opengl.GL11;
 
 /** Explicitly enabled checks; never touch existing saves or close normal sessions. */
 @EventBusSubscriber(modid = "allforvulkan", value = Dist.CLIENT)
@@ -39,6 +43,94 @@ public final class ClientSmokeTest {
     private static DimensionLifecycle dimensionCycle;
     private static long renderedFrames;
     private static long benchmarkBeginWallMs;
+
+    /** Chunk meshes keep arriving for a while after the first varied shadow. */
+    private static int heldSections = -1;
+    private static int heldTicks;
+
+    private static boolean sectionsSettled() {
+        int sections = ShadowMeshCapture.lastSections();
+        if (sections < 4) {
+            heldSections = sections;
+            heldTicks = 0;
+            return false;
+        }
+        if (sections != heldSections) {
+            heldSections = sections;
+            heldTicks = 0;
+            return false;
+        }
+        return ++heldTicks >= 100;
+    }
+
+    /** Iris draws the player into the shadow map unless they are a spectator. The terrain mesh does not include that model.
+     * The same block keeps the off, on, and fallback images comparable. */
+    private static void hideProbePlayer(Minecraft client) {
+        client.player.setInvisible(true);
+        client.player.setPos(0.5, -60, 0.5);
+        client.player.setDeltaMovement(0, 0, 0);
+        client.player.setYRot(0f);
+        client.player.setXRot(80f);
+        var server = client.getSingleplayerServer();
+        if (server == null) return;
+        var id = client.player.getUUID();
+        server.execute(() -> {
+            var player = server.getPlayerList().getPlayer(id);
+            if (player == null) return;
+            if (!player.isSpectator()) player.setGameMode(GameType.SPECTATOR);
+            player.teleportTo(0.5, -60, 0.5);
+            player.setYRot(0f);
+            player.setXRot(80f);
+        });
+    }
+
+    private static void placeShadowBlocks(Minecraft client) {
+        var server = client.getSingleplayerServer();
+        if (server == null || client.player == null) return;
+        BlockPos feet = client.player.blockPosition();
+        server.execute(() -> {
+            var level = server.overworld();
+            level.setDayTime(6000);
+            Block[] wool = {Blocks.RED_WOOL, Blocks.BLUE_WOOL, Blocks.WHITE_WOOL, Blocks.LIME_WOOL};
+            int surface = feet.getY() - 1;
+            for (int column = 0; column < wool.length; column++) {
+                for (int dx = 0; dx < 6; dx++) {
+                    for (int dz = 0; dz < 6; dz++) {
+                        var pos = new BlockPos(feet.getX() + 2 + column * 6 + dx, surface, feet.getZ() + 2 + dz);
+                        level.setBlockAndUpdate(pos, wool[column].defaultBlockState());
+                        level.setBlockAndUpdate(pos.above(), wool[column].defaultBlockState());
+                    }
+                }
+            }
+            System.out.println("AFV_SHADOW_MESH_SCENE: wool columns at " + feet.getX() + "," + surface + "," + feet.getZ());
+        });
+    }
+
+    private static String viewCenter(Minecraft client) {
+        var target = client.getMainRenderTarget();
+        int width = target.width;
+        int height = target.height;
+        int id = target.getColorTextureId();
+        if (id <= 0 || width < 1 || height < 1) return "no target";
+        var buffer = org.lwjgl.BufferUtils.createByteBuffer(width * height * 4);
+        int previous = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, id);
+        GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, previous);
+        int index = ((height / 2) * width + width / 2) * 4;
+        return "size=" + width + "x" + height + " center="
+                + (buffer.get(index) & 255) + "," + (buffer.get(index + 1) & 255) + ","
+                + (buffer.get(index + 2) & 255) + "," + (buffer.get(index + 3) & 255);
+    }
+
+    private static int distinctColors(String summary) {
+        int at = summary.indexOf("distinct=");
+        if (at < 0) return 0;
+        int value = 0;
+        for (int index = at + "distinct=".length(); index < summary.length() && Character.isDigit(summary.charAt(index)); index++)
+            value = value * 10 + summary.charAt(index) - '0';
+        return value;
+    }
 
     @SubscribeEvent public static void frame(net.neoforged.neoforge.client.event.RenderFrameEvent.Post event) {
         if (ENABLED) renderedFrames++;
@@ -68,13 +160,7 @@ public final class ClientSmokeTest {
             phase = 1;
             stableTicks = 0;
             drawBaseline = BackendBootstrap.vulkan() ? DrawBuffers.getSubmittedDraws() : 0;
-            String name = "AFV-Smoke-" + System.currentTimeMillis();
-            client.createWorldOpenFlows().createFreshLevel(name,
-                    new LevelSettings(name, GameType.CREATIVE, false, Difficulty.PEACEFUL, true,
-                            new GameRules(), WorldDataConfiguration.DEFAULT),
-                    new WorldOptions(123456789L, false, false),
-                    registries -> registries.registryOrThrow(Registries.WORLD_PRESET)
-                            .getHolderOrThrow(WorldPresets.FLAT).value().createWorldDimensions(), client.screen);
+            openProbeWorld(client);
             return;
         }
         if (phase == 11 && client.level != null && client.player != null && client.screen == null) {
@@ -100,9 +186,22 @@ public final class ClientSmokeTest {
         }
         if (phase >= 1 && phase <= 3 && client.level != null && client.player != null && client.screen == null) {
             if (phase == 1 && Boolean.getBoolean("afv.shadowProbe")) {
-                if (++stableTicks < 200) return;
+                boolean mesh = Boolean.getBoolean("afv.shadowMesh");
+                if (mesh) hideProbePlayer(client);
+                if (mesh && stableTicks == 40) placeShadowBlocks(client);
+                if (mesh && (stableTicks == 200 || stableTicks == 800))
+                    System.out.println("AFV_SHADOW_MESH_VIEW: tick=" + stableTicks + " " + viewCenter(client));
+                if (++stableTicks < (mesh ? 120 : 200)) return;
+                // A fixed wait lets every mode finish loading the same sections before the hold.
+                if (mesh && stableTicks < 500) return;
+                if (mesh && ShadowMeshCapture.lastSections() < 5 && stableTicks < 900) return;
+                if (mesh && !sectionsSettled() && stableTicks < 900) return;
                 if (!dev.allforvulkan.validation.ShadowProbe.capture()) return;
                 String summary = dev.allforvulkan.validation.ShadowProbe.summary();
+                if (mesh && distinctColors(summary) < 2 && stableTicks < 900) return;
+                if (mesh) System.out.println("AFV_SHADOW_MESH_CAPTURE: matched=" + IrisShadowHook.matched()
+                        + " last=" + ShadowMeshCapture.lastSections() + " max=" + ShadowMeshCapture.maxSections()
+                        + " result=" + IrisShadowHook.lastResult());
                 Initializer.LOGGER.info("AFV_SHADOW_PROBE_PASS: {}", summary);
                 System.out.println("AFV_SHADOW_PROBE_PASS: " + summary);
                 pass(client);
@@ -289,6 +388,25 @@ public final class ClientSmokeTest {
             if (player != null) player.connection.teleport(x, -60.0, z, yaw, 12.0f);
         });
         client.player.moveTo(x, -60.0, z, yaw, 12.0f);
+    }
+
+    /** Mesh runs share one flat world so off, on, and fallback see the same chunks. */
+    private static void openProbeWorld(Minecraft client) {
+        boolean mesh = Boolean.getBoolean("afv.shadowMesh");
+        String name = mesh ? "AFV-Shadow-Mesh" : "AFV-Smoke-" + System.currentTimeMillis();
+        var flows = client.createWorldOpenFlows();
+        if (mesh && client.getLevelSource().levelExists(name)) {
+            flows.openWorld(name, () -> {
+                throw new IllegalStateException("AFV_SMOKE_FAIL: could not reopen the shadow world");
+            });
+            return;
+        }
+        flows.createFreshLevel(name,
+                new LevelSettings(name, GameType.CREATIVE, false, Difficulty.PEACEFUL, true,
+                        new GameRules(), WorldDataConfiguration.DEFAULT),
+                new WorldOptions(123456789L, false, false),
+                registries -> registries.registryOrThrow(Registries.WORLD_PRESET)
+                        .getHolderOrThrow(WorldPresets.FLAT).value().createWorldDimensions(), client.screen);
     }
 
     private static void pass(Minecraft client) {

@@ -74,6 +74,25 @@ Verified here, under Xvfb and llvmpipe:
 
 No FPS. Real Sodium meshes are still later. Complementary is not this pack, so a center mismatch keeps its GL shadow.
 
+## Iteration 7 — captured Sodium shadow mesh, flag still off
+
+`afv.irisShadow` still defaults off and the hook still does not cancel Iris's shadow pass. While the flag is on, the pinned Sodium 0.6 upload is copied and the shadow draw records which opaque sections it submitted. Iris 1.8.12 appends attributes after the 20-byte compact prefix. Each vertex becomes the subset mesh: camera-relative position, atlas UV with Iris's texcoord shrink, and the stored tint. The lightmap is not applied.
+
+`ShadowMeshPass` draws that mesh only when the pack's `shadow` shader is the fixed texture×tint program. Iris's ortho is classic OpenGL clip space, so z is rewritten with `z' = 0.5 z + 0.5 w`. Y is mirrored with a negative viewport and the readback is flipped to match `glGetTexImage`. Clip Y is then nudged by 1/32 of a pixel: Vulkan was keeping the upper pixel when an edge sat on a pixel center, and llvmpipe keeps the lower one. The block atlas is uploaded with every GL mip. The readback replaces `shadowcolor0` only when every pixel has a sample within one texel and tolerance 8. Otherwise Iris's GL image stays.
+
+AFV-Shadow-Mesh is the non-constant pack. Iris reads `const` directives from fragment shaders only, so `shadowDistance = 32` lives in `shadow.fsh` and the map is 32×32. The clear is `(32, 0, 32)`. The probe places red, blue, white, and lime wool, hides the player, and reopens one flat world so off, on, and fallback see the same chunks.
+
+Verified under Xvfb, llvmpipe, and lavapipe, with the flag off by default:
+
+- `AFV_SHADOW_MESH_DRAW_PASS: device=llvmpipe (LLVM 20.1.2, 256 bits), vertices=12, size=32 left=255,0,0,255 right=0,255,0,255 negativeZ=0,0,255,255`. An edge through a pixel center fills the lower pixel and leaves the upper one clear.
+- On: `AFV_SHADOW_MESH_CAPTURE: matched=true last=4 max=4 result=match` and `AFV_SHADOW_PROBE_PASS: width=32 height=32 format=RGBA hook=true file=afv-shadow-on.rgba nonzero=1024/1024 distinct=7 center=85,111,52,255 depthWritten=256 depthMin=0.3921416 depthMax=1.0`.
+- Off: `AFV_IRIS_SHADOW_HOOK`, no pass line, `AFV_SHADOW_PROBE_PASS: width=32 height=32 format=RGBA hook=false file=afv-shadow-off.rgba nonzero=1024/1024 distinct=7 center=85,111,52,255 depthWritten=256 depthMin=0.3921416 depthMax=1.0`.
+- Forced fallback: `AFV_IRIS_SHADOW_FALLBACK: forced`, no pass line, and the same center and depth as off.
+- Diff against that off image: `AFV_SHADOW_DIFF: mismatches=0/1024 tolerance=8 mesh=True` for both the on image and the fallback image.
+- GitHub Actions `build (21)` succeeded on `3345ea3`.
+
+This does not move Complementary Reimagined. Its shadow program is not the texture×tint subset, the flag is off, and the GL shadow pass still runs. No FPS.
+
 ## Next
 
-Capture one real shadow mesh from the pinned Iris/Sodium pair and feed it to the subset draw. Until that write matches a pack that is not a constant clear, keep the flag off and do not cancel Iris's shadow pass.
+Cancel the GL shadow pass for this texture×tint subset now that the replay stays matched. Keep the flag off by default, and keep Iris's image when the replay misses. Until a Complementary pass is actually skipped, a desktop frame time should not move.

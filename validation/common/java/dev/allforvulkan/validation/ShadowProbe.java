@@ -2,6 +2,7 @@ package dev.allforvulkan.validation;
 
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
 import java.nio.file.Path;
 import org.lwjgl.opengl.GL11;
 
@@ -59,15 +60,20 @@ public final class ShadowProbe {
         int nonzero = 0;
         int cx = resolution / 2;
         int index = (cx * resolution + cx) * 4;
-        for (int i = 0; i < rgba.length; i += 4)
+        var colors = new java.util.HashSet<Integer>();
+        for (int i = 0; i < rgba.length; i += 4) {
             if ((rgba[i] | rgba[i + 1] | rgba[i + 2]) != 0) nonzero++;
+            colors.add((rgba[i] & 255) | ((rgba[i + 1] & 255) << 8) | ((rgba[i + 2] & 255) << 16) | ((rgba[i + 3] & 255) << 24));
+        }
         summary = "width=" + resolution + " height=" + resolution
                 + " format=" + formatName
                 + " hook=" + hook
                 + " file=" + output
                 + " nonzero=" + nonzero + "/" + (resolution * resolution)
+                + " distinct=" + colors.size()
                 + " center=" + (rgba[index] & 255) + "," + (rgba[index + 1] & 255) + ","
                 + (rgba[index + 2] & 255) + "," + (rgba[index + 3] & 255);
+        if (Boolean.getBoolean("afv.shadowMesh")) summary += depthStats(resolution);
         return true;
     }
 
@@ -75,6 +81,44 @@ public final class ShadowProbe {
         if (!loggedWaiting) {
             System.out.println("AFV_SHADOW_PROBE_WAIT: " + reason);
             loggedWaiting = true;
+        }
+    }
+
+    /** How much of the shadow depth texture is not the far clear. A uniform color with written depth means the pass rasterized without color. */
+    private static String depthStats(int resolution) {
+        try {
+            Object pipeline = IrisAssertions.requireActive();
+            Object targets = field(pipeline, "shadowRenderTargets");
+            if (targets == null) return " depth=none";
+            Object depth = targets.getClass().getMethod("getDepthTexture").invoke(targets);
+            int texture = (int) depth.getClass().getMethod("getTextureId").invoke(depth);
+            if (texture <= 0) return " depth=none";
+            int previous = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+            int pack = GL11.glGetInteger(GL11.GL_PACK_ALIGNMENT);
+            while (GL11.glGetError() != GL11.GL_NO_ERROR) { /* drop errors from the color read */ }
+            FloatBuffer pixels = org.lwjgl.BufferUtils.createFloatBuffer(resolution * resolution);
+            try {
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, texture);
+                GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
+                GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL11.GL_DEPTH_COMPONENT, GL11.GL_FLOAT, pixels);
+                int error = GL11.glGetError();
+                if (error != GL11.GL_NO_ERROR) return " depthError=" + error;
+            } finally {
+                GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, pack);
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, previous);
+            }
+            float min = 1f;
+            float max = 0f;
+            int written = 0;
+            for (int i = 0; i < resolution * resolution; i++) {
+                float value = pixels.get(i);
+                if (value < min) min = value;
+                if (value > max) max = value;
+                if (value < 0.999f) written++;
+            }
+            return " depthWritten=" + written + " depthMin=" + min + " depthMax=" + max;
+        } catch (ReflectiveOperationException failure) {
+            return " depthError=reflect";
         }
     }
 

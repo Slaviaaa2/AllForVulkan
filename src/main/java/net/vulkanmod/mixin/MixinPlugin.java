@@ -40,6 +40,8 @@ public class MixinPlugin implements IMixinConfigPlugin {
             return Boolean.getBoolean("afv.validationPack");
         if (mixinClassName.endsWith(".IrisShadowPassMixin"))
             return irisShadowRendererPresent();
+        if (mixinClassName.endsWith(".SodiumShadowMeshMixin") || mixinClassName.endsWith(".SodiumShadowUploadMixin"))
+            return sodiumPresent();
         return dev.allforvulkan.neoforge.BackendBootstrap.vulkan();
     }
 
@@ -57,6 +59,39 @@ public class MixinPlugin implements IMixinConfigPlugin {
         try {
             var mods = net.neoforged.fml.loading.FMLLoader.getLoadingModList();
             return mods != null && mods.getMods().stream().anyMatch(mod -> "iris".equals(mod.getModId()));
+        } catch (Throwable failure) {
+            return false;
+        }
+    }
+
+    private static Boolean sodiumLoaded;
+
+    /** Do not load Sodium's renderer. Its mixins are still being applied at this point. */
+    private static boolean sodiumPresent() {
+        if (sodiumLoaded != null && sodiumLoaded) return true;
+        boolean present = sodiumModId() || sodiumJar();
+        if (present) sodiumLoaded = true;
+        return present;
+    }
+
+    private static boolean sodiumModId() {
+        try {
+            var mods = net.neoforged.fml.loading.FMLLoader.getLoadingModList();
+            return mods != null && mods.getMods().stream().anyMatch(mod -> "sodium".equals(mod.getModId()));
+        } catch (Throwable failure) {
+            return false;
+        }
+    }
+
+    private static boolean sodiumJar() {
+        try {
+            var mods = net.neoforged.fml.loading.FMLLoader.getGamePath().resolve("mods");
+            try (var files = java.nio.file.Files.list(mods)) {
+                return files.anyMatch(path -> {
+                    String name = path.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+                    return name.startsWith("sodium-") && name.endsWith(".jar");
+                });
+            }
         } catch (Throwable failure) {
             return false;
         }
