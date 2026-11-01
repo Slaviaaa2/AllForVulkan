@@ -34,6 +34,7 @@ public final class IrisShadowHook {
     private static int stableFrames;
     private static int notedPass = -1;
     private static boolean loggedSkip;
+    private static int stableLogs;
     private static String lastResult = "none";
 
     public static boolean matched() { return matched; }
@@ -154,6 +155,11 @@ public final class IrisShadowHook {
             heldFingerprint = fingerprint;
             heldVertices = vertices;
             stableFrames = 1;
+        }
+        if (stableLogs < 8) {
+            stableLogs++;
+            System.out.println("AFV_IRIS_SHADOW_STABLE: frames=" + stableFrames + " vertices=" + heldVertices
+                    + " calls=" + ShadowMeshCapture.matchedCallCount());
         }
     }
 

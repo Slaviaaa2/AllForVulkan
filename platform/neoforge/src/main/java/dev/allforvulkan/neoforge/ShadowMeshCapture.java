@@ -79,6 +79,8 @@ public final class ShadowMeshCapture {
         matchedCalls = CALLS.stream().mapToInt(Integer::intValue).toArray();
     }
 
+    public static int matchedCallCount() { return matchedCalls.length; }
+
     public static void clearMatchedCalls() {
         matchedCalls = new int[0];
     }
