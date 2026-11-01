@@ -93,6 +93,20 @@ Verified under Xvfb, llvmpipe, and lavapipe, with the flag off by default:
 
 This does not move Complementary Reimagined. Its shadow program is not the texture×tint subset, the flag is off, and the GL shadow pass still runs. No FPS.
 
+## Iteration 8 — skip the matched shadow terrain draw
+
+`afv.irisShadow` still defaults off. `renderShadows` still runs. After the texture×tint replay has matched twice with the same camera and mesh, each later Sodium shadow terrain call is cancelled only when that call's camera, placement, and vertex bytes still match. Iris clears the shadow target before the draw, so a skipped frame is compared with the last matched image and uploaded back when it still agrees. A mismatch or a forced fallback draws GL again.
+
+Verified under Xvfb, llvmpipe, and lavapipe:
+
+- On: `AFV_IRIS_SHADOW_SKIP: vertices=8328`, `AFV_SHADOW_MESH_CAPTURE: matched=true last=4 max=4 result=match`, and `AFV_SHADOW_PROBE_PASS: width=32 height=32 format=RGBA hook=true file=afv-shadow-on.rgba nonzero=1024/1024 distinct=7 center=85,111,52,255 depthWritten=0 depthMin=1.0 depthMax=1.0`. Depth stays clear because the GL depth draw was skipped; the color image is the uploaded replay.
+- Off: `AFV_IRIS_SHADOW_HOOK`, no pass and no skip, `AFV_SHADOW_PROBE_PASS: ... hook=false ... distinct=7 center=85,111,52,255 depthWritten=256 depthMin=0.3985504`.
+- Forced fallback: `AFV_IRIS_SHADOW_FALLBACK: forced`, no pass and no skip, same center and depth as off.
+- Diff: `AFV_SHADOW_DIFF: mismatches=0/1024 tolerance=8 mesh=True` for off vs on and off vs fallback.
+- GitHub Actions `build (21)` succeeded on `0d33ce4`.
+
+This is not a Complementary Reimagined frame-time change. Complementary's shadow program is not the texture×tint subset, and the flag is off. Nothing here is worth benchmarking on the RTX 3060. No FPS.
+
 ## Next
 
-Cancel the GL shadow pass for this texture×tint subset now that the replay stays matched. Keep the flag off by default, and keep Iris's image when the replay misses. Until a Complementary pass is actually skipped, a desktop frame time should not move.
+Match a shadow program Complementary actually runs, or skip a GL pass that pack uses. Until that happens, a desktop Complementary frame time should not move.
