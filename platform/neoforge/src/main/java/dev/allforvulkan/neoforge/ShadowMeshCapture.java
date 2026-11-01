@@ -3,6 +3,7 @@ package dev.allforvulkan.neoforge;
 import dev.allforvulkan.framegraph.SodiumShadowDecoder;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +36,8 @@ public final class ShadowMeshCapture {
     private static boolean matrices;
     private static int generation;
     private static int passId;
+    private static final List<Integer> CALLS = new ArrayList<>();
+    private static int[] matchedCalls = new int[0];
     private static int lastSections;
     private static int maxSections;
     private static int renderLogs;
@@ -46,6 +49,7 @@ public final class ShadowMeshCapture {
         if (!BackendBootstrap.irisShadow()) return;
         DRAWS.clear();
         matrices = false;
+        CALLS.clear();
         passId++;
     }
 
@@ -60,8 +64,23 @@ public final class ShadowMeshCapture {
             hash = 31 * hash + Float.floatToIntBits(draw.regionY());
             hash = 31 * hash + Float.floatToIntBits(draw.regionZ());
             hash = 31 * hash + draw.vertices();
+            hash = 31 * hash + Arrays.hashCode(draw.packed());
         }
         return hash;
+    }
+
+    /** The draw recorded by this Sodium call matches the call in the last matched frame. */
+    public static boolean thisCallMatches() {
+        int index = CALLS.size() - 1;
+        return index >= 0 && index < matchedCalls.length && CALLS.get(index) == matchedCalls[index];
+    }
+
+    public static void keepMatchedCalls() {
+        matchedCalls = CALLS.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    public static void clearMatchedCalls() {
+        matchedCalls = new int[0];
     }
 
     private static int mix(int hash, float[] matrix) {
@@ -112,6 +131,7 @@ public final class ShadowMeshCapture {
                 DRAWS.add(new Draw(stored.packed, stored.vertices, stored.stride, regionX, regionY, regionZ));
             }
         }
+        CALLS.add(fingerprint());
         return true;
     }
 

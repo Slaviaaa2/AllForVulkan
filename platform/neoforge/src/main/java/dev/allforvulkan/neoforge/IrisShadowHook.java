@@ -140,12 +140,14 @@ public final class IrisShadowHook {
             heldFingerprint = 0;
             stableFrames = 0;
             notedPass = pass;
+            ShadowMeshCapture.clearMatchedCalls();
             return;
         }
         // renderShadows and the frame event both observe the same pass.
         if (pass == notedPass) return;
         notedPass = pass;
         meshMatch = true;
+        ShadowMeshCapture.keepMatchedCalls();
         int fingerprint = ShadowMeshCapture.fingerprint();
         if (fingerprint == heldFingerprint) stableFrames++;
         else {

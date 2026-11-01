@@ -19,7 +19,8 @@ public class SodiumShadowMeshMixin {
     @Inject(method = "render", at = @At("HEAD"), remap = false, cancellable = true, require = 1)
     private void afvCaptureShadowMesh(ChunkRenderMatrices matrices, CommandList commands, ChunkRenderListIterable lists,
                                      TerrainRenderPass pass, CameraTransform camera, CallbackInfo callback) {
-        if (ShadowMeshCapture.retainDraw(matrices, lists, pass, camera) && IrisShadowHook.skipShadowGl()) {
+        if (ShadowMeshCapture.retainDraw(matrices, lists, pass, camera)
+                && IrisShadowHook.skipShadowGl() && ShadowMeshCapture.thisCallMatches()) {
             IrisShadowHook.noteSkip();
             callback.cancel();
         }
