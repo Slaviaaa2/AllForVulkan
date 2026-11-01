@@ -147,7 +147,7 @@ public final class ShadowMeshReplay {
             if (ComplementaryShadow.installed(directory)) {
                 complementary = true;
                 shader = ComplementaryShadow.shader();
-                clearRed = clearGreen = clearBlue = clearAlpha = 0;
+                clearRed = clearGreen = clearBlue = clearAlpha = 255;
                 return shader != null;
             }
             var plan = IrisPackPlan.fromGameDirectory(directory);
