@@ -36,7 +36,7 @@ public final class ShadowMeshPassChecks {
         require(Math.abs(vulkan[10] - 0.5f * ortho[10]) < 1e-6f, "projection z scale was not halved");
         require(Math.abs(vulkan[14] - (0.5f * ortho[14] + 0.5f)) < 1e-5f, "projection z bias was not applied");
         var draw = new ShadowMeshPass.Draw(vertices, new byte[][] {{(byte) 255, (byte) 255, (byte) 255, (byte) 255}}, 1, 1,
-                identity, identity, 32, 0, 0, 0, 255);
+                identity, identity, 32, 0, 0, 0, 255, false);
         var result = ShadowMeshPass.render(shadow, draw);
         if (result.skipped()) {
             if (Boolean.getBoolean("afv.requireCompositeDevice")) throw new IllegalStateException(result.detail());
@@ -57,7 +57,7 @@ public final class ShadowMeshPassChecks {
                 -1f, 1f, -0.5f, 0.5f, 0.5f, 0f, 0f, 1f, 1f
         };
         var negative = ShadowMeshPass.render(shadow, new ShadowMeshPass.Draw(behind, draw.mips(), 1, 1,
-                identity, identity, 32, 0, 0, 0, 255));
+                identity, identity, 32, 0, 0, 0, 255, false));
         if (negative.skipped() || negative.rgba() == null) throw new IllegalStateException(negative.detail());
         float edge0 = 12.5f / 16f - 1f;
         float edge1 = 15.5f / 16f - 1f;
@@ -70,7 +70,7 @@ public final class ShadowMeshPassChecks {
                 -0.5f, edge1, 0f, 0.5f, 0.5f, 1f, 0f, 0f, 1f
         };
         var tied = ShadowMeshPass.render(shadow, new ShadowMeshPass.Draw(edge, draw.mips(), 1, 1,
-                identity, identity, 32, 0, 0, 0, 255));
+                identity, identity, 32, 0, 0, 0, 255, false));
         if (tied.skipped() || tied.rgba() == null) throw new IllegalStateException(tied.detail());
         require(channel(pixel(tied.rgba(), 32, 16, 12), 0) > 200, "lower edge pixel was dropped");
         require(channel(pixel(tied.rgba(), 32, 16, 15), 0) < 40, "upper edge pixel was filled");
@@ -78,8 +78,9 @@ public final class ShadowMeshPassChecks {
         require(channel(center, 2) > 200 && channel(center, 0) < 40 && channel(center, 1) < 40,
                 "negative clip z was discarded " + hex(center));
         var rejected = ShadowMeshPass.render(shadow, new ShadowMeshPass.Draw(new float[0], draw.mips(), 1, 1,
-                identity, identity, 32, 0, 0, 0, 255));
+                identity, identity, 32, 0, 0, 0, 255, false));
         if (rejected.skipped() || rejected.rgba() != null) throw new IllegalStateException(rejected.detail());
+        ComplementaryShadowChecks.check();
         System.out.println("AFV_SHADOW_MESH_DRAW_PASS: " + result.detail() + " left=" + hex(left) + " right=" + hex(right)
                 + " negativeZ=" + hex(center));
     }

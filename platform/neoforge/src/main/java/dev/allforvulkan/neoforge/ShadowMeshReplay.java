@@ -1,5 +1,6 @@
 package dev.allforvulkan.neoforge;
 
+import dev.allforvulkan.framegraph.ComplementaryShadow;
 import dev.allforvulkan.framegraph.IrisPackPlan;
 import dev.allforvulkan.framegraph.IrisSubset;
 import dev.allforvulkan.framegraph.ShadowMeshPass;
@@ -17,6 +18,7 @@ public final class ShadowMeshReplay {
     private static final Pattern CLEAR = Pattern.compile(
             "shadowcolor0ClearColor\\s*=\\s*vec4\\s*\\(\\s*([0-9.]+)\\s*,\\s*([0-9.]+)\\s*,\\s*([0-9.]+)\\s*,\\s*([0-9.]+)\\s*\\)");
     private static IrisSubset.Shader shader;
+    private static boolean complementary;
     private static boolean resolved;
     private static int clearRed = 255;
     private static int clearGreen = 255;
@@ -53,7 +55,7 @@ public final class ShadowMeshReplay {
         if (vertices == null) return new Image(true, null, "shadow mesh could not be decoded");
         logClip(snapshot, vertices);
         var draw = new ShadowMeshPass.Draw(vertices, atlas, atlasWidth, atlasHeight, snapshot.modelView(), snapshot.projection(),
-                size, clearRed, clearGreen, clearBlue, clearAlpha);
+                size, clearRed, clearGreen, clearBlue, clearAlpha, complementary);
         var rendered = ShadowMeshPass.render(shader, draw);
         if (rendered.skipped() || rendered.rgba() == null)
             return new Image(true, null, rendered.detail() == null ? "shadow mesh draw failed" : rendered.detail());
@@ -141,7 +143,14 @@ public final class ShadowMeshReplay {
         if (resolved) return shader != null;
         resolved = true;
         try {
-            var plan = IrisPackPlan.fromGameDirectory(Minecraft.getInstance().gameDirectory.toPath());
+            var directory = Minecraft.getInstance().gameDirectory.toPath();
+            if (ComplementaryShadow.installed(directory)) {
+                complementary = true;
+                shader = ComplementaryShadow.shader();
+                clearRed = clearGreen = clearBlue = clearAlpha = 0;
+                return shader != null;
+            }
+            var plan = IrisPackPlan.fromGameDirectory(directory);
             var compiled = IrisSubset.compile(plan);
             shader = compiled.shaders().stream().filter(item -> item.name().equals("shadow")).findFirst().orElse(null);
             for (var program : plan.programs()) {

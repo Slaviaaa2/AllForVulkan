@@ -98,6 +98,7 @@ public final class ClientSmokeTest {
             level.setDayTime(6000);
             Block[] wool = {Blocks.RED_WOOL, Blocks.BLUE_WOOL, Blocks.WHITE_WOOL, Blocks.LIME_WOOL};
             int surface = feet.getY() - 1;
+            if (Boolean.getBoolean("afv.complementaryProbe")) clearPlants(level, feet, surface);
             for (int column = 0; column < wool.length; column++) {
                 for (int dx = 0; dx < 6; dx++) {
                     for (int dz = 0; dz < 6; dz++) {
@@ -109,6 +110,20 @@ public final class ClientSmokeTest {
             }
             System.out.println("AFV_SHADOW_MESH_SCENE: wool columns at " + feet.getX() + "," + surface + "," + feet.getZ());
         });
+    }
+
+    /** Complementary waves plants and offsets foliage. Solid blocks stay on the natural-shadow path. */
+    private static void clearPlants(net.minecraft.server.level.ServerLevel level, BlockPos feet, int surface) {
+        for (int dx = -80; dx <= 80; dx++) {
+            for (int dz = -80; dz <= 80; dz++) {
+                for (int dy = 1; dy <= 3; dy++) {
+                    var pos = new BlockPos(feet.getX() + dx, surface + dy, feet.getZ() + dz);
+                    var state = level.getBlockState(pos);
+                    if (!state.isAir() && !state.blocksMotion())
+                        level.setBlockAndUpdate(pos, Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
     }
 
     private static String viewCenter(Minecraft client) {

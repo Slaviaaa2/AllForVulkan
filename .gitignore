@@ -41,6 +41,7 @@ crash-reports/
 /run-iris-baseline/
 /run-shadow-probe/
 /run-shadow-mesh/
+/run-shadow-complementary/
 
 # Python validation helpers
 **/__pycache__/
