@@ -51,6 +51,7 @@ public final class ShadowMeshCapture {
         matrices = false;
         CALLS.clear();
         passId++;
+        IrisShadowHook.beginPass();
     }
 
     public static int passId() { return passId; }

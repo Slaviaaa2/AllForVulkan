@@ -35,6 +35,8 @@ public final class IrisShadowHook {
     private static int notedPass = -1;
     private static boolean loggedSkip;
     private static int stableLogs;
+    private static int skipsThisPass;
+    private static byte[] lastImage;
     private static String lastResult = "none";
 
     public static boolean matched() { return matched; }
@@ -47,7 +49,10 @@ public final class IrisShadowHook {
                 && !Boolean.getBoolean("afv.irisShadowForceFallback");
     }
 
+    public static void beginPass() { skipsThisPass = 0; }
+
     public static void noteSkip() {
+        skipsThisPass++;
         if (loggedSkip) return;
         loggedSkip = true;
         String line = "AFV_IRIS_SHADOW_SKIP: vertices=" + heldVertices;
@@ -89,25 +94,28 @@ public final class IrisShadowHook {
         }
         var mesh = ShadowMeshReplay.render(frame.resolution());
         if (mesh.subset()) {
-            byte[] chosen = ShadowImage.replacementNear(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution());
+            // A skipped draw leaves the cleared shadow target, not the previous image.
+            byte[] reference = skipsThisPass > 0 && lastImage != null ? lastImage : frame.rgba();
+            byte[] chosen = ShadowImage.replacementNear(reference, mesh.rgba(), frame.resolution(), frame.resolution());
             if (chosen != mesh.rgba()) {
                 matched = false;
                 noteMesh(false, 0);
                 int mismatches = mesh.rgba() == null ? -1
-                        : ShadowImage.nearMismatches(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE);
+                        : ShadowImage.nearMismatches(reference, mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE);
                 if (mesh.rgba() != null && mismatches != loggedMismatch && mismatchLogs < 5) {
                     loggedMismatch = mismatches;
                     mismatchLogs++;
                     System.out.println("AFV_SHADOW_MESH_MISMATCH:" + ShadowImage.nearMismatchSummary(
-                            frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 8));
+                            reference, mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 8));
                 }
                 lastResult = "mismatch " + mismatches + (mesh.rgba() == null ? ""
-                        : ShadowImage.bestShift(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE)
-                        + ShadowImage.nearMismatchSummary(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 6));
+                        : ShadowImage.bestShift(reference, mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE)
+                        + ShadowImage.nearMismatchSummary(reference, mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 6));
                 fallback(mesh.rgba() == null ? mesh.detail() : "mesh mismatch " + mismatches + " " + mesh.detail());
                 return;
             }
             matched = true;
+            lastImage = chosen.clone();
             noteMesh(true, ShadowMeshCapture.snapshot().vertexCount());
             lastResult = "match";
             upload(frame.texture(), frame.resolution(), chosen);
@@ -142,6 +150,7 @@ public final class IrisShadowHook {
             stableFrames = 0;
             notedPass = pass;
             ShadowMeshCapture.clearMatchedCalls();
+            lastImage = null;
             return;
         }
         // renderShadows and the frame event both observe the same pass.
