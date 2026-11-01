@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+import prepare_complementary
 import shadow_probe
 
 
@@ -53,6 +54,18 @@ class ShadowProbeDiffTest(unittest.TestCase):
                       'AFV_SHADOW_MESH_CAPTURE: matched=true last=6 max=6')
         fragment = Path(__file__).resolve().parents[1] / 'tests/shaderpacks/AFV-Shadow-Mesh/shaders/shadow.fsh'
         self.assertIn('const float shadowDistance = 32.0;', fragment.read_text())
+
+    def test_modrinth_release_uses_the_api_hash(self):
+        filename, url, sha512 = prepare_complementary.find_release([{
+            'version_number': 'r5.9.3',
+            'files': [{'primary': True, 'filename': 'pack.zip', 'url': 'https://example.invalid/pack.zip',
+                       'hashes': {'sha512': 'abc'}}],
+        }])
+        self.assertEqual(filename, 'pack.zip')
+        self.assertEqual(url, 'https://example.invalid/pack.zip')
+        self.assertEqual(sha512, 'abc')
+        with self.assertRaises(SystemExit):
+            prepare_complementary.find_release([{'version_number': 'r5.9.2', 'files': []}])
 
 
 if __name__ == '__main__':

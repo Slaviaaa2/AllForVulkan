@@ -59,7 +59,33 @@ def center_mismatches(left, right, width, height, tolerance):
     return mismatches
 
 
-def prepare(instance, mesh):
+def prepare(instance, pack):
+    if pack == 'complementary':
+        import prepare_complementary
+        downloaded = prepare_complementary.cached_pack()
+        subprocess.run([sys.executable, str(ROOT / 'scripts/prepare_iris_baseline.py')], check=True, cwd=ROOT)
+        mods = instance / 'mods'
+        mods.mkdir(parents=True, exist_ok=True)
+        for jar in (ROOT / 'run-iris-baseline' / 'mods').glob('*.jar'):
+            shutil.copy2(jar, mods / jar.name)
+        packs = instance / 'shaderpacks'
+        packs.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(downloaded, packs / downloaded.name)
+        (packs / (downloaded.name + '.txt')).write_text(
+            'SHADOW_QUALITY=1\nshadowDistance=64.0\n'
+            'WAVING_FOLIAGE=false\nWAVING_LEAVES=false\nWAVING_LAVA=false\nWAVING_WATER_VERTEX=false\n')
+        config = instance / 'config'
+        config.mkdir(exist_ok=True)
+        (config / 'fml.toml').write_text('earlyWindowControl = false\n')
+        (config / 'iris.properties').write_text('enableShaders=true\nshaderPack=' + downloaded.name + '\n')
+        (instance / 'options.txt').write_text(
+            'onboardAccessibility:false\npauseOnLostFocus:false\nrenderDistance:8\n'
+            'simulationDistance:5\nenableVsync:false\nmaxFps:20\n')
+        marker = config / 'allforvulkan_renderer_starting'
+        if marker.exists():
+            marker.unlink()
+        return
+    mesh = pack == 'mesh'
     pack_name = 'AFV-Shadow-Mesh' if mesh else 'AFV-Shadow'
     subprocess.run([sys.executable, str(ROOT / 'scripts/prepare_iris_baseline.py')], check=True, cwd=ROOT)
     mods = instance / 'mods'
@@ -101,7 +127,8 @@ def ensure_display():
     raise RuntimeError('Xvfb did not open :99')
 
 
-def launch(instance, iris_shadow, force_fallback, mesh, timeout):
+def launch(instance, iris_shadow, force_fallback, mesh, timeout, complementary=False):
+    expected = (1024, 1024) if complementary else (32, 32)
     display = ensure_display()
     command = [
         './gradlew', 'runClient', '--console=plain',
@@ -111,6 +138,7 @@ def launch(instance, iris_shadow, force_fallback, mesh, timeout):
         '-Dafv.irisShadow=' + ('true' if iris_shadow else 'false'),
         '-Dafv.irisShadowForceFallback=' + ('true' if force_fallback else 'false'),
         '-Dafv.shadowMesh=' + ('true' if mesh else 'false'),
+        '-Dafv.complementaryProbe=' + ('true' if complementary else 'false'),
     ]
     environment = dict(**{key: value for key, value in __import__('os').environ.items()})
     environment.update({
@@ -139,7 +167,7 @@ def launch(instance, iris_shadow, force_fallback, mesh, timeout):
         raise SystemExit('Shadow probe failed with exit ' + str(completed.returncode) + '\n' + tail)
     print(passed[-1])
     if mesh:
-        require_varied(passed[-1])
+        require_varied(passed[-1], expected)
         if iris_shadow and not force_fallback and 'AFV_IRIS_SHADOW_MESH' not in text:
             raise SystemExit('Vulkan did not replay a Sodium shadow mesh')
         if iris_shadow and not force_fallback:
@@ -178,16 +206,17 @@ def require_stable_mesh(text):
         raise SystemExit('Shadow mesh replay mismatched after it had matched')
 
 
-def require_varied(line):
-    """AFV-Shadow-Mesh is 32x32 and the wool columns make the shadow map more than one color."""
+def require_varied(line, expected=(32, 32)):
+    """The wool columns, or Complementary's black terrain on a white clear, make more than one color."""
     import re
     size = re.search(r'width=(\d+) height=(\d+)', line)
     distinct = re.search(r'distinct=(\d+)', line)
     if not size or not distinct:
         raise SystemExit('Shadow probe pass line has no size or distinct count: ' + line)
     width, height = int(size.group(1)), int(size.group(2))
-    if (width, height) != (32, 32):
-        raise SystemExit('Shadow map is ' + str(width) + 'x' + str(height) + ', expected 32x32: ' + line)
+    if (width, height) != expected:
+        raise SystemExit('Shadow map is ' + str(width) + 'x' + str(height) + ', expected '
+                         + str(expected[0]) + 'x' + str(expected[1]) + ': ' + line)
     if int(distinct.group(1)) < 2:
         raise SystemExit('Shadow map is a constant color: ' + line)
 
@@ -227,20 +256,22 @@ def compare(off, on, tolerance, mesh):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('off', 'on', 'diff', 'fallback'), default='off')
-    parser.add_argument('--pack', choices=('constant', 'mesh'), default='constant')
+    parser.add_argument('--pack', choices=('constant', 'mesh', 'complementary'), default='constant')
     parser.add_argument('--instance', type=Path)
     parser.add_argument('--timeout', type=int, default=2700)
     parser.add_argument('--tolerance', type=int, default=8)
     args = parser.parse_args()
-    instance = args.instance or (ROOT / ('run-shadow-mesh' if args.pack == 'mesh' else 'run-shadow-probe'))
+    instance = args.instance or (ROOT / ('run-shadow-complementary' if args.pack == 'complementary'
+                                         else 'run-shadow-mesh' if args.pack == 'mesh' else 'run-shadow-probe'))
     instance = instance if instance.is_absolute() else ROOT / instance
-    mesh = args.pack == 'mesh'
+    mesh = args.pack in ('mesh', 'complementary')
     if args.mode == 'diff':
         compare(instance / 'afv-shadow-off.rgba', instance / 'afv-shadow-on.rgba', args.tolerance, mesh)
         compare(instance / 'afv-shadow-off.rgba', instance / 'afv-shadow-fallback.rgba', args.tolerance, mesh)
         return
-    prepare(instance, mesh)
-    launch(instance, args.mode in ('on', 'fallback'), args.mode == 'fallback', mesh, args.timeout)
+    prepare(instance, args.pack)
+    launch(instance, args.mode in ('on', 'fallback'), args.mode == 'fallback', mesh, args.timeout,
+           args.pack == 'complementary')
 
 
 if __name__ == '__main__':

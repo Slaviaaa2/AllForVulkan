@@ -23,9 +23,10 @@ public final class ShadowMeshPass {
     private static final int UNIFORM_BYTES = 256;
 
     /** Vertices are nine floats each. {@code mips} is the block atlas from mip 0 down. Matrices are column-major. */
+    /** {@code distort} applies Complementary's shadow-map distortion in the shader and keeps the GL projection. */
     public record Draw(float[] vertices, byte[][] mips, int textureWidth, int textureHeight,
                        float[] modelView, float[] projection, int size,
-                       int clearRed, int clearGreen, int clearBlue, int clearAlpha) {
+                       int clearRed, int clearGreen, int clearBlue, int clearAlpha, boolean distort) {
         String invalid() {
             if (vertices == null || vertices.length < VERTEX_FLOATS * 3 || vertices.length % VERTEX_FLOATS != 0)
                 return "mesh needs complete vertices";
@@ -136,7 +137,9 @@ public final class ShadowMeshPass {
                 renderPass = renderPass(device, stack);
                 uniform = buffer(device, stack, UNIFORM_BYTES, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
                 uniformMemory = bind(device, stack, memory, uniform, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-                writeUniforms(device, uniformMemory, draw.modelView(), vulkanProjection(draw.projection(), draw.size()));
+                float[] projection = draw.distort() ? draw.projection() : vulkanProjection(draw.projection(), draw.size());
+                writeUniforms(device, uniformMemory, draw.modelView(), projection,
+                        draw.distort() ? ComplementaryShadow.edgeNudge(draw.size()) : 0f);
                 long vertexBytes = (long) draw.vertices().length * 4;
                 vertices = buffer(device, stack, vertexBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
                 vertexMemory = bind(device, stack, memory, vertices, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -377,7 +380,7 @@ public final class ShadowMeshPass {
         }
     }
 
-    private static void writeUniforms(VkDevice device, long memory, float[] modelView, float[] projection) {
+    private static void writeUniforms(VkDevice device, long memory, float[] modelView, float[] projection, float edgeNudge) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             var mapped = stack.mallocPointer(1);
             check(vkMapMemory(device, memory, 0, UNIFORM_BYTES, 0, mapped), "map uniforms");
@@ -386,6 +389,7 @@ public final class ShadowMeshPass {
             for (float value : projection) bytes.putFloat(value);
             for (int column = 0; column < 4; column++)
                 for (int row = 0; row < 4; row++) bytes.putFloat(column == row ? 1f : 0f);
+            bytes.putFloat(edgeNudge);
             vkUnmapMemory(device, memory);
         }
     }
@@ -552,7 +556,7 @@ public final class ShadowMeshPass {
     }
 
     private static void writeSet(VkDevice device, MemoryStack stack, long set, long buffer, long view, long sampler) {
-        var bufferInfo = VkDescriptorBufferInfo.calloc(1, stack).buffer(buffer).offset(0).range(192);
+        var bufferInfo = VkDescriptorBufferInfo.calloc(1, stack).buffer(buffer).offset(0).range(UNIFORM_BYTES);
         var imageInfo = VkDescriptorImageInfo.calloc(1, stack).sampler(sampler).imageView(view)
                 .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         var writes = VkWriteDescriptorSet.calloc(2, stack);

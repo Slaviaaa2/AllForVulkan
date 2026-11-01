@@ -107,6 +107,24 @@ Verified under Xvfb, llvmpipe, and lavapipe:
 
 This is not a Complementary Reimagined frame-time change. Complementary's shadow program is not the texture×tint subset, and the flag is off. Nothing here is worth benchmarking on the RTX 3060. No FPS.
 
+## Iteration 9 — Complementary opaque shadow color
+
+Complementary Reimagined r5.9.3 is downloaded from the Modrinth API when the harness runs. The sha512 in that response is checked before use, and the zip is cached under the user cache directory. The pack is not in the git tree.
+
+Opaque shadow texels use Complementary's natural-shadow formula and its radial shadow-map distortion. Fully opaque texels become black. Iris leaves `shadowcolor0` white when the pack sets no clear color, and the replay clears to that white. Water, glass, and waving are not this path: a mismatch keeps the GL image. `afv.irisShadow` still defaults off.
+
+The harness uses options the pack exposes: shadow quality 1 (1024²), shadow distance 64, and waving off. Plants are removed so the scene stays on the opaque path. Default quality 2, distance 192, and waving are not what this run measured.
+
+Verified under Xvfb, llvmpipe, and lavapipe:
+
+- On: `AFV_IRIS_SHADOW_SKIP: vertices=8328`, `AFV_SHADOW_MESH_CAPTURE: matched=true last=4 max=4 result=match`, and `AFV_SHADOW_PROBE_PASS: width=1024 height=1024 format=RGBA hook=true file=afv-shadow-on.rgba nonzero=848139/1048576 distinct=2 center=0,0,0,255 depthWritten=0 depthMin=1.0 depthMax=1.0`. Depth stays clear because the GL depth draw was skipped; the color image is the uploaded replay.
+- Off: no pass and no skip, `AFV_SHADOW_PROBE_PASS: width=1024 height=1024 format=RGBA hook=false file=afv-shadow-off.rgba nonzero=848145/1048576 distinct=2 center=0,0,0,255 depthWritten=200431 depthMin=0.47971314`.
+- Forced fallback: `AFV_IRIS_SHADOW_FALLBACK: forced`, no pass and no skip, same center and depth as off.
+- Diff: `AFV_SHADOW_DIFF: mismatches=0/1048576 tolerance=8 mesh=True` for off vs on and off vs fallback.
+- `AFV_COMPLEMENTARY_SHADOW_PASS: center=0,0,0,255` on lavapipe.
+
+This is not worth benchmarking on the RTX 3060. The skipped draw is Complementary's shadow terrain only for this opaque, waving-off, quality-1 setup, and the flag is off. A default Complementary session still runs that draw on GL. No FPS.
+
 ## Next
 
-Match a shadow program Complementary actually runs, or skip a GL pass that pack uses. Until that happens, a desktop Complementary frame time should not move.
+The default Complementary profile is still open: shadow quality 2, distance 192, and waving foliage. Water and glass use a different shadow color. Until one of those matches and the GL draw is skipped with the flag still defaulting off, a desktop Complementary frame time should not move.
