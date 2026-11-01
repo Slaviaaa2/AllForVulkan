@@ -15,7 +15,8 @@ import org.lwjgl.system.MemoryUtil;
 /**
  * After Iris has drawn its shadow pass, optionally replace shadowcolor0 with a Vulkan image.
  * The flag defaults off. A mismatch or a device failure leaves Iris's image in place.
- * This does not cancel {@code renderShadows}.
+ * This does not cancel {@code renderShadows}. Once the texture×tint replay has matched twice
+ * at the same vertex count, the Sodium shadow terrain draw is skipped. A mismatch draws GL again.
  */
 @EventBusSubscriber(modid = "allforvulkan", value = Dist.CLIENT)
 public final class IrisShadowHook {
@@ -27,11 +28,37 @@ public final class IrisShadowHook {
     private static int loggedMismatch = -2;
     private static int mismatchLogs;
     private static boolean matched;
+    private static boolean meshMatch;
+    private static int heldVertices = -1;
+    private static int heldFingerprint;
+    private static int stableFrames;
+    private static int notedPass = -1;
+    private static boolean loggedSkip;
+    private static int stableLogs;
+    private static int skipsThisPass;
+    private static byte[] lastImage;
     private static String lastResult = "none";
 
     public static boolean matched() { return matched; }
 
     public static String lastResult() { return lastResult; }
+
+    /** The GL terrain draw can be skipped once two matches in a row saw the same mesh and camera. */
+    public static boolean skipShadowGl() {
+        return meshMatch && stableFrames >= 2 && BackendBootstrap.irisShadow()
+                && !Boolean.getBoolean("afv.irisShadowForceFallback");
+    }
+
+    public static void beginPass() { skipsThisPass = 0; }
+
+    public static void noteSkip() {
+        skipsThisPass++;
+        if (loggedSkip) return;
+        loggedSkip = true;
+        String line = "AFV_IRIS_SHADOW_SKIP: vertices=" + heldVertices;
+        Initializer.LOGGER.info(line);
+        System.out.println(line);
+    }
 
     private IrisShadowHook() {}
 
@@ -51,6 +78,7 @@ public final class IrisShadowHook {
             replace();
         } catch (RuntimeException failure) {
             matched = false;
+            noteMesh(false, 0);
             fallback(failure.getMessage());
         }
     }
@@ -60,29 +88,35 @@ public final class IrisShadowHook {
         if (frame == null) return;
         if (Boolean.getBoolean("afv.irisShadowForceFallback")) {
             matched = false;
+            noteMesh(false, 0);
             fallback("forced");
             return;
         }
         var mesh = ShadowMeshReplay.render(frame.resolution());
         if (mesh.subset()) {
-            byte[] chosen = ShadowImage.replacementNear(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution());
+            // A skipped draw leaves the cleared shadow target, not the previous image.
+            byte[] reference = skipsThisPass > 0 && lastImage != null ? lastImage : frame.rgba();
+            byte[] chosen = ShadowImage.replacementNear(reference, mesh.rgba(), frame.resolution(), frame.resolution());
             if (chosen != mesh.rgba()) {
                 matched = false;
+                noteMesh(false, 0);
                 int mismatches = mesh.rgba() == null ? -1
-                        : ShadowImage.nearMismatches(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE);
+                        : ShadowImage.nearMismatches(reference, mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE);
                 if (mesh.rgba() != null && mismatches != loggedMismatch && mismatchLogs < 5) {
                     loggedMismatch = mismatches;
                     mismatchLogs++;
                     System.out.println("AFV_SHADOW_MESH_MISMATCH:" + ShadowImage.nearMismatchSummary(
-                            frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 8));
+                            reference, mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 8));
                 }
                 lastResult = "mismatch " + mismatches + (mesh.rgba() == null ? ""
-                        : ShadowImage.bestShift(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE)
-                        + ShadowImage.nearMismatchSummary(frame.rgba(), mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 6));
+                        : ShadowImage.bestShift(reference, mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE)
+                        + ShadowImage.nearMismatchSummary(reference, mesh.rgba(), frame.resolution(), frame.resolution(), ShadowImage.TOLERANCE, 6));
                 fallback(mesh.rgba() == null ? mesh.detail() : "mesh mismatch " + mismatches + " " + mesh.detail());
                 return;
             }
             matched = true;
+            lastImage = chosen.clone();
+            noteMesh(true, ShadowMeshCapture.snapshot().vertexCount());
             lastResult = "match";
             upload(frame.texture(), frame.resolution(), chosen);
             if (!loggedPass) {
@@ -97,12 +131,45 @@ public final class IrisShadowHook {
         byte[] chosen = ShadowImage.replacement(frame.rgba(), image.rgba(), frame.resolution(), frame.resolution());
         if (chosen != image.rgba()) {
             matched = false;
+            noteMesh(false, 0);
             fallback(image.rgba() == null ? image.detail() : "center mismatch");
             return;
         }
         matched = true;
+        noteMesh(false, 0);
         upload(frame.texture(), frame.resolution(), chosen);
         pass("AFV_IRIS_SHADOW_PASS: " + image.detail());
+    }
+
+    private static void noteMesh(boolean subsetMatch, int vertices) {
+        int pass = ShadowMeshCapture.passId();
+        if (!subsetMatch || vertices <= 0) {
+            meshMatch = false;
+            heldVertices = -1;
+            heldFingerprint = 0;
+            stableFrames = 0;
+            notedPass = pass;
+            ShadowMeshCapture.clearMatchedCalls();
+            lastImage = null;
+            return;
+        }
+        // renderShadows and the frame event both observe the same pass.
+        if (pass == notedPass) return;
+        notedPass = pass;
+        meshMatch = true;
+        ShadowMeshCapture.keepMatchedCalls();
+        int fingerprint = ShadowMeshCapture.fingerprint();
+        if (fingerprint == heldFingerprint) stableFrames++;
+        else {
+            heldFingerprint = fingerprint;
+            heldVertices = vertices;
+            stableFrames = 1;
+        }
+        if (stableLogs < 8) {
+            stableLogs++;
+            System.out.println("AFV_IRIS_SHADOW_STABLE: frames=" + stableFrames + " vertices=" + heldVertices
+                    + " calls=" + ShadowMeshCapture.matchedCallCount());
+        }
     }
 
     private static void pass(String summary) {

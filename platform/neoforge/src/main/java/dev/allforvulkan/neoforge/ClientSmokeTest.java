@@ -78,6 +78,11 @@ public final class ClientSmokeTest {
             var player = server.getPlayerList().getPlayer(id);
             if (player == null) return;
             if (!player.isSpectator()) player.setGameMode(GameType.SPECTATOR);
+            var level = server.overworld();
+            level.getGameRules().getRule(GameRules.RULE_DAYLIGHT).set(false, server);
+            level.getGameRules().getRule(GameRules.RULE_WEATHER_CYCLE).set(false, server);
+            level.getGameRules().getRule(GameRules.RULE_RANDOMTICKING).set(0, server);
+            level.setDayTime(6000);
             player.teleportTo(0.5, -60, 0.5);
             player.setYRot(0f);
             player.setXRot(80f);
