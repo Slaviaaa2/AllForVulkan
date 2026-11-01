@@ -128,6 +128,7 @@ def ensure_display():
 
 
 def launch(instance, iris_shadow, force_fallback, mesh, timeout, complementary=False):
+    expected = (1024, 1024) if complementary else (32, 32)
     display = ensure_display()
     command = [
         './gradlew', 'runClient', '--console=plain',
@@ -166,7 +167,7 @@ def launch(instance, iris_shadow, force_fallback, mesh, timeout, complementary=F
         raise SystemExit('Shadow probe failed with exit ' + str(completed.returncode) + '\n' + tail)
     print(passed[-1])
     if mesh:
-        require_varied(passed[-1])
+        require_varied(passed[-1], expected)
         if iris_shadow and not force_fallback and 'AFV_IRIS_SHADOW_MESH' not in text:
             raise SystemExit('Vulkan did not replay a Sodium shadow mesh')
         if iris_shadow and not force_fallback:
@@ -205,16 +206,17 @@ def require_stable_mesh(text):
         raise SystemExit('Shadow mesh replay mismatched after it had matched')
 
 
-def require_varied(line):
-    """AFV-Shadow-Mesh is 32x32 and the wool columns make the shadow map more than one color."""
+def require_varied(line, expected=(32, 32)):
+    """The wool columns, or Complementary's black terrain on a white clear, make more than one color."""
     import re
     size = re.search(r'width=(\d+) height=(\d+)', line)
     distinct = re.search(r'distinct=(\d+)', line)
     if not size or not distinct:
         raise SystemExit('Shadow probe pass line has no size or distinct count: ' + line)
     width, height = int(size.group(1)), int(size.group(2))
-    if (width, height) != (32, 32):
-        raise SystemExit('Shadow map is ' + str(width) + 'x' + str(height) + ', expected 32x32: ' + line)
+    if (width, height) != expected:
+        raise SystemExit('Shadow map is ' + str(width) + 'x' + str(height) + ', expected '
+                         + str(expected[0]) + 'x' + str(expected[1]) + ': ' + line)
     if int(distinct.group(1)) < 2:
         raise SystemExit('Shadow map is a constant color: ' + line)
 
