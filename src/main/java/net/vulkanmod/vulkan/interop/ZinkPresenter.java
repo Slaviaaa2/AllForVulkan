@@ -435,7 +435,7 @@ public final class ZinkPresenter implements AutoCloseable {
             dirty = false;
             windowWidth = requestedWidth; windowHeight = requestedHeight;
             targetContextWidth = context.width(); targetContextHeight = context.height();
-            Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}, sharedLayout=transfer, transfer={}, asyncPresent={}", width, height, format, images.length, vsync, directCopy ? "copy" : "blit", presentation.asynchronous());
+            Initializer.LOGGER.info("AFV_ZINK_CLIENT_SWAPCHAIN: {}x{}, format={}, images={}, vsync={}, transfer={}, asyncPresent={}", width, height, format, images.length, vsync, directCopy ? "copy" : "blit", presentation.asynchronous());
             if (framePipeline) Initializer.LOGGER.info("AFV_FRAME_PIPELINE: slots={}, depth={}, acquire/transfer/present worker, bounded FIFO", frameSlots, pipelineDepth);
             if (directOutput) Initializer.LOGGER.info("AFV_DIRECT_OUTPUT: active={}, GL default -> imported target, colorCopySkipped={}", useDirectTarget, useDirectTarget);
             if (useDirectTarget) Initializer.LOGGER.info("AFV_DIRECT_OUTPUT_LAYOUT: {}", directOutputLayout());

@@ -12,12 +12,12 @@ import static org.lwjgl.opengl.EXTSemaphore.glDeleteSemaphoresEXT;
 import static org.lwjgl.opengl.EXTSemaphore.glWaitSemaphoreEXT;
 import static org.lwjgl.opengl.EXTSemaphore.glSignalSemaphoreEXT;
 import static org.lwjgl.opengl.EXTSemaphore.GL_LAYOUT_GENERAL_EXT;
-import static org.lwjgl.opengl.EXTSemaphore.GL_LAYOUT_TRANSFER_SRC_EXT;
 import static org.lwjgl.opengl.EXTSemaphore.GL_LAYOUT_TRANSFER_DST_EXT;
 import static org.lwjgl.opengl.EXTSemaphore.GL_LAYOUT_COLOR_ATTACHMENT_EXT;
 import static org.lwjgl.opengl.EXTSemaphoreFD.glImportSemaphoreFdEXT;
 import static org.lwjgl.vulkan.VK10.*;
 import static org.lwjgl.vulkan.VK11.*;
+import static org.lwjgl.vulkan.VK12.*;
 import static org.lwjgl.vulkan.KHRExternalMemoryFd.*;
 import static org.lwjgl.vulkan.KHRExternalSemaphoreFd.*;
 
@@ -25,23 +25,23 @@ import static org.lwjgl.vulkan.KHRExternalSemaphoreFd.*;
  * The caller must complete GPU work before close; this class never owns/destroys the device. */
 public final class SharedImage implements AutoCloseable {
     public enum GlOutputLayout { GENERAL, ATTACHMENT }
+    /** Mesa ignores the layouts of glWaitSemaphoreEXT and glSignalSemaphoreEXT, so these name what
+     * Zink's own tracking expects and leaves behind, in both directions of the handoff. */
     private enum Access {
-        SAMPLED(GL_LAYOUT_GENERAL_EXT, GL_LAYOUT_GENERAL_EXT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL),
-        COPY_TARGET(GL_LAYOUT_TRANSFER_DST_EXT, GL_LAYOUT_TRANSFER_SRC_EXT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL),
-        RENDER_GENERAL(GL_LAYOUT_GENERAL_EXT, GL_LAYOUT_GENERAL_EXT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL),
-        RENDER_ATTACHMENT(GL_LAYOUT_COLOR_ATTACHMENT_EXT, GL_LAYOUT_TRANSFER_SRC_EXT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        SAMPLED(GL_LAYOUT_GENERAL_EXT, VK_IMAGE_LAYOUT_GENERAL),
+        COPY_TARGET(GL_LAYOUT_TRANSFER_DST_EXT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL),
+        RENDER_GENERAL(GL_LAYOUT_GENERAL_EXT, VK_IMAGE_LAYOUT_GENERAL),
+        RENDER_ATTACHMENT(GL_LAYOUT_COLOR_ATTACHMENT_EXT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-        final int glWait, glSignal, vkRelease, vkAcquire;
-        Access(int glWait, int glSignal, int vkRelease, int vkAcquire) {
-            this.glWait = glWait; this.glSignal = glSignal;
-            this.vkRelease = vkRelease; this.vkAcquire = vkAcquire;
-        }
+        final int glLayout, vkLayout;
+        Access(int glLayout, int vkLayout) { this.glLayout = glLayout; this.vkLayout = vkLayout; }
         boolean renderTarget() { return this == RENDER_GENERAL || this == RENDER_ATTACHMENT; }
     }
     private final Thread owner = Thread.currentThread();
     private final VkDevice device;
     private final int width, height, aspect;
     private final Access access;
+    private final int glHandoffLayout, vkHandoffLayout;
     private long image, memory, toGl, fromGl;
     private int glMemory, glToGl, glFromGl, texture, framebuffer, depthStencil;
     private boolean closed;
@@ -82,6 +82,9 @@ public final class SharedImage implements AutoCloseable {
         this.width = width;
         this.height = height;
         this.access = access;
+        boolean general = zinkUsesGeneralLayout(physical);
+        glHandoffLayout = general ? GL_LAYOUT_GENERAL_EXT : access.glLayout;
+        vkHandoffLayout = general ? VK_IMAGE_LAYOUT_GENERAL : access.vkLayout;
         if (width <= 0 || height <= 0) throw new IllegalArgumentException("Invalid shared image size");
         if (access != Access.SAMPLED && aspect != VK_IMAGE_ASPECT_COLOR_BIT) throw new IllegalArgumentException("Presentation output requires a color image");
         var caps = GL.getCapabilities();
@@ -165,6 +168,25 @@ public final class SharedImage implements AutoCloseable {
         }
     }
 
+    /** Mirrors Zink's general_layout choice: on these drivers every image stays in GENERAL. */
+    private static boolean zinkUsesGeneralLayout(VkPhysicalDevice physical) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            var driver = VkPhysicalDeviceDriverProperties.calloc(stack).sType$Default();
+            vkGetPhysicalDeviceProperties2(physical, VkPhysicalDeviceProperties2.calloc(stack).sType$Default().pNext(driver.address()));
+            switch (driver.driverID()) {
+                case VK_DRIVER_ID_NVIDIA_PROPRIETARY, VK_DRIVER_ID_QUALCOMM_PROPRIETARY, VK_DRIVER_ID_MESA_LLVMPIPE,
+                     VK_DRIVER_ID_MESA_TURNIP, VK_DRIVER_ID_MESA_NVK: return true;
+                default: break;
+            }
+            var count = stack.mallocInt(1);
+            check(vkEnumerateDeviceExtensionProperties(physical, (CharSequence) null, count, null), "count device extensions");
+            var extensions = VkExtensionProperties.malloc(count.get(0), stack);
+            check(vkEnumerateDeviceExtensionProperties(physical, (CharSequence) null, count, extensions), "list device extensions");
+            for (var extension : extensions) if (extension.extensionNameString().equals("VK_KHR_unified_image_layouts")) return true;
+            return false;
+        }
+    }
+
     private long createSemaphore(MemoryStack stack) {
         var export = VkExportSemaphoreCreateInfo.calloc(stack).sType$Default().handleTypes(VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
         var result = stack.mallocLong(1);
@@ -224,7 +246,7 @@ public final class SharedImage implements AutoCloseable {
             throw new IllegalStateException("Initial ownership cannot batch a transfer release");
         int access = layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? VK_ACCESS_TRANSFER_WRITE_BIT
                 : layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL ? VK_ACCESS_TRANSFER_READ_BIT : 0;
-        int nextLayout = this.access.vkRelease;
+        int nextLayout = vkHandoffLayout;
         barrier(command, layout, nextLayout, access, 0, family, VK_QUEUE_FAMILY_EXTERNAL,
                 layout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, transferBarrier);
@@ -240,7 +262,7 @@ public final class SharedImage implements AutoCloseable {
         assertOwner();
         try (MemoryStack stack = MemoryStack.stackPush()) {
             glWaitSemaphoreEXT(glToGl, stack.mallocInt(0), stack.ints(texture),
-                    stack.ints(access.glWait));
+                    stack.ints(glHandoffLayout));
         }
     }
     /** Wait in the GL queue; returns this real GL FBO for the producer. No CPU wait/readback. */
@@ -265,7 +287,7 @@ public final class SharedImage implements AutoCloseable {
         assertOwner();
         try (MemoryStack stack = MemoryStack.stackPush()) {
             glSignalSemaphoreEXT(glFromGl, stack.mallocInt(0), stack.ints(texture),
-                    stack.ints(access.glSignal));
+                    stack.ints(glHandoffLayout));
             // EXT_semaphore already flushes immediately after signaling.
             // Release frames do not also call glGetError; --debug-gl still does.
             if (GlDiagnostics.errorsEnabled()) checkGl("submit shared game image");
@@ -279,7 +301,7 @@ public final class SharedImage implements AutoCloseable {
      * The companion must reference a different image and use compatible access masks. */
     public void acquire(VkCommandBuffer command, int family, VkImageMemoryBarrier transferBarrier) {
         assertOwner();
-        barrier(command, access.vkAcquire,
+        barrier(command, vkHandoffLayout,
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0, VK_ACCESS_TRANSFER_READ_BIT,
                 VK_QUEUE_FAMILY_EXTERNAL, family, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, transferBarrier);
         layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;

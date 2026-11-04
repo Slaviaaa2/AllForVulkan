@@ -290,7 +290,7 @@ public final class VulkanExternalImage implements AutoCloseable {
                     awaitFence();
                     verifyReadback(red, green, blue);
                 }
-                System.out.println((copyOnly ? "AFV_SHARED_COPY_LAYOUT_PASS: TRANSFER_DST -> GL -> TRANSFER_SRC"
+                System.out.println((copyOnly ? "AFV_SHARED_COPY_LAYOUT_PASS: handoff layout -> GL -> handoff layout"
                         : "AFV_SHARED_GENERAL_PASS: GENERAL -> GL -> GENERAL")
                         + ", 8 changing frames, implicit signal flush, size=" + width + "x" + height);
             } finally {
