@@ -158,7 +158,8 @@ public final class ClientSmokeTest {
         if (ENABLED) renderedFrames++;
         if (ENABLED && !BackendBootstrap.vulkan()) dev.allforvulkan.validation.GlDebugTrace.installIfRequested();
         if (ENABLED) dev.allforvulkan.validation.FrameBenchmark.frame();
-        if (ENABLED) { TerrainProbe.frame(); SectionProbe.frame(); }
+        if (ENABLED) { TerrainProbe.frame(); SectionProbe.frame(); TerrainWorkProbe.frame(); }
+        if (ENABLED) turnCamera(Minecraft.getInstance());
     }
 
     @SubscribeEvent
@@ -262,6 +263,7 @@ public final class ClientSmokeTest {
                     dev.allforvulkan.validation.FrameBenchmark.begin();
                     TerrainProbe.reset();
                     SectionProbe.reset();
+                    TerrainWorkProbe.reset();
                     benchmarkBeginWallMs = System.currentTimeMillis();
                     Initializer.LOGGER.info("AFV_BENCHMARK_BEGIN: wallMs={} camera={}", benchmarkBeginWallMs, System.getProperty("afv.benchmarkCamera", "fixed"));
                 }
@@ -295,6 +297,11 @@ public final class ClientSmokeTest {
                 conditions.put("terrainScene", TERRAIN);
                 if (TerrainProbe.PROBE) conditions.put("terrainProbe", TerrainProbe.result());
                 if (SectionProbe.ENABLED) conditions.put("sectionProbe", SectionProbe.result());
+                if (TerrainWorkProbe.ENABLED) {
+                    conditions.put("terrainWork", TerrainWorkProbe.result());
+                    conditions.put("sectionStatistics", client.levelRenderer.getSectionStatistics());
+                    conditions.put("loadedChunks", client.level.getChunkSource().getLoadedChunksCount());
+                }
                 conditions.put("warmupTicks", warmup);
                 conditions.put("width", client.getWindow().getWidth());
                 conditions.put("height", client.getWindow().getHeight());
@@ -415,6 +422,13 @@ public final class ClientSmokeTest {
     }
 
     /** Fixed orbit used by the desktop harness. Step 0 is the first post-settle tick, including warmup. */
+    /** Sodium only searches its graph when the view changes, which a fixed camera never does. */
+    private static void turnCamera(Minecraft client) {
+        if (benchmarkBeginWallMs == 0 || benchmarkFinished || client.player == null
+                || !"turn".equalsIgnoreCase(System.getProperty("afv.benchmarkCamera", "fixed"))) return;
+        client.player.setYRot(45 + (System.currentTimeMillis() - benchmarkBeginWallMs) * .03f);
+    }
+
     private static void placeCamera(Minecraft client, int step) {
         double angle = (step % 80) * (Math.PI * 2.0 / 80.0);
         double x = 0.5 + Math.cos(angle) * 3.0;
@@ -431,11 +445,13 @@ public final class ClientSmokeTest {
     /** Mesh runs share one flat world so off, on, and fallback see the same chunks. */
     private static void openProbeWorld(Minecraft client) {
         boolean mesh = Boolean.getBoolean("afv.shadowMesh");
-        String name = mesh ? "AFV-Shadow-Mesh" : "AFV-Smoke-" + System.currentTimeMillis();
+        // A named world lets large render distances skip generation, and every run sees the same chunks.
+        String kept = mesh ? "AFV-Shadow-Mesh" : System.getProperty("afv.benchmarkWorld");
+        String name = kept != null ? kept : "AFV-Smoke-" + System.currentTimeMillis();
         var flows = client.createWorldOpenFlows();
-        if (mesh && client.getLevelSource().levelExists(name)) {
+        if (kept != null && client.getLevelSource().levelExists(name)) {
             flows.openWorld(name, () -> {
-                throw new IllegalStateException("AFV_SMOKE_FAIL: could not reopen the shadow world");
+                throw new IllegalStateException("AFV_SMOKE_FAIL: could not reopen " + name);
             });
             return;
         }

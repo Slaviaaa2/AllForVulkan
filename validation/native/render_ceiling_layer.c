@@ -9,8 +9,16 @@
 // plus "gpuCovered", the milliseconds those intervals cover. The remainder of GPU busy
 // time is barriers and other unscoped work. AFV_RENDER_PROBE_TIMESTAMP_NS scales ticks
 // for devices whose timestampPeriod is not 1 ns. Command buffers recorded once and replayed
-// are not timed. AFV_RENDER_PROBE_TRACE=<path> with AFV_RENDER_PROBE_TRACE_DRAIN=<n> writes
-// every scope of the n-th one-second drain to <path>.dev<i> as "begin end name", in ticks.
+// are not timed. AFV_RENDER_PROBE_TRACE=<path> with AFV_RENDER_PROBE_TRACE_DRAIN=<n> appends
+// every scope of the n-th second after the first device to <path>.dev<i> as "begin end name",
+// in ticks. AFV_RENDER_PROBE_TRACE_DRAINS=<k> extends that to k seconds. A blit reports its
+// source and destination image layouts in the load/store position.
+//
+// AFV_RENDER_PROBE_SUBMITS=1 puts a timestamp before, between and after
+// the command buffers of every vkQueueSubmit, so replayed commands and the gaps between
+// batches and devices become visible. Traced stamps go to <path>.submits<i> as
+// "tick submit position/commands wWaits sSignals". Application timestamp writes appear as
+// "stamp" scopes next to their own position.
 //
 // AFV_RENDER_PROBE_NULL_PRESENT=1 replaces every swapchain with three offscreen
 // images. Rendering, queue submission, semaphores and a three-frame GPU throttle
@@ -40,6 +48,7 @@ typedef void *(*GetProcAddr)(void *, const char *);
 enum {
     STRUCT_SUBMIT_INFO = 4, STRUCT_MEMORY_ALLOCATE_INFO = 5, STRUCT_FENCE_CREATE_INFO = 8,
     STRUCT_IMAGE_CREATE_INFO = 14, STRUCT_LOADER_INSTANCE_CREATE_INFO = 47, STRUCT_LOADER_DEVICE_CREATE_INFO = 48,
+    STRUCT_COMMAND_POOL_CREATE_INFO = 39, STRUCT_COMMAND_BUFFER_ALLOCATE_INFO = 40, STRUCT_COMMAND_BUFFER_BEGIN_INFO = 42,
     LAYER_LINK_INFO = 0, IMAGE_CREATE_MUTABLE_FORMAT = 8, IMAGE_TYPE_2D = 1, FENCE_SIGNALED = 1,
     MEMORY_DEVICE_LOCAL = 1, STAGE_ALL_COMMANDS = 0x10000, NULL_IMAGES = 3, MAX_DEVICES = 8, MAX_THREADS = 24,
 };
@@ -72,6 +81,9 @@ typedef struct {
     const U *swapchains; const uint32_t *indices; int *results;
 } PresentInfo;
 typedef struct { int sType; const void *pNext; U swapchain; uint64_t timeout; U semaphore, fence; uint32_t mask; } AcquireInfo;
+typedef struct { int sType; const void *pNext; uint32_t flags, family; } CommandPoolInfo;
+typedef struct { int sType; const void *pNext; U pool; int level; uint32_t count; } CommandAllocateInfo;
+typedef struct { int sType; const void *pNext; uint32_t flags; const void *inheritance; } CommandBeginInfo;
 
 #define TIMED(X) X(QueueSubmit) X(QueueSubmit2) X(QueueSubmit2KHR) X(QueuePresentKHR) X(AcquireNextImageKHR) \
     X(AcquireNextImage2KHR) X(WaitSemaphores) X(WaitForFences) X(QueueWaitIdle) X(DeviceWaitIdle) \
@@ -85,7 +97,8 @@ typedef struct { int sType; const void *pNext; U swapchain; uint64_t timeout; U 
     X(UpdateDescriptorSetWithTemplate)
 #define INTERNAL(X) X(CreateSwapchainKHR) X(GetSwapchainImagesKHR) X(DestroySwapchainKHR) X(CreateImage) \
     X(GetImageMemoryRequirements) X(BindImageMemory) X(CreateFence) X(ResetFences) X(GetDeviceQueue) \
-    X(CreateQueryPool) X(ResetQueryPool) X(CmdWriteTimestamp) X(GetQueryPoolResults) X(CmdEndRendering)
+    X(CreateQueryPool) X(ResetQueryPool) X(CmdWriteTimestamp) X(GetQueryPoolResults) X(CmdEndRendering) \
+    X(CreateCommandPool) X(AllocateCommandBuffers) X(EndCommandBuffer) X(DestroyDevice)
 
 #define ENUM(name) TIMED_##name,
 enum { TIMED(ENUM) TIMED_TOTAL };
@@ -101,8 +114,9 @@ static const char *const countNames[] = {COUNTED(NAME)};
 typedef struct {
     void *dispatchKey, *device;
     GetProcAddr gdpa;
-    U queue, queryPool;
-    uint32_t nextScope, collectedScope;
+    U queue, queryPool, stampPool;
+    U *stampCommands;
+    uint32_t family, nextScope, collectedScope, nextStamp, collectedStamp, submitCount;
 #define MEMBER(name) Fn name;
     TIMED(MEMBER) COUNTED(MEMBER) INTERNAL(MEMBER)
 #undef MEMBER
@@ -120,7 +134,10 @@ static __thread int threadSlot = -1;
 static pthread_mutex_t tableLock = PTHREAD_MUTEX_INITIALIZER;
 // Null presentation submits from threads the application did not synchronize with.
 static pthread_mutex_t queueLock = PTHREAD_MUTEX_INITIALIZER;
-static int nullPresent;
+// The writer thread reads query pools of devices that the application can destroy at any time.
+static pthread_mutex_t drainLock = PTHREAD_MUTEX_INITIALIZER;
+static int nullPresent, submitStamps;
+static int drainNumber;
 static uint32_t memoryTypeCount, memoryTypeFlags[32];
 static FILE *output;
 
@@ -185,8 +202,8 @@ typedef struct { int sType; const void *pNext; uint32_t flags; int type; uint32_
 typedef struct { uint32_t pad; int x, y; uint32_t width, height, layers, viewMask, colorCount;
                  const char *colors, *depth, *stencil; } RenderingBody;
 typedef struct { int sType; const void *pNext; RenderingBody body; } RenderingInfo;
-enum { KIND_PASS, KIND_BLIT, KIND_COPY_IMAGE, KIND_COPY_BUFFER, KIND_BUFFER_TO_IMAGE, KIND_CLEAR_COLOR, KIND_CLEAR_DEPTH, KIND_RESOLVE };
-static const char *const scopeKinds[] = {"pass", "blit", "copyImage", "copyBuffer", "bufferToImage", "clearColor", "clearDepth", "resolve"};
+enum { KIND_PASS, KIND_BLIT, KIND_COPY_IMAGE, KIND_COPY_BUFFER, KIND_BUFFER_TO_IMAGE, KIND_CLEAR_COLOR, KIND_CLEAR_DEPTH, KIND_RESOLVE, KIND_STAMP };
+static const char *const scopeKinds[] = {"pass", "blit", "copyImage", "copyBuffer", "bufferToImage", "clearColor", "clearDepth", "resolve", "stamp"};
 static int gpuProbe;
 static double nanosPerTick = 1;
 static uint64_t scopeKeys[MAX_DEVICES][SCOPE_RING];
@@ -219,22 +236,28 @@ static U scopedEndRendering(PARAMS) {
     endScope(device, a, passScope);
     return result;
 }
-#define SCOPED(entry, kind, width, height) static U scoped##entry(PARAMS) { \
+#define SCOPED(entry, kind, width, height, load, store) static U scoped##entry(PARAMS) { \
     Device *device = deviceOf(a); \
-    uint32_t scope = beginScope(device, a, scopeKey(kind, width, height, 0, 0, 0, 0)); \
+    uint32_t scope = beginScope(device, a, scopeKey(kind, width, height, 0, 0, load, store)); \
     U result = wrap##entry(ARGS); \
     endScope(device, a, scope); \
     return result; \
 }
 // VkImageBlit: destination offsets[1] follow src subresource, src offsets and dst subresource.
 static uint32_t blitAxis(U regions, int axis) { return regions ? *(const uint32_t *)(regions + 68 + axis * 4) : 0; }
-SCOPED(CmdBlitImage, KIND_BLIT, blitAxis(g, 0), blitAxis(g, 1))
-SCOPED(CmdCopyImage, KIND_COPY_IMAGE, 0, 0)
-SCOPED(CmdCopyBuffer, KIND_COPY_BUFFER, 0, 0)
-SCOPED(CmdCopyBufferToImage, KIND_BUFFER_TO_IMAGE, 0, 0)
-SCOPED(CmdClearColorImage, KIND_CLEAR_COLOR, 0, 0)
-SCOPED(CmdClearDepthStencilImage, KIND_CLEAR_DEPTH, 0, 0)
-SCOPED(CmdResolveImage, KIND_RESOLVE, 0, 0)
+SCOPED(CmdBlitImage, KIND_BLIT, blitAxis(g, 0), blitAxis(g, 1), c, e)
+SCOPED(CmdCopyImage, KIND_COPY_IMAGE, 0, 0, 0, 0)
+SCOPED(CmdCopyBuffer, KIND_COPY_BUFFER, 0, 0, 0, 0)
+SCOPED(CmdCopyBufferToImage, KIND_BUFFER_TO_IMAGE, 0, 0, 0, 0)
+SCOPED(CmdClearColorImage, KIND_CLEAR_COLOR, 0, 0, 0, 0)
+SCOPED(CmdClearDepthStencilImage, KIND_CLEAR_DEPTH, 0, 0, 0, 0)
+SCOPED(CmdResolveImage, KIND_RESOLVE, 0, 0, 0, 0)
+static U stampedWriteTimestamp(PARAMS) {
+    Device *device = deviceOf(a);
+    U result = device->CmdWriteTimestamp(ARGS);
+    endScope(device, a, beginScope(device, a, scopeKey(KIND_STAMP, 0, 0, 0, 0, 0, 0)));
+    return result;
+}
 
 typedef struct { uint64_t begin, end, key; } Interval;
 static int compareIntervals(const void *left, const void *right) {
@@ -242,6 +265,16 @@ static int compareIntervals(const void *left, const void *right) {
     return a < b ? -1 : a > b;
 }
 static Interval intervals[SCOPE_RING];
+static int tracing(void) {
+    const char *first = getenv("AFV_RENDER_PROBE_TRACE_DRAIN"), *count = getenv("AFV_RENDER_PROBE_TRACE_DRAINS");
+    if (!getenv("AFV_RENDER_PROBE_TRACE") || !first) return 0;
+    return drainNumber >= atoi(first) && drainNumber < atoi(first) + (count ? atoi(count) : 1);
+}
+static FILE *openTrace(const char *suffix, int deviceIndex) {
+    char path[4096];
+    snprintf(path, sizeof path, "%s.%s%d", getenv("AFV_RENDER_PROBE_TRACE"), suffix, deviceIndex);
+    return fopen(path, "a");
+}
 /** Write one device's completed scopes. Unfinished scopes stay queued for the next pass. */
 static void writeGpuScopes(Device *device) {
     static uint64_t keys[MAX_SCOPE_KEYS], counts[MAX_SCOPE_KEYS];
@@ -281,12 +314,8 @@ static void writeGpuScopes(Device *device) {
     for (uint32_t index = device->collectedScope; index != contiguous; index++) scopeDone[deviceIndex][index % SCOPE_RING] = 0;
     device->collectedScope = contiguous;
     qsort(intervals, intervalCount, sizeof intervals[0], compareIntervals);
-    static int traceDrains[MAX_DEVICES];
-    const char *tracePath = getenv("AFV_RENDER_PROBE_TRACE");
-    if (tracePath && intervalCount > 0 && ++traceDrains[deviceIndex] == atoi(getenv("AFV_RENDER_PROBE_TRACE_DRAIN"))) {
-        char path[4096];
-        snprintf(path, sizeof path, "%s.dev%d", tracePath, deviceIndex);
-        FILE *trace = fopen(path, "w");
+    if (intervalCount > 0 && tracing()) {
+        FILE *trace = openTrace("dev", deviceIndex);
         for (int k = 0; trace && k < intervalCount; k++) {
             uint64_t key = intervals[k].key;
             fprintf(trace, "%lu %lu %s %ux%u c%u d%u %u/%u\n", intervals[k].begin, intervals[k].end, scopeKinds[key >> 56], (unsigned)(key >> 40 & 0xffff),
@@ -307,6 +336,91 @@ static void writeGpuScopes(Device *device) {
                 (unsigned)(key >> 4 & 0xf), (unsigned)(key & 0xf), counts[k], totals[k]);
     }
     fprintf(output, "},\"gpuCovered%d\":%.3f", deviceIndex, covered * nanosPerTick / 1e6);
+}
+
+// Submit stamps: one recorded single-timestamp command buffer per slot, replayed around the
+// application's command buffers. Nothing is recorded while a frame is being submitted.
+enum { STAMP_RING = 1 << 12, STAMP_MARGIN = 64, MAX_SPLIT_SUBMITS = 8, MAX_SPLIT_COMMANDS = 16 };
+typedef struct { uint32_t submit, position, commands, waits, signals; } StampInfo;
+static StampInfo stampInfo[MAX_DEVICES][STAMP_RING];
+
+static int createStamps(Device *device) {
+    QueryPoolInfo pool = {STRUCT_QUERY_POOL_CREATE_INFO, 0, 0, QUERY_TYPE_TIMESTAMP, STAMP_RING, 0};
+    int status = (int)device->CreateQueryPool((U)device->device, (U)&pool, 0, (U)&device->stampPool, 0, 0, 0, 0, 0, 0);
+    if (status) return status;
+    device->ResetQueryPool((U)device->device, device->stampPool, 0, STAMP_RING, 0, 0, 0, 0, 0, 0);
+    CommandPoolInfo commandPool = {STRUCT_COMMAND_POOL_CREATE_INFO, 0, 0, device->family};
+    U commands = 0;
+    status = (int)device->CreateCommandPool((U)device->device, (U)&commandPool, 0, (U)&commands, 0, 0, 0, 0, 0, 0);
+    if (status) return status;
+    device->stampCommands = calloc(STAMP_RING, sizeof(U));
+    CommandAllocateInfo allocate = {STRUCT_COMMAND_BUFFER_ALLOCATE_INFO, 0, commands, 0, STAMP_RING};
+    status = (int)device->AllocateCommandBuffers((U)device->device, (U)&allocate, (U)device->stampCommands, 0, 0, 0, 0, 0, 0, 0);
+    if (status) return status;
+    CommandBeginInfo begin = {STRUCT_COMMAND_BUFFER_BEGIN_INFO, 0, 0, 0};
+    for (uint32_t k = 0; k < STAMP_RING; k++) {
+        U command = device->stampCommands[k];
+        *(void **)command = device->dispatchKey;
+        device->BeginCommandBuffer(command, (U)&begin, 0, 0, 0, 0, 0, 0, 0, 0);
+        device->CmdWriteTimestamp(command, STAGE_BOTTOM_OF_PIPE, device->stampPool, k, 0, 0, 0, 0, 0, 0);
+        device->EndCommandBuffer(command, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
+    return 0;
+}
+static U stampCommand(Device *device, uint32_t submit, uint32_t position, const SubmitInfo *info) {
+    uint32_t index = __atomic_fetch_add(&device->nextStamp, 1, __ATOMIC_RELAXED);
+    if (index - __atomic_load_n(&device->collectedStamp, __ATOMIC_RELAXED) >= STAMP_RING - STAMP_MARGIN) {
+        __atomic_fetch_sub(&device->nextStamp, 1, __ATOMIC_RELAXED);
+        return 0;
+    }
+    index %= STAMP_RING;
+    stampInfo[device - devices][index] = (StampInfo){submit, position, info->commandCount, info->waitCount, info->signalCount};
+    return device->stampCommands[index];
+}
+/** Returns the number of stamps written. A slot is reset once read; only then can it be replayed. */
+static int writeSubmitStamps(Device *device) {
+    int deviceIndex = (int)(device - devices), written = 0;
+    FILE *trace = tracing() ? openTrace("submits", deviceIndex) : NULL;
+    uint32_t next = __atomic_load_n(&device->nextStamp, __ATOMIC_RELAXED);
+    while (device->collectedStamp != next) {
+        uint32_t slot = device->collectedStamp % STAMP_RING;
+        uint64_t data[2];
+        int status = (int)device->GetQueryPoolResults((U)device->device, device->stampPool, slot, 1, sizeof data, (U)data,
+                                                      16, QUERY_RESULT_64 | QUERY_RESULT_AVAILABILITY, 0, 0);
+        if (status != 0 || !data[1]) break;
+        device->ResetQueryPool((U)device->device, device->stampPool, slot, 1, 0, 0, 0, 0, 0, 0);
+        const StampInfo *info = &stampInfo[deviceIndex][slot];
+        if (trace) fprintf(trace, "%lu %u %u/%u w%u s%u\n", data[0], info->submit, info->position, info->commands, info->waits, info->signals);
+        __atomic_store_n(&device->collectedStamp, device->collectedStamp + 1, __ATOMIC_RELAXED);
+        written++;
+    }
+    if (trace) fclose(trace);
+    return written;
+}
+
+/** Rewrites each VkSubmitInfo in place on the stack, then forwards through the timed wrapper. */
+static U rewrittenQueueSubmit(PARAMS) {
+    Device *device = deviceOf(a);
+    uint32_t count = (uint32_t)b;
+    const SubmitInfo *original = (const SubmitInfo *)c;
+    if (count > MAX_SPLIT_SUBMITS) return wrapQueueSubmit(ARGS);
+    SubmitInfo copies[MAX_SPLIT_SUBMITS];
+    U commands[MAX_SPLIT_SUBMITS][MAX_SPLIT_COMMANDS * 2 + 1];
+    for (uint32_t s = 0; s < count; s++) {
+        SubmitInfo *copy = &copies[s];
+        *copy = original[s];
+        if (submitStamps && copy->commandCount && copy->commandCount <= MAX_SPLIT_COMMANDS) {
+            uint32_t submit = __atomic_fetch_add(&device->submitCount, 1, __ATOMIC_RELAXED), used = 0;
+            for (uint32_t k = 0; k <= original[s].commandCount; k++) {
+                U stamp = stampCommand(device, submit, k, &original[s]);
+                if (stamp) commands[s][used++] = stamp;
+                if (k < original[s].commandCount) commands[s][used++] = original[s].commands[k];
+            }
+            copy->commandCount = used;
+            copy->commands = commands[s];
+        }
+    }
+    return wrapQueueSubmit(a, b, (U)copies, d, e, f, g, h, i, j);
 }
 
 typedef struct { uint32_t next; U images[NULL_IMAGES], fences[NULL_IMAGES]; } NullSwapchain;
@@ -441,9 +555,13 @@ static void *writer(void *unused) {
             lastCounters[entry] = value;
         }
         fprintf(output, "}");
-        if (gpuProbe) for (int k = 0; k < deviceCount; k++) if (devices[k].queryPool) writeGpuScopes(&devices[k]);
+        pthread_mutex_lock(&drainLock);
+        for (int k = 0; k < deviceCount; k++) if (devices[k].queryPool) writeGpuScopes(&devices[k]);
+        for (int k = 0; k < deviceCount; k++) if (devices[k].stampPool) writeSubmitStamps(&devices[k]);
+        pthread_mutex_unlock(&drainLock);
         fprintf(output, "}\n");
         fflush(output);
+        if (deviceCount) drainNumber++;
     }
     return unused;
 }
@@ -451,6 +569,7 @@ static void *writer(void *unused) {
 __attribute__((constructor)) static void start(void) {
     nullPresent = getenv("AFV_RENDER_PROBE_NULL_PRESENT") != NULL;
     gpuProbe = getenv("AFV_RENDER_PROBE_GPU") != NULL;
+    submitStamps = getenv("AFV_RENDER_PROBE_SUBMITS") != NULL;
     if (getenv("AFV_RENDER_PROBE_TIMESTAMP_NS")) nanosPerTick = atof(getenv("AFV_RENDER_PROBE_TIMESTAMP_NS"));
     const char *prefix = getenv("AFV_RENDER_PROBE_OUT");
     char path[4096];
@@ -504,18 +623,29 @@ static int createDevice(void *physicalDevice, const Header *info, const void *al
     TIMED(RESOLVE) COUNTED(RESOLVE) INTERNAL(RESOLVE)
 #undef RESOLVE
     const DeviceInfo *deviceInfo = (const DeviceInfo *)info;
-    uint32_t family = ((const QueueInfo *)deviceInfo->queues)->family;
-    device->GetDeviceQueue((U)*result, family, 0, (U)&device->queue, 0, 0, 0, 0, 0, 0);
-    if (gpuProbe) {
+    device->family = ((const QueueInfo *)deviceInfo->queues)->family;
+    device->GetDeviceQueue((U)*result, device->family, 0, (U)&device->queue, 0, 0, 0, 0, 0, 0);
+    if (gpuProbe || submitStamps) {
         QueryPoolInfo pool = {STRUCT_QUERY_POOL_CREATE_INFO, 0, 0, QUERY_TYPE_TIMESTAMP, SCOPE_RING * 2, 0};
         device->CreateQueryPool((U)*result, (U)&pool, 0, (U)&device->queryPool, 0, 0, 0, 0, 0, 0);
         device->ResetQueryPool((U)*result, device->queryPool, 0, SCOPE_RING * 2, 0, 0, 0, 0, 0, 0);
     }
+    if (submitStamps) createStamps(device);
     pthread_mutex_unlock(&tableLock);
     return 0;
 }
 
 EXPORT void *afvGetDeviceProcAddr(void *deviceHandle, const char *name);
+
+static U destroyDevice(PARAMS) {
+    Device *device = deviceOf(a);
+    pthread_mutex_lock(&drainLock);
+    device->queryPool = device->stampPool = 0;
+    device->stampCommands = NULL;
+    device->dispatchKey = NULL;
+    pthread_mutex_unlock(&drainLock);
+    return device->DestroyDevice(ARGS);
+}
 
 static void *interceptPresentation(const char *name) {
     if (!strcmp(name, "vkQueuePresentKHR")) return (void *)presentEntry;
@@ -552,6 +682,9 @@ EXPORT void *afvGetDeviceProcAddr(void *deviceHandle, const char *name) {
     if (!device) return NULL;
     void *presentation = interceptPresentation(name);
     if (presentation) return presentation;
+    if (!strcmp(name, "vkDestroyDevice")) return (void *)destroyDevice;
+    if ((submitStamps && device->stampCommands) && !strcmp(name, "vkQueueSubmit")) return (void *)rewrittenQueueSubmit;
+    if (submitStamps && device->stampCommands && !strcmp(name, "vkCmdWriteTimestamp")) return (void *)stampedWriteTimestamp;
     void *scoped = gpuProbe && device->queryPool ? interceptScopes(name) : NULL;
     if (scoped) return scoped;
     void *wrapped = intercept(device, name);

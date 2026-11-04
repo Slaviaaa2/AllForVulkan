@@ -7,4 +7,5 @@ import net.caffeinemc.mods.sodium.client.util.iterator.ByteIterator;
 public class ChunkRenderList {
     public RenderRegion getRegion() { return null; }
     public ByteIterator sectionsWithGeometryIterator(boolean reverse) { return null; }
+    public int getSectionsWithGeometryCount() { return 0; }
 }

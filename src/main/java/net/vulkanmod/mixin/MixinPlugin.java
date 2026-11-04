@@ -33,7 +33,13 @@ public class MixinPlugin implements IMixinConfigPlugin {
                 || mixinClassName.endsWith(".ZinkClientGameMixin"))
             return dev.allforvulkan.neoforge.BackendBootstrap.zinkClient();
         if (mixinClassName.endsWith(".SodiumTerrainProbeMixin"))
-            return Boolean.getBoolean("afv.terrainProbe") && pinnedSodiumPresent();
+            return terrainMeasurementRequested() && sodiumPresent(SODIUM_0_6_13);
+        if (mixinClassName.endsWith(".SodiumTerrainProbe08Mixin"))
+            return terrainMeasurementRequested() && sodiumPresent(SODIUM_0_8_13);
+        if (mixinClassName.endsWith(".SodiumRenderLists08Mixin"))
+            return Boolean.getBoolean("afv.terrainWork") && sodiumPresent(SODIUM_0_8_13);
+        if (mixinClassName.endsWith(".SodiumWorldProbeMixin") || mixinClassName.endsWith(".SodiumSectionsProbeMixin"))
+            return Boolean.getBoolean("afv.terrainWork") && (sodiumPresent(SODIUM_0_6_13) || sodiumPresent(SODIUM_0_8_13));
         if (mixinClassName.endsWith(".SectionProbeMixin"))
             return Boolean.getBoolean("afv.sectionProbe");
         if (mixinClassName.endsWith(".ZinkNativeFrameMixin"))
@@ -74,33 +80,45 @@ public class MixinPlugin implements IMixinConfigPlugin {
         return dev.allforvulkan.neoforge.BackendBootstrap.irisShadow() || System.getProperty("afv.irisShadow") != null;
     }
 
-    /** The Sodium series the compile-time stubs and shadow mesh decoder describe. */
-    private static final String PINNED_SODIUM = "0.6.";
-    private static Boolean pinnedSodium;
-
-    /** Do not load Sodium's renderer. Its mixins are still being applied at this point. */
-    private static boolean pinnedSodiumPresent() {
-        if (pinnedSodium == null || !pinnedSodium) pinnedSodium = pinnedSodiumMod() || pinnedSodiumJar();
-        return pinnedSodium;
+    private static boolean terrainMeasurementRequested() {
+        return Boolean.getBoolean("afv.terrainProbe") || Boolean.getBoolean("afv.terrainWork");
     }
 
-    private static boolean pinnedSodiumMod() {
+    /** The Sodium series the compile-time stubs and shadow mesh decoder describe. */
+    private static final String PINNED_SODIUM = "0.6.";
+    /** Terrain measurement names private methods, so it targets exact releases. */
+    private static final String SODIUM_0_6_13 = "0.6.13+", SODIUM_0_8_13 = "0.8.13+";
+    private static final java.util.Set<String> sodiumFound = new java.util.HashSet<>();
+
+    private static boolean pinnedSodiumPresent() {
+        return sodiumPresent(PINNED_SODIUM);
+    }
+
+    /** Do not load Sodium's renderer. Its mixins are still being applied at this point. */
+    private static boolean sodiumPresent(String version) {
+        if (sodiumFound.contains(version)) return true;
+        boolean present = sodiumMod(version) || sodiumJar(version);
+        if (present) sodiumFound.add(version);
+        return present;
+    }
+
+    private static boolean sodiumMod(String version) {
         try {
             var mods = net.neoforged.fml.loading.FMLLoader.getLoadingModList();
             return mods != null && mods.getMods().stream().anyMatch(mod -> "sodium".equals(mod.getModId())
-                    && mod.getVersion().toString().startsWith(PINNED_SODIUM));
+                    && mod.getVersion().toString().startsWith(version));
         } catch (Throwable failure) {
             return false;
         }
     }
 
-    private static boolean pinnedSodiumJar() {
+    private static boolean sodiumJar(String version) {
         try {
             var mods = net.neoforged.fml.loading.FMLLoader.getGamePath().resolve("mods");
             try (var files = java.nio.file.Files.list(mods)) {
                 return files.anyMatch(path -> {
                     String name = path.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-                    return name.startsWith("sodium-neoforge-" + PINNED_SODIUM) && name.endsWith(".jar");
+                    return name.startsWith("sodium-neoforge-" + version) && name.endsWith(".jar");
                 });
             }
         } catch (Throwable failure) {

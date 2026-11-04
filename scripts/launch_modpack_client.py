@@ -259,6 +259,17 @@ def launch(args):
         if args.benchmark_ticks <= 0:
             raise ValueError('--terrain-probe and --section-probe require --benchmark-ticks')
         command += ['-Dafv.terrainProbe=' + str(args.terrain_probe).lower(), '-Dafv.sectionProbe=' + str(args.section_probe).lower()]
+    if args.benchmark_world:
+        command += ['-Dafv.benchmarkWorld=' + args.benchmark_world]
+    if args.terrain_probe_mode != 'normal' and not args.terrain_probe:
+        raise ValueError('--terrain-probe-mode requires --terrain-probe')
+    if args.terrain_probe_stats and not args.terrain_probe:
+        raise ValueError('--terrain-probe-stats requires --terrain-probe')
+    if args.terrain_work or args.terrain_occlusion:
+        if args.benchmark_ticks <= 0:
+            raise ValueError('--terrain-work and --terrain-occlusion require --benchmark-ticks')
+        command += ['-Dafv.terrainWork=true', '-Dafv.terrainOcclusion=' + str(args.terrain_occlusion).lower()]
+    command += ['-Dafv.terrainProbeMode=' + args.terrain_probe_mode, '-Dafv.terrainProbeStats=' + str(args.terrain_probe_stats).lower()]
     if args.benchmark_only:
         if args.benchmark_ticks <= 0:
             raise ValueError('--benchmark-only requires --benchmark-ticks')
@@ -446,7 +457,7 @@ if __name__ == '__main__':
     parser.add_argument('--inspect-ticks', type=int, default=0)
     parser.add_argument('--benchmark-ticks', type=int, default=0)
     parser.add_argument('--warmup-ticks', type=int, default=900)
-    parser.add_argument('--benchmark-camera', choices=('fixed', 'orbit'), default='fixed', help='Fixed spawn view, or an 80-tick orbit after the world settles')
+    parser.add_argument('--benchmark-camera', choices=('fixed', 'orbit', 'turn'), default='fixed', help='Fixed spawn view, an 80-tick orbit after the world settles, or a steady turn in place during measurement')
     parser.add_argument('--width', type=int, default=960)
     parser.add_argument('--height', type=int, default=540)
     parser.add_argument('--render-distance', type=int)
@@ -459,7 +470,12 @@ if __name__ == '__main__':
     parser.add_argument('--dimension-inspect-ticks', type=int, default=0, help='Hold each validated dimension for scoped visual inspection')
     parser.add_argument('--scene', action='store_true', help='Build a shader validation scene in the new smoke world')
     parser.add_argument('--terrain', action='store_true', help='With --scene: benchmark a fixed viewpoint over generated terrain instead of the flat diagnostic scene')
-    parser.add_argument('--terrain-probe', action='store_true', help='GL timer and sample queries around Sodium terrain passes; Sodium 0.6 only')
+    parser.add_argument('--terrain-probe', action='store_true', help='GL timer and sample queries around Sodium terrain passes; Sodium 0.6.13 and 0.8.13 only')
+    parser.add_argument('--benchmark-world', help='Keep this world between runs instead of generating a new one')
+    parser.add_argument('--terrain-probe-mode', choices=('normal', 'discard', 'alternate'), default='normal', help='discard blanks terrain to leave vertex work; alternate cycles sampled frames through normal, discard and a one-pixel scissor')
+    parser.add_argument('--terrain-probe-stats', action='store_true', help='Add pipeline statistics queries to --terrain-probe')
+    parser.add_argument('--terrain-work', action='store_true', help='Render thread time and draw counts for Sodium terrain; Sodium 0.6.13 and 0.8.13 only')
+    parser.add_argument('--terrain-occlusion', action='store_true', help='Replay opaque terrain with a sample query per section; stalls frames, so its frame times are not usable')
     parser.add_argument('--section-probe', action='store_true', help='GL timestamps at Minecraft profiler section changes: comparable GPU time per render stage')
     parser.add_argument('--benchmark-only', action='store_true', help='Leave the world after the sample instead of running the resize/reload checks')
     parser.add_argument('--render-ceiling', action='store_true', help='Replace swapchains with offscreen images: FPS measures rendering, not the window system')
