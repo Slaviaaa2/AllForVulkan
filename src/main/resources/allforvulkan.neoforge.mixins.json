@@ -4,6 +4,6 @@
   "package": "dev.allforvulkan.neoforge.mixin",
   "plugin": "net.vulkanmod.mixin.MixinPlugin",
   "compatibilityLevel": "JAVA_21",
-  "client": ["NeoForgeWindowMixin", "EglValidationMixin", "PackValidationMixin", "ZinkClientWindowMixin", "ZinkClientFrameMixin", "ZinkClientGameMixin", "ZinkNativeFrameMixin", "IrisShadowPassMixin", "SodiumShadowMeshMixin", "SodiumShadowUploadMixin", "SodiumTerrainProbeMixin", "SodiumTerrainProbe08Mixin", "SodiumWorldProbeMixin", "SodiumSectionsProbeMixin", "SodiumRenderLists08Mixin", "SectionProbeMixin"],
+  "client": ["NeoForgeWindowMixin", "EglValidationMixin", "PackValidationMixin", "ZinkClientWindowMixin", "ZinkClientFrameMixin", "ZinkClientGameMixin", "ZinkNativeFrameMixin", "IrisShadowPassMixin", "SodiumShadowMeshMixin", "SodiumShadowUploadMixin", "SodiumTerrainProbeMixin", "SodiumTerrainProbe08Mixin", "SodiumWorldProbeMixin", "SodiumSectionsProbeMixin", "SodiumRenderLists08Mixin", "SectionProbeMixin", "GraphWhyProbeMixin", "GraphWhySetupMixin", "GlErrorStackMixin"],
   "injectors": {"defaultRequire": 1}
 }

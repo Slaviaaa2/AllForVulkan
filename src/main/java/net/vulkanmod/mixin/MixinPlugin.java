@@ -40,6 +40,10 @@ public class MixinPlugin implements IMixinConfigPlugin {
             return Boolean.getBoolean("afv.terrainWork") && sodiumPresent(SODIUM_0_8_13);
         if (mixinClassName.endsWith(".SodiumWorldProbeMixin") || mixinClassName.endsWith(".SodiumSectionsProbeMixin"))
             return Boolean.getBoolean("afv.terrainWork") && (sodiumPresent(SODIUM_0_6_13) || sodiumPresent(SODIUM_0_8_13));
+        if (mixinClassName.endsWith(".GraphWhyProbeMixin") || mixinClassName.endsWith(".GraphWhySetupMixin"))
+            return Boolean.getBoolean("afv.graphWhy") && sodiumPresent(SODIUM_0_8_13);
+        if (mixinClassName.endsWith(".GlErrorStackMixin"))
+            return Boolean.getBoolean("afv.graphWhy");
         if (mixinClassName.endsWith(".SectionProbeMixin"))
             return Boolean.getBoolean("afv.sectionProbe");
         if (mixinClassName.endsWith(".ZinkNativeFrameMixin"))
