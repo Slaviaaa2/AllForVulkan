@@ -165,6 +165,14 @@ class HarnessChecks(unittest.TestCase):
         jfr, _ = summary.profile_jvm_args("jfr", None)
         self.assertTrue(jfr[0].startswith("-XX:StartFlightRecording="))
 
+    def test_terrain_fixes_the_camera_and_skips_the_later_checks(self):
+        args = self.args()
+        args.terrain = True
+        command = desktop.planned(args, ["afv-bridge"], [])[0]
+        self.assertIn("--terrain", command)
+        self.assertIn("--benchmark-only", command)
+        self.assertEqual(command[command.index("--benchmark-camera") + 1], "fixed")
+
     def test_dry_run_prints_a_rotated_plan_without_launching(self):
         commands = desktop.planned(self.args(), summary.DEFAULT_ROUTES, [])
         self.assertEqual(len(commands), 8)
@@ -200,7 +208,7 @@ class HarnessChecks(unittest.TestCase):
             instance=Path("instance"), install=Path("install"), java_home=Path("java"),
             afv_jar=Path("afv.jar"), shader_pack=None, heap="6G", timeout=1800, local_xim=False,
             width=1920, height=1080, render_distance=12, simulation_distance=12,
-            benchmark_ticks=600, warmup_ticks=600, benchmark_camera="orbit", rounds=2,
+            benchmark_ticks=600, warmup_ticks=600, benchmark_camera="orbit", terrain=False, rounds=2,
             x11_no_modifiers=False)
 
 

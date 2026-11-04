@@ -1,0 +1,15 @@
+{
+    "file_format_version": "1.2.0",
+    "layer": {
+        "name": "VK_LAYER_AFV_render_ceiling",
+        "type": "GLOBAL",
+        "library_path": "./libVkLayer_afv_render_ceiling.so",
+        "api_version": "1.4.303",
+        "implementation_version": "1",
+        "description": "AFV render timing and presentation removal for benchmarks",
+        "functions": {
+            "vkGetInstanceProcAddr": "afvGetInstanceProcAddr",
+            "vkGetDeviceProcAddr": "afvGetDeviceProcAddr"
+        }
+    }
+}

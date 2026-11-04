@@ -13,6 +13,24 @@ import java.util.concurrent.CompletableFuture;
 /** Only called in an explicitly requested, freshly created AFV smoke world. */
 public final class ValidationScene {
     private ValidationScene() {}
+    /** Fixed viewpoint above generated terrain; world time and weather stay constant between runs. */
+    public static CompletableFuture<Void> createTerrain(MinecraftServer server) {
+        return CompletableFuture.runAsync(() -> {
+            var level = server.overworld();
+            level.getGameRules().getRule(GameRules.RULE_DAYLIGHT).set(false, server);
+            level.getGameRules().getRule(GameRules.RULE_WEATHER_CYCLE).set(false, server);
+            level.getGameRules().getRule(GameRules.RULE_RANDOMTICKING).set(0, server);
+            level.setDayTime(1000);
+            level.setWeatherParameters(120000, 0, false, false);
+            int y = level.getChunk(0, 0).getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, 8, 8) + 12;
+            for (var player : server.getPlayerList().getPlayers()) {
+                player.getAbilities().flying = true;
+                player.onUpdateAbilities();
+                player.connection.teleport(8.5, y, 8.5, 45, 10);
+            }
+            System.out.println("AFV_TERRAIN_SCENE_READY: y=" + y + "; time=1000");
+        }, server);
+    }
     public static CompletableFuture<Void> create(MinecraftServer server) {
         return CompletableFuture.runAsync(() -> {
             var level = server.overworld();

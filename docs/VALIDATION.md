@@ -67,6 +67,34 @@ For asynchronous modes, also report completed Vulkan presentations, dropped jobs
 and pending jobs. Successful `vkQueuePresentKHR` returns do not measure how many
 distinct frames reached a compositor or monitor, or input-to-photon latency.
 
+### Render ceiling
+
+A window system can cost more than the renderer. On a nested X server the GPU
+driver may present through a slow foreign-server path, which caps every route near
+the same frame rate and hides real differences. Check this before trusting a
+comparison: if `vkQueuePresentKHR` dominates or the GPU is far from fully loaded,
+the sample measures presentation.
+
+`--render-ceiling` replaces swapchains with offscreen images through a Vulkan layer
+built from `validation/native/`. Rendering, submission, synchronization and a
+three-frame GPU throttle remain; nothing reaches the window. The resulting FPS is
+what the renderer can produce on that GPU, not what a player sees.
+
+`--gl-reference VENDOR_JSON` is the same measurement for the vendor's OpenGL driver:
+GL renders on the GPU's EGL device into a pbuffer, so a nested X server can host a
+same-hardware reference. Use it with `--backend OPENGL --expect-backend OpenGL
+--benchmark-only` and the vendor's glvnd JSON file. Compare it only with
+`--render-ceiling` results from the same scene.
+
+`--render-probe PATH` records per-second Vulkan blocking times and draw statistics
+to `PATH.<pid>`, with or without `--render-ceiling`. Layer-level times are CPU
+blocking times of those entrypoints, not GPU execution times.
+
+The flat diagnostic scene is too light to represent play. For a representative
+load add `--terrain --benchmark-only --width 1920 --height 1080`, which uses a fixed
+viewpoint over generated terrain. Use the real display for the final measurement
+of what players see, since neither mode includes the compositor or scanout.
+
 Compare experimental switches one at a time, including `--sync-present` against
 the async default, `--frame-pipeline --pipeline-depth 1|2|3`, and `--direct-output`.
 Direct-output handoff layouts can be compared with `--direct-output-layout general|attachment`.

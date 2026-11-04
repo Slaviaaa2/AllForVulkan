@@ -47,6 +47,21 @@ def expand(items, values):
     return result
 
 
+def build_native_tool(game, source, library, *flags):
+    """Compile a validation tool into the private client; these never ship in the mod."""
+    tools = game / '.afv-tools'
+    tools.mkdir(exist_ok=True)
+    target = tools / library
+    code = Path(__file__).resolve().parent.parent / 'validation/native' / source
+    subprocess.run(['cc', '-O2', '-fPIC', '-shared', '-Wl,-z,nodelete', '-o', str(target), str(code), *flags], check=True)
+    return tools
+
+
+def x_default_visual(environment):
+    info = subprocess.run(['xdpyinfo'], env=environment, capture_output=True, text=True, check=True).stdout
+    return re.search(r'default visual id:\s*(0x[0-9a-f]+)', info).group(1)
+
+
 def verify_client_mods(game, manifest):
     expected = {entry['file']: entry for entry in manifest['jars']}
     if len(expected) != len(manifest['jars']):
@@ -236,6 +251,14 @@ def launch(args):
         command += ['-Dafv.smokeDimensionInspectTicks=' + str(args.dimension_inspect_ticks)]
     if args.scene:
         command += ['-Dafv.smokeScene=true']
+    if args.terrain:
+        if not args.scene or args.benchmark_ticks <= 0:
+            raise ValueError('--terrain requires --scene and --benchmark-ticks')
+        command += ['-Dafv.benchmarkTerrain=true']
+    if args.benchmark_only:
+        if args.benchmark_ticks <= 0:
+            raise ValueError('--benchmark-only requires --benchmark-ticks')
+        command += ['-Dafv.benchmarkOnly=true']
     if args.native_output_probe:
         command += ['-Dafv.smokeNativeOutput=true']
     if args.final_output_probe:
@@ -277,6 +300,24 @@ def launch(args):
         if not (args.zink or args.zink_client):
             raise ValueError('--x11-no-modifiers requires a Zink route')
         environment['LIBGL_KOPPER_DRI2'] = 'true'
+    if args.render_ceiling or args.render_probe:
+        if not (args.zink or args.zink_client):
+            raise ValueError('--render-ceiling and --render-probe observe a Vulkan route')
+        tools = build_native_tool(game, 'render_ceiling_layer.c', 'libVkLayer_afv_render_ceiling.so', '-lpthread')
+        shutil.copy2(Path(__file__).resolve().parent.parent / 'validation/native/VkLayer_afv_render_ceiling.json', tools)
+        environment.update(VK_LAYER_PATH=str(tools), VK_INSTANCE_LAYERS='VK_LAYER_AFV_render_ceiling')
+        if args.render_probe:
+            environment['AFV_RENDER_PROBE_OUT'] = str(args.render_probe.resolve())
+        if args.render_ceiling:
+            environment['AFV_RENDER_PROBE_NULL_PRESENT'] = '1'
+    if args.gl_reference:
+        if args.backend != 'OPENGL' or args.zink or args.zink_client or not args.benchmark_only:
+            raise ValueError('--gl-reference requires --backend OPENGL --benchmark-only on the vendor GL route')
+        tools = build_native_tool(game, 'gl_reference_egl.c', 'libEGL.so.1', '-ldl', '-Wl,-soname,libEGL.so.1')
+        command += ['-Dafv.validationEgl=true']
+        environment.update(LD_LIBRARY_PATH=str(tools), AFV_GL_REFERENCE_SIZE=f'{args.width}x{args.height}',
+                           AFV_GL_REFERENCE_VISUAL=x_default_visual(environment),
+                           __EGL_VENDOR_LIBRARY_FILENAMES=args.gl_reference)
     command += expand(vanilla['arguments']['jvm'] + forge['arguments']['jvm'], values)
     command += [forge['mainClass']] + expand(vanilla['arguments']['game'] + forge['arguments']['game'], values)
     command += ['--width', str(args.width), '--height', str(args.height)]
@@ -287,7 +328,8 @@ def launch(args):
               'afvSha256': hashlib.sha256(jar.read_bytes()).hexdigest(),
               'route': 'Zink native window presentation; no AFV bridge' if native_zink else 'AFV Vulkan presentation with Zink GL client' if args.zink_client else 'OpenGL via Zink comparison' if args.zink else 'Auto; see AFV_BACKEND',
               'benchmarkTicks': args.benchmark_ticks, 'warmupTicks': args.warmup_ticks,
-              'uncapped': args.uncapped, 'requireIris': args.require_iris, 'validationScene': args.scene}
+              'uncapped': args.uncapped, 'requireIris': args.require_iris, 'validationScene': args.scene,
+              'terrainScene': args.terrain}
     if 'dependency_lock' in manifest:
         record['dependencyLock'] = manifest['dependency_lock']
     record['presentation'] = 'native' if native_zink else 'bridge' if args.zink_client else None
@@ -314,6 +356,8 @@ def launch(args):
     record['expectedBackend'] = args.expect_backend
     record['requestedBackend'] = args.backend or ('VULKAN' if args.zink_client else 'OPENGL' if args.zink else 'saved setting')
     record['x11NoModifiers'] = args.x11_no_modifiers
+    record['renderCeiling'] = args.render_ceiling
+    record['glReference'] = str(args.gl_reference) if args.gl_reference else None
     if shader_source:
         record['shaderPack'] = fixture.name
         if fixture.is_file():
@@ -340,6 +384,9 @@ def launch(args):
                 return 1
     text = log.read_text(errors='replace')
     passed = code == 0 and (not args.smoke or 'AFV_SMOKE_PASS' in text)
+    if args.gl_reference:
+        # The vendor driver's teardown on the EGL device may fault after the sample is written.
+        passed = 'AFV_BENCHMARK_RESULT:' in text
     passed = passed and 'Caught error loading resourcepacks' not in text and 'AFV_SMOKE_FAIL' not in text
     if args.zink_client:
         passed = passed and ('AFV_ZINK_NATIVE_SWAP_PASS' in text if native_zink else 'AFV_ZINK_CLIENT_PRESENT_PASS' in text)
@@ -405,6 +452,11 @@ if __name__ == '__main__':
     parser.add_argument('--dimension-cycle', action='store_true', help='Transfer the fresh QA world through Nether/End and back with real Iris pipelines')
     parser.add_argument('--dimension-inspect-ticks', type=int, default=0, help='Hold each validated dimension for scoped visual inspection')
     parser.add_argument('--scene', action='store_true', help='Build a shader validation scene in the new smoke world')
+    parser.add_argument('--terrain', action='store_true', help='With --scene: benchmark a fixed viewpoint over generated terrain instead of the flat diagnostic scene')
+    parser.add_argument('--benchmark-only', action='store_true', help='Leave the world after the sample instead of running the resize/reload checks')
+    parser.add_argument('--render-ceiling', action='store_true', help='Replace swapchains with offscreen images: FPS measures rendering, not the window system')
+    parser.add_argument('--render-probe', type=Path, help='Write per-second Vulkan timing and draw statistics to PATH.<pid>')
+    parser.add_argument('--gl-reference', metavar='VENDOR_JSON', help='Vendor GL on an EGL device pbuffer with presentation removed; compare with --render-ceiling')
     parser.add_argument('--final-output-probe', action='store_true', help='Verify a last default-framebuffer draw reaches the Vulkan shared image')
     parser.add_argument('--async-present', action='store_true', help='Explicitly enable async presentation. The bridge default is already on; this records an explicit request')
     parser.add_argument('--sync-present', action='store_true', help='Force synchronous vkQueuePresentKHR on the Zink client bridge')

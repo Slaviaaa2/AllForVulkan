@@ -29,6 +29,8 @@ import org.lwjgl.opengl.GL11;
 public final class ClientSmokeTest {
     private static final boolean ENABLED = Boolean.getBoolean("afv.smokeTest");
     private static final boolean WORLD = Boolean.getBoolean("afv.smokeWorld");
+    /** Fixed-seed generated terrain instead of the flat diagnostic world, for realistic render load. */
+    private static final boolean TERRAIN = Boolean.getBoolean("afv.benchmarkTerrain");
     private static int ticks, stableTicks, phase, inspectUntil;
     private static int benchmarkUntil;
     private static int resizeWidth, resizeHeight;
@@ -166,6 +168,14 @@ public final class ClientSmokeTest {
         int tickLimit = 6000 + (benchmarkTicks > 0 ? benchmarkTicks + Math.max(0, Integer.getInteger("afv.benchmarkWarmupTicks", 900)) : 0);
         if (++ticks > tickLimit) throw new IllegalStateException("AFV_SMOKE_FAIL: timeout at phase " + phase);
         if (client.getOverlay() != null) { stableTicks = 0; return; }
+        // A pack's startup prompt must not hold an unattended world check on its first screen.
+        if (phase == 0 && WORLD && client.screen != null && !(client.screen instanceof TitleScreen)
+                && ++stableTicks >= 200) {
+            Initializer.LOGGER.info("AFV_SMOKE_SCREEN_SKIPPED: {}", client.screen.getClass().getName());
+            client.setScreen(new TitleScreen());
+            stableTicks = 0;
+            return;
+        }
         if (phase == 0 && client.screen instanceof TitleScreen) {
             if (++stableTicks < 60) return;
             verifyAtlas(client);
@@ -228,11 +238,12 @@ public final class ClientSmokeTest {
                 return;
             }
             if (phase == 1 && Boolean.getBoolean("afv.smokeScene")) {
-                if (scene == null) scene = dev.allforvulkan.validation.ValidationScene.create(client.getSingleplayerServer());
+                if (scene == null) scene = TERRAIN ? dev.allforvulkan.validation.ValidationScene.createTerrain(client.getSingleplayerServer())
+                        : dev.allforvulkan.validation.ValidationScene.create(client.getSingleplayerServer());
                 if (!scene.isDone()) return;
                 scene.join();
             }
-            if (phase == 1 && stableTicks == 0 && benchmarkUntil == 0 && Integer.getInteger("afv.benchmarkTicks", 0) > 0)
+            if (phase == 1 && stableTicks == 0 && benchmarkUntil == 0 && Integer.getInteger("afv.benchmarkTicks", 0) > 0 && !TERRAIN)
                 client.player.moveTo(.5, -60, .5, 0, Boolean.getBoolean("afv.smokeScene") ? 8 : 0);
             if (++stableTicks < 120) return;
             if (phase == 1 && "orbit".equalsIgnoreCase(System.getProperty("afv.benchmarkCamera", "fixed")))
@@ -278,6 +289,7 @@ public final class ClientSmokeTest {
                 conditions.put("shaderBackendFallback", BackendBootstrap.shaderBackendFallback());
                 conditions.put("shaderBackendCoverage", BackendBootstrap.shaderBackendCoverage());
                 Initializer.LOGGER.info("AFV_BENCHMARK_END: wallMs={}", conditions.get("benchmarkEndWallMs"));
+                conditions.put("terrainScene", TERRAIN);
                 conditions.put("warmupTicks", warmup);
                 conditions.put("width", client.getWindow().getWidth());
                 conditions.put("height", client.getWindow().getHeight());
@@ -290,6 +302,7 @@ public final class ClientSmokeTest {
                 conditions.put("focused", GLFW.glfwGetWindowAttrib(client.getWindow().getWindow(), GLFW.GLFW_FOCUSED) == GLFW.GLFW_TRUE);
                 dev.allforvulkan.validation.FrameBenchmark.finish(java.nio.file.Path.of("afv-benchmark.json"), conditions);
                 benchmarkFinished = true;
+                if (Boolean.getBoolean("afv.benchmarkOnly")) { disconnect(client); return; }
             }
             if (phase == 1 && Integer.getInteger("afv.smokeInspectTicks", 0) > 0) {
                 if (inspectUntil == 0) {
@@ -426,7 +439,7 @@ public final class ClientSmokeTest {
                         new GameRules(), WorldDataConfiguration.DEFAULT),
                 new WorldOptions(123456789L, false, false),
                 registries -> registries.registryOrThrow(Registries.WORLD_PRESET)
-                        .getHolderOrThrow(WorldPresets.FLAT).value().createWorldDimensions(), client.screen);
+                        .getHolderOrThrow(TERRAIN ? WorldPresets.NORMAL : WorldPresets.FLAT).value().createWorldDimensions(), client.screen);
     }
 
     private static void pass(Minecraft client) {

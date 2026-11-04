@@ -33,13 +33,15 @@ def planned(args, routes, jvm_args):
         common += ["--shader-pack", str(args.shader_pack)]
     if args.local_xim:
         common += ["--local-xim"]
+    if args.terrain:
+        common += ["--terrain", "--benchmark-only"]
     commands = []
     for round_index in range(args.rounds):
         for route in summary.rotate(routes, round_index):
             commands.append([sys.executable, str(LAUNCHER), *common, *summary.route_launch_args(
                 route, width=args.width, height=args.height, render_distance=args.render_distance,
                 simulation_distance=args.simulation_distance, benchmark_ticks=args.benchmark_ticks,
-                warmup_ticks=args.warmup_ticks, camera=args.benchmark_camera,
+                warmup_ticks=args.warmup_ticks, camera="fixed" if args.terrain else args.benchmark_camera,
                 x11_no_modifiers=args.x11_no_modifiers, jvm_args=jvm_args)])
     return commands
 
@@ -142,6 +144,8 @@ def main(argv):
     parser.add_argument("--render-distance", type=int, default=12)
     parser.add_argument("--simulation-distance", type=int, default=12)
     parser.add_argument("--benchmark-camera", choices=("fixed", "orbit"), default="orbit")
+    parser.add_argument("--terrain", action="store_true",
+                        help="Fixed viewpoint over generated terrain instead of the flat orbit scene")
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--heap", default="6G")
     parser.add_argument("--route", action="append", dest="routes", choices=summary.ALL_ROUTES,
@@ -196,7 +200,7 @@ def main(argv):
         "display": args.display or os.environ.get("DISPLAY"), "width": args.width, "height": args.height,
         "renderDistance": args.render_distance, "simulationDistance": args.simulation_distance,
         "rounds": args.rounds, "benchmarkTicks": args.benchmark_ticks, "warmupTicks": args.warmup_ticks,
-        "camera": args.benchmark_camera, "routes": list(routes), "nestedDisplay": nested,
+        "camera": "fixed" if args.terrain else args.benchmark_camera, "terrain": args.terrain, "routes": list(routes), "nestedDisplay": nested,
         "allowNestedDisplay": args.allow_nested_display, "profile": args.profile,
         "profileNote": profile_note, "gpuNote": gpu_note,
         "preservedVulkanIcd": "VK_ICD_FILENAMES" in os.environ,
