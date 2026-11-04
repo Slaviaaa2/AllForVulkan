@@ -135,6 +135,7 @@ public final class SharedImage implements AutoCloseable {
             check(vkBindImageMemory(device, image, memory, 0), "bind shared image");
             toGl = createSemaphore(stack);
             fromGl = createSemaphore(stack);
+            discardPendingGlErrors();
             glMemory = glCreateMemoryObjectsEXT();
             glMemoryObjectParameteriEXT(glMemory, GL_DEDICATED_MEMORY_OBJECT_EXT, GL_TRUE);
             var fdResult = stack.mallocInt(1);
@@ -328,6 +329,11 @@ public final class SharedImage implements AutoCloseable {
     }
     public static void check(int result, String operation) {
         if (result != VK_SUCCESS) throw new IllegalStateException(operation + ": Vulkan result " + result);
+    }
+    /** Release frames never read the GL error flag, so one left by a mod's draw is still set when
+     * a resize rebuilds these images. It says nothing about the imports that follow. */
+    private static void discardPendingGlErrors() {
+        for (int n = 0; n < 16 && glGetError() != GL_NO_ERROR; n++) { /* Drain. */ }
     }
     private static void checkGl(String operation) {
         int error = glGetError();

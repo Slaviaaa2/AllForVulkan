@@ -165,7 +165,7 @@ For an independently prepared test instance (see preparation commands below):
 ```sh
 python3 scripts/launch_modpack_client.py \
   --instance /path/to/private-client --install /path/to/CurseForge/Install \
-  --java-home /path/to/jdk21 --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.1.jar \
+  --java-home /path/to/jdk21 --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.2.jar \
   --smoke --local-xim --zink-client --backend AUTO --require-iris \
   --shader-pack /path/to/ComplementaryReimagined_r5.9.3.zip \
   --scene --final-output-probe --inspect-ticks 600
@@ -531,7 +531,7 @@ uses an offline QA identity, and never reads launcher accounts:
 python3 scripts/launch_modpack_client.py \
   --instance build/compatibility/test-client \
   --install /path/to/CurseForge/Install --java-home /path/to/jdk21 \
-  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.1.jar \
+  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.2.jar \
   --smoke --local-xim --zink --x11-no-modifiers
 ```
 

@@ -60,7 +60,7 @@ python3 scripts/verify_artifact.py
 ./gradlew runClient
 ```
 
-出力: `build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.1.jar`。
+出力: `build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.2.jar`。
 開発クライアントではNeoForgeのOpenGL早期ウィンドウを無効にします。
 別のMinecraftインスタンスでは、その `config/fml.toml` に
 `earlyWindowControl = false` を設定してください。詳細は[開発手順](docs/DEVELOPMENT.md)を参照。
