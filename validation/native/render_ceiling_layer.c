@@ -4,6 +4,14 @@
 // call counts and blocking time per Vulkan entrypoint and thread, plus draw,
 // barrier and render-pass counts.
 //
+// AFV_RENDER_PROBE_GPU=1 also times render passes, blits and copies with GPU
+// timestamps and adds a "gpu" object per second: "kind WxH cN dN load/store": [count, ms],
+// plus "gpuCovered", the milliseconds those intervals cover. The remainder of GPU busy
+// time is barriers and other unscoped work. AFV_RENDER_PROBE_TIMESTAMP_NS scales ticks
+// for devices whose timestampPeriod is not 1 ns. Command buffers recorded once and replayed
+// are not timed. AFV_RENDER_PROBE_TRACE=<path> with AFV_RENDER_PROBE_TRACE_DRAIN=<n> writes
+// every scope of the n-th one-second drain to <path>.dev<i> as "begin end name", in ticks.
+//
 // AFV_RENDER_PROBE_NULL_PRESENT=1 replaces every swapchain with three offscreen
 // images. Rendering, queue submission, semaphores and a three-frame GPU throttle
 // remain; nothing reaches a window. FPS then measures what the renderer can
@@ -76,7 +84,8 @@ typedef struct { int sType; const void *pNext; U swapchain; uint64_t timeout; U 
     X(CmdClearDepthStencilImage) X(CmdClearAttachments) X(CmdResolveImage) X(BeginCommandBuffer) X(CmdBindShadersEXT) \
     X(UpdateDescriptorSetWithTemplate)
 #define INTERNAL(X) X(CreateSwapchainKHR) X(GetSwapchainImagesKHR) X(DestroySwapchainKHR) X(CreateImage) \
-    X(GetImageMemoryRequirements) X(BindImageMemory) X(CreateFence) X(ResetFences) X(GetDeviceQueue)
+    X(GetImageMemoryRequirements) X(BindImageMemory) X(CreateFence) X(ResetFences) X(GetDeviceQueue) \
+    X(CreateQueryPool) X(ResetQueryPool) X(CmdWriteTimestamp) X(GetQueryPoolResults) X(CmdEndRendering)
 
 #define ENUM(name) TIMED_##name,
 enum { TIMED(ENUM) TIMED_TOTAL };
@@ -92,7 +101,8 @@ static const char *const countNames[] = {COUNTED(NAME)};
 typedef struct {
     void *dispatchKey, *device;
     GetProcAddr gdpa;
-    U queue;
+    U queue, queryPool;
+    uint32_t nextScope, collectedScope;
 #define MEMBER(name) Fn name;
     TIMED(MEMBER) COUNTED(MEMBER) INTERNAL(MEMBER)
 #undef MEMBER
@@ -166,6 +176,137 @@ TIMED(WRAP)
 }
 COUNTED(WRAP)
 #undef WRAP
+
+// GPU scopes: two timestamps per pass, in a ring the writer thread drains each second.
+enum { SCOPE_RING = 1 << 17, SCOPE_MARGIN = 1 << 12, STAGE_BOTTOM_OF_PIPE = 0x2000, QUERY_TYPE_TIMESTAMP = 2, STRUCT_QUERY_POOL_CREATE_INFO = 11,
+       QUERY_RESULT_64 = 1, QUERY_RESULT_AVAILABILITY = 4, MAX_SCOPE_KEYS = 256 };
+typedef struct { int sType; const void *pNext; uint32_t flags; int type; uint32_t count, statistics; } QueryPoolInfo;
+typedef struct { uint32_t pad; int x, y; uint32_t width, height, layers, viewMask, colorCount;
+                 const char *colors, *depth, *stencil; } RenderingBody;
+typedef struct { int sType; const void *pNext; RenderingBody body; } RenderingInfo;
+enum { KIND_PASS, KIND_BLIT, KIND_COPY_IMAGE, KIND_COPY_BUFFER, KIND_BUFFER_TO_IMAGE, KIND_CLEAR_COLOR, KIND_CLEAR_DEPTH, KIND_RESOLVE };
+static const char *const scopeKinds[] = {"pass", "blit", "copyImage", "copyBuffer", "bufferToImage", "clearColor", "clearDepth", "resolve"};
+static int gpuProbe;
+static double nanosPerTick = 1;
+static uint64_t scopeKeys[MAX_DEVICES][SCOPE_RING];
+static uint8_t scopeDone[MAX_DEVICES][SCOPE_RING];
+static __thread uint32_t passScope;
+
+static uint64_t scopeKey(int kind, uint32_t width, uint32_t height, uint32_t colors, uint32_t depth, uint32_t load, uint32_t store) {
+    return (uint64_t)kind << 56 | (uint64_t)(width & 0xffff) << 40 | (uint64_t)(height & 0xffff) << 24
+            | (colors & 0xff) << 16 | (depth & 0xff) << 8 | (load & 0xf) << 4 | (store & 0xf);
+}
+static uint32_t beginScope(Device *device, U command, uint64_t key) {
+    uint32_t scope = __atomic_fetch_add(&device->nextScope, 1, __ATOMIC_RELAXED) % SCOPE_RING;
+    scopeKeys[device - devices][scope] = key;
+    device->CmdWriteTimestamp(command, STAGE_BOTTOM_OF_PIPE, device->queryPool, scope * 2, 0, 0, 0, 0, 0, 0);
+    return scope;
+}
+static void endScope(Device *device, U command, uint32_t scope) {
+    device->CmdWriteTimestamp(command, STAGE_BOTTOM_OF_PIPE, device->queryPool, scope * 2 + 1, 0, 0, 0, 0, 0, 0);
+}
+static U scopedBeginRendering(PARAMS) {
+    const RenderingInfo *info = (const RenderingInfo *)b;
+    const RenderingBody *pass = &info->body;
+    uint32_t load = pass->colors ? *(const uint32_t *)(pass->colors + 44) : 9, store = pass->colors ? *(const uint32_t *)(pass->colors + 48) : 9;
+    passScope = beginScope(deviceOf(a), a, scopeKey(KIND_PASS, pass->width, pass->height, pass->colorCount, pass->depth != NULL, load, store));
+    return wrapCmdBeginRendering(ARGS);
+}
+static U scopedEndRendering(PARAMS) {
+    Device *device = deviceOf(a);
+    U result = device->CmdEndRendering(ARGS);
+    endScope(device, a, passScope);
+    return result;
+}
+#define SCOPED(entry, kind, width, height) static U scoped##entry(PARAMS) { \
+    Device *device = deviceOf(a); \
+    uint32_t scope = beginScope(device, a, scopeKey(kind, width, height, 0, 0, 0, 0)); \
+    U result = wrap##entry(ARGS); \
+    endScope(device, a, scope); \
+    return result; \
+}
+// VkImageBlit: destination offsets[1] follow src subresource, src offsets and dst subresource.
+static uint32_t blitAxis(U regions, int axis) { return regions ? *(const uint32_t *)(regions + 68 + axis * 4) : 0; }
+SCOPED(CmdBlitImage, KIND_BLIT, blitAxis(g, 0), blitAxis(g, 1))
+SCOPED(CmdCopyImage, KIND_COPY_IMAGE, 0, 0)
+SCOPED(CmdCopyBuffer, KIND_COPY_BUFFER, 0, 0)
+SCOPED(CmdCopyBufferToImage, KIND_BUFFER_TO_IMAGE, 0, 0)
+SCOPED(CmdClearColorImage, KIND_CLEAR_COLOR, 0, 0)
+SCOPED(CmdClearDepthStencilImage, KIND_CLEAR_DEPTH, 0, 0)
+SCOPED(CmdResolveImage, KIND_RESOLVE, 0, 0)
+
+typedef struct { uint64_t begin, end, key; } Interval;
+static int compareIntervals(const void *left, const void *right) {
+    uint64_t a = ((const Interval *)left)->begin, b = ((const Interval *)right)->begin;
+    return a < b ? -1 : a > b;
+}
+static Interval intervals[SCOPE_RING];
+/** Write one device's completed scopes. Unfinished scopes stay queued for the next pass. */
+static void writeGpuScopes(Device *device) {
+    static uint64_t keys[MAX_SCOPE_KEYS], counts[MAX_SCOPE_KEYS];
+    static double totals[MAX_SCOPE_KEYS];
+    int keyCount = 0, intervalCount = 0, deviceIndex = (int)(device - devices);
+    // Zink can drop a recorded command buffer, so its scopes never complete: scan the whole
+    // window, and retire unfinished ones once the ring has moved on. Scopes newer than the
+    // margin may not be submitted yet. Each slot is reset here, because a reset recorded in
+    // the command stream costs more GPU time than the passes being measured.
+    uint32_t limit = __atomic_load_n(&device->nextScope, __ATOMIC_RELAXED) - SCOPE_MARGIN;
+    while ((int32_t)(limit - device->collectedScope) > (int32_t)(SCOPE_RING - 2 * SCOPE_MARGIN)) device->collectedScope++;
+    uint32_t contiguous = device->collectedScope;
+    int pending = 0;
+    for (uint32_t index = device->collectedScope; (int32_t)(limit - index) > 0 && intervalCount < SCOPE_RING; index++) {
+        uint32_t scope = index % SCOPE_RING;
+        if (scopeDone[deviceIndex][scope] == 1) { if (!pending) contiguous = index + 1; continue; }
+        uint64_t data[4];
+        int status = (int)device->GetQueryPoolResults((U)device->device, device->queryPool, scope * 2, 2, sizeof data, (U)data,
+                                                      16, QUERY_RESULT_64 | QUERY_RESULT_AVAILABILITY, 0, 0);
+        if (status != 0 || !data[1] || !data[3]) { pending = 1; continue; }
+        scopeDone[deviceIndex][scope] = 1;
+        if (!pending) contiguous = index + 1;
+        device->ResetQueryPool((U)device->device, device->queryPool, scope * 2, 2, 0, 0, 0, 0, 0, 0);
+        if (data[2] < data[0]) continue;
+        double millis = (data[2] - data[0]) * nanosPerTick / 1e6;
+        uint64_t key = scopeKeys[deviceIndex][scope];
+        int slot = 0;
+        while (slot < keyCount && keys[slot] != key) slot++;
+        if (slot == keyCount) {
+            if (keyCount == MAX_SCOPE_KEYS) continue;
+            keys[keyCount] = key; counts[keyCount] = 0; totals[keyCount] = 0; keyCount++;
+        }
+        counts[slot]++;
+        totals[slot] += millis;
+        intervals[intervalCount++] = (Interval){data[0], data[2], key};
+    }
+    for (uint32_t index = device->collectedScope; index != contiguous; index++) scopeDone[deviceIndex][index % SCOPE_RING] = 0;
+    device->collectedScope = contiguous;
+    qsort(intervals, intervalCount, sizeof intervals[0], compareIntervals);
+    static int traceDrains[MAX_DEVICES];
+    const char *tracePath = getenv("AFV_RENDER_PROBE_TRACE");
+    if (tracePath && intervalCount > 0 && ++traceDrains[deviceIndex] == atoi(getenv("AFV_RENDER_PROBE_TRACE_DRAIN"))) {
+        char path[4096];
+        snprintf(path, sizeof path, "%s.dev%d", tracePath, deviceIndex);
+        FILE *trace = fopen(path, "w");
+        for (int k = 0; trace && k < intervalCount; k++) {
+            uint64_t key = intervals[k].key;
+            fprintf(trace, "%lu %lu %s %ux%u c%u d%u %u/%u\n", intervals[k].begin, intervals[k].end, scopeKinds[key >> 56], (unsigned)(key >> 40 & 0xffff),
+                    (unsigned)(key >> 24 & 0xffff), (unsigned)(key >> 16 & 0xff), (unsigned)(key >> 8 & 0xff), (unsigned)(key >> 4 & 0xf), (unsigned)(key & 0xf));
+        }
+        if (trace) fclose(trace);
+    }
+    uint64_t covered = 0, reach = 0;
+    for (int k = 0; k < intervalCount; k++) {
+        uint64_t begin = intervals[k].begin > reach ? intervals[k].begin : reach;
+        if (intervals[k].end > begin) { covered += intervals[k].end - begin; reach = intervals[k].end; }
+    }
+    fprintf(output, ",\"gpu%d\":{", deviceIndex);
+    for (int k = 0; k < keyCount; k++) {
+        uint64_t key = keys[k];
+        fprintf(output, "%s\"%s %ux%u c%u d%u %u/%u\":[%lu,%.3f]", k ? "," : "", scopeKinds[key >> 56], (unsigned)(key >> 40 & 0xffff),
+                (unsigned)(key >> 24 & 0xffff), (unsigned)(key >> 16 & 0xff), (unsigned)(key >> 8 & 0xff),
+                (unsigned)(key >> 4 & 0xf), (unsigned)(key & 0xf), counts[k], totals[k]);
+    }
+    fprintf(output, "},\"gpuCovered%d\":%.3f", deviceIndex, covered * nanosPerTick / 1e6);
+}
 
 typedef struct { uint32_t next; U images[NULL_IMAGES], fences[NULL_IMAGES]; } NullSwapchain;
 
@@ -291,7 +432,9 @@ static void *writer(void *unused) {
             }
             lastCounters[entry] = value;
         }
-        fprintf(output, "}}\n");
+        fprintf(output, "}");
+        if (gpuProbe) for (int k = 0; k < deviceCount; k++) if (devices[k].queryPool) writeGpuScopes(&devices[k]);
+        fprintf(output, "}\n");
         fflush(output);
     }
     return unused;
@@ -299,6 +442,8 @@ static void *writer(void *unused) {
 
 __attribute__((constructor)) static void start(void) {
     nullPresent = getenv("AFV_RENDER_PROBE_NULL_PRESENT") != NULL;
+    gpuProbe = getenv("AFV_RENDER_PROBE_GPU") != NULL;
+    if (getenv("AFV_RENDER_PROBE_TIMESTAMP_NS")) nanosPerTick = atof(getenv("AFV_RENDER_PROBE_TIMESTAMP_NS"));
     const char *prefix = getenv("AFV_RENDER_PROBE_OUT");
     char path[4096];
     snprintf(path, sizeof path, "%s.%d", prefix ? prefix : "/dev/null", (int)getpid());
@@ -346,6 +491,11 @@ static int createDevice(void *physicalDevice, const Header *info, const void *al
     const DeviceInfo *deviceInfo = (const DeviceInfo *)info;
     uint32_t family = ((const QueueInfo *)deviceInfo->queues)->family;
     device->GetDeviceQueue((U)*result, family, 0, (U)&device->queue, 0, 0, 0, 0, 0, 0);
+    if (gpuProbe) {
+        QueryPoolInfo pool = {STRUCT_QUERY_POOL_CREATE_INFO, 0, 0, QUERY_TYPE_TIMESTAMP, SCOPE_RING * 2, 0};
+        device->CreateQueryPool((U)*result, (U)&pool, 0, (U)&device->queryPool, 0, 0, 0, 0, 0, 0);
+        device->ResetQueryPool((U)*result, device->queryPool, 0, SCOPE_RING * 2, 0, 0, 0, 0, 0, 0);
+    }
     pthread_mutex_unlock(&tableLock);
     return 0;
 }
@@ -359,6 +509,16 @@ static void *interceptPresentation(const char *name) {
     if (!strcmp(name, "vkCreateSwapchainKHR")) return (void *)createSwapchainEntry;
     if (!strcmp(name, "vkGetSwapchainImagesKHR")) return (void *)swapchainImagesEntry;
     if (!strcmp(name, "vkDestroySwapchainKHR")) return (void *)destroySwapchainEntry;
+    return NULL;
+}
+
+static void *interceptScopes(const char *name) {
+    if (!strcmp(name, "vkCmdBeginRendering")) return (void *)scopedBeginRendering;
+    if (!strcmp(name, "vkCmdEndRendering")) return (void *)scopedEndRendering;
+#define SCOPE_MATCH(entry) if (!strcmp(name, "vk" #entry)) return (void *)scoped##entry;
+    SCOPE_MATCH(CmdBlitImage) SCOPE_MATCH(CmdCopyImage) SCOPE_MATCH(CmdCopyBuffer) SCOPE_MATCH(CmdCopyBufferToImage)
+    SCOPE_MATCH(CmdClearColorImage) SCOPE_MATCH(CmdClearDepthStencilImage) SCOPE_MATCH(CmdResolveImage)
+#undef SCOPE_MATCH
     return NULL;
 }
 
@@ -377,6 +537,8 @@ EXPORT void *afvGetDeviceProcAddr(void *deviceHandle, const char *name) {
     if (!device) return NULL;
     void *presentation = interceptPresentation(name);
     if (presentation) return presentation;
+    void *scoped = gpuProbe && device->queryPool ? interceptScopes(name) : NULL;
+    if (scoped) return scoped;
     void *wrapped = intercept(device, name);
     return wrapped ? wrapped : device->gdpa(deviceHandle, name);
 }

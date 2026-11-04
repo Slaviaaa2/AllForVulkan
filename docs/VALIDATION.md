@@ -89,6 +89,9 @@ same-hardware reference. Use it with `--backend OPENGL --expect-backend OpenGL
 `--render-probe PATH` records per-second Vulkan blocking times and draw statistics
 to `PATH.<pid>`, with or without `--render-ceiling`. Layer-level times are CPU
 blocking times of those entrypoints, not GPU execution times.
+Add `--render-probe-gpu` for GPU timestamps around render passes, blits and copies.
+Group a frame by pass position when comparing runs: two passes with the same size
+and attachments can be different work.
 
 The flat diagnostic scene is too light to represent play. For a representative
 load add `--terrain --benchmark-only --width 1920 --height 1080`, which uses a fixed

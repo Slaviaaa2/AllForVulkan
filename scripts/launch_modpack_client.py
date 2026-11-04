@@ -308,6 +308,8 @@ def launch(args):
         environment.update(VK_LAYER_PATH=str(tools), VK_INSTANCE_LAYERS='VK_LAYER_AFV_render_ceiling')
         if args.render_probe:
             environment['AFV_RENDER_PROBE_OUT'] = str(args.render_probe.resolve())
+        if args.render_probe_gpu:
+            environment['AFV_RENDER_PROBE_GPU'] = '1'
         if args.render_ceiling:
             environment['AFV_RENDER_PROBE_NULL_PRESENT'] = '1'
     if args.gl_reference:
@@ -456,6 +458,7 @@ if __name__ == '__main__':
     parser.add_argument('--benchmark-only', action='store_true', help='Leave the world after the sample instead of running the resize/reload checks')
     parser.add_argument('--render-ceiling', action='store_true', help='Replace swapchains with offscreen images: FPS measures rendering, not the window system')
     parser.add_argument('--render-probe', type=Path, help='Write per-second Vulkan timing and draw statistics to PATH.<pid>')
+    parser.add_argument('--render-probe-gpu', action='store_true', help='With --render-probe: add GPU timestamps per render pass, blit and copy')
     parser.add_argument('--gl-reference', metavar='VENDOR_JSON', help='Vendor GL on an EGL device pbuffer with presentation removed; compare with --render-ceiling')
     parser.add_argument('--final-output-probe', action='store_true', help='Verify a last default-framebuffer draw reaches the Vulkan shared image')
     parser.add_argument('--async-present', action='store_true', help='Explicitly enable async presentation. The bridge default is already on; this records an explicit request')
