@@ -766,6 +766,16 @@ Role-specific GL sampling/Vulkan-scene-producer operations are rejected for
 presentation-only images. This changes ownership/layout declarations, not Iris
 shader operations, shaderpack settings or the number of WSI transfer commands.
 
+## Vertex uploads on Zink
+
+ImmediatelyFast's `fast_buffer_upload` replaces `glBufferData` with `glBufferSubData`
+on vertex buffers that are rewritten every frame. A vendor GL driver can rename such
+a buffer. On Zink the write synchronizes the GL thread, the driver thread and the
+GPU, so the render thread waits and the GPU stays underused. AFV turns that setting
+off when a world starts on a Zink route. Other mods that overwrite busy buffers
+would show the same signature: `vkWaitSemaphores` time on the render thread in a
+`--render-probe` log while GPU use stays well below full load.
+
 ## Release preparation
 
 Publish a new version after a coherent feature set, acceptable measured performance
@@ -814,6 +824,11 @@ DRM format modifier support. The launcher's `--x11-no-modifiers` choice is recor
 and allowed on either Zink route so comparison conditions can match. This flag
 does not disable Vulkan swapchains; `LIBGL_KOPPER_DISABLE` is a different setting.
 See [Mesa's environment documentation](https://docs.mesa3d.org/envvars.html#libgl-kopper-dri2).
+Zink fixes a surface's present mode when its swapchain is created and does not apply
+later `eglSwapInterval` calls. Without intervention an uncapped client stays on FIFO
+and is held to the monitor's refresh rate. AFV sets Mesa's `vblank_mode` from the
+saved VSync option before the driver loads, unless the environment already chose
+one, so changing VSync on this route takes effect after a restart.
 A successful hidden GL-window probe alone does not prove visible window output;
 check the actual client viewport as well. On affected X11 servers, set
 `LIBGL_KOPPER_DRI2=true` in the game's launcher environment or use the helper's
