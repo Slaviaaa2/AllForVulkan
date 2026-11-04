@@ -41,7 +41,7 @@ enum {
     STRUCT_SUBMIT_INFO = 4, STRUCT_MEMORY_ALLOCATE_INFO = 5, STRUCT_FENCE_CREATE_INFO = 8,
     STRUCT_IMAGE_CREATE_INFO = 14, STRUCT_LOADER_INSTANCE_CREATE_INFO = 47, STRUCT_LOADER_DEVICE_CREATE_INFO = 48,
     LAYER_LINK_INFO = 0, IMAGE_CREATE_MUTABLE_FORMAT = 8, IMAGE_TYPE_2D = 1, FENCE_SIGNALED = 1,
-    STAGE_ALL_COMMANDS = 0x10000, NULL_IMAGES = 3, MAX_DEVICES = 8, MAX_THREADS = 24,
+    MEMORY_DEVICE_LOCAL = 1, STAGE_ALL_COMMANDS = 0x10000, NULL_IMAGES = 3, MAX_DEVICES = 8, MAX_THREADS = 24,
 };
 
 typedef struct { int sType; const void *pNext; } Header;
@@ -121,6 +121,7 @@ static pthread_mutex_t tableLock = PTHREAD_MUTEX_INITIALIZER;
 // Null presentation submits from threads the application did not synchronize with.
 static pthread_mutex_t queueLock = PTHREAD_MUTEX_INITIALIZER;
 static int nullPresent;
+static uint32_t memoryTypeCount, memoryTypeFlags[32];
 static FILE *output;
 
 static uint64_t monotonic(void) {
@@ -310,6 +311,13 @@ static void writeGpuScopes(Device *device) {
 
 typedef struct { uint32_t next; U images[NULL_IMAGES], fences[NULL_IMAGES]; } NullSwapchain;
 
+/** A real swapchain image lives in device memory. A host-visible one would add a PCIe copy. */
+static uint32_t deviceLocalType(uint32_t bits) {
+    for (uint32_t type = 0; type < memoryTypeCount; type++)
+        if (bits & (1u << type) && memoryTypeFlags[type] & MEMORY_DEVICE_LOCAL) return type;
+    return (uint32_t)__builtin_ctz(bits);
+}
+
 static int createNullSwapchain(U deviceHandle, const SwapchainInfo *info, NullSwapchain **result) {
     Device *device = deviceOf(deviceHandle);
     NullSwapchain *swapchain = calloc(1, sizeof *swapchain);
@@ -321,7 +329,7 @@ static int createNullSwapchain(U deviceHandle, const SwapchainInfo *info, NullSw
         if (status) return status;
         MemoryRequirements requirements;
         device->GetImageMemoryRequirements(deviceHandle, swapchain->images[k], (U)&requirements, 0, 0, 0, 0, 0, 0, 0);
-        MemoryInfo memory = {STRUCT_MEMORY_ALLOCATE_INFO, 0, requirements.size, (uint32_t)__builtin_ctz(requirements.bits)};
+        MemoryInfo memory = {STRUCT_MEMORY_ALLOCATE_INFO, 0, requirements.size, deviceLocalType(requirements.bits)};
         U allocation = 0;
         status = (int)device->AllocateMemory(deviceHandle, (U)&memory, 0, (U)&allocation, 0, 0, 0, 0, 0, 0);
         if (status) return status;
@@ -478,6 +486,13 @@ static int createDevice(void *physicalDevice, const Header *info, const void *al
             (int (*)(void *, const Header *, const void *, void **))next(instanceHandle, "vkCreateDevice");
     int status = create(physicalDevice, info, allocator, result);
     if (status != 0) return status;
+    void (*memoryProperties)(void *, void *) = (void (*)(void *, void *))next(instanceHandle, "vkGetPhysicalDeviceMemoryProperties");
+    if (memoryProperties) {
+        uint32_t properties[1 + 2 * 32 + 1 + 4 * 16 * 2] = {0};
+        memoryProperties(physicalDevice, properties);
+        memoryTypeCount = properties[0] > 32 ? 32 : properties[0];
+        for (uint32_t k = 0; k < memoryTypeCount; k++) memoryTypeFlags[k] = properties[1 + 2 * k];
+    }
 
     pthread_mutex_lock(&tableLock);
     Device *device = &devices[deviceCount < MAX_DEVICES ? deviceCount++ : MAX_DEVICES - 1];

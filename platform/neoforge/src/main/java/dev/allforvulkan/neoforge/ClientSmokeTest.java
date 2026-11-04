@@ -158,6 +158,7 @@ public final class ClientSmokeTest {
         if (ENABLED) renderedFrames++;
         if (ENABLED && !BackendBootstrap.vulkan()) dev.allforvulkan.validation.GlDebugTrace.installIfRequested();
         if (ENABLED) dev.allforvulkan.validation.FrameBenchmark.frame();
+        if (ENABLED) { TerrainProbe.frame(); SectionProbe.frame(); }
     }
 
     @SubscribeEvent
@@ -259,6 +260,8 @@ public final class ClientSmokeTest {
                     benchmarkPresentBaseline = ZinkClientSession.completedFrames();
                     benchmarkDropBaseline = ZinkClientSession.droppedFrames();
                     dev.allforvulkan.validation.FrameBenchmark.begin();
+                    TerrainProbe.reset();
+                    SectionProbe.reset();
                     benchmarkBeginWallMs = System.currentTimeMillis();
                     Initializer.LOGGER.info("AFV_BENCHMARK_BEGIN: wallMs={} camera={}", benchmarkBeginWallMs, System.getProperty("afv.benchmarkCamera", "fixed"));
                 }
@@ -290,6 +293,8 @@ public final class ClientSmokeTest {
                 conditions.put("shaderBackendCoverage", BackendBootstrap.shaderBackendCoverage());
                 Initializer.LOGGER.info("AFV_BENCHMARK_END: wallMs={}", conditions.get("benchmarkEndWallMs"));
                 conditions.put("terrainScene", TERRAIN);
+                if (TerrainProbe.PROBE) conditions.put("terrainProbe", TerrainProbe.result());
+                if (SectionProbe.ENABLED) conditions.put("sectionProbe", SectionProbe.result());
                 conditions.put("warmupTicks", warmup);
                 conditions.put("width", client.getWindow().getWidth());
                 conditions.put("height", client.getWindow().getHeight());

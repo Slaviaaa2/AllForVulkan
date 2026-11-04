@@ -32,6 +32,10 @@ public class MixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.endsWith(".ZinkClientWindowMixin") || mixinClassName.endsWith(".ZinkClientFrameMixin")
                 || mixinClassName.endsWith(".ZinkClientGameMixin"))
             return dev.allforvulkan.neoforge.BackendBootstrap.zinkClient();
+        if (mixinClassName.endsWith(".SodiumTerrainProbeMixin"))
+            return Boolean.getBoolean("afv.terrainProbe") && pinnedSodiumPresent();
+        if (mixinClassName.endsWith(".SectionProbeMixin"))
+            return Boolean.getBoolean("afv.sectionProbe");
         if (mixinClassName.endsWith(".ZinkNativeFrameMixin"))
             return dev.allforvulkan.neoforge.BackendBootstrap.zinkNative();
         if (mixinClassName.endsWith(".EglValidationMixin"))

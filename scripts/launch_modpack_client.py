@@ -255,6 +255,10 @@ def launch(args):
         if not args.scene or args.benchmark_ticks <= 0:
             raise ValueError('--terrain requires --scene and --benchmark-ticks')
         command += ['-Dafv.benchmarkTerrain=true']
+    if args.terrain_probe or args.section_probe:
+        if args.benchmark_ticks <= 0:
+            raise ValueError('--terrain-probe and --section-probe require --benchmark-ticks')
+        command += ['-Dafv.terrainProbe=' + str(args.terrain_probe).lower(), '-Dafv.sectionProbe=' + str(args.section_probe).lower()]
     if args.benchmark_only:
         if args.benchmark_ticks <= 0:
             raise ValueError('--benchmark-only requires --benchmark-ticks')
@@ -455,6 +459,8 @@ if __name__ == '__main__':
     parser.add_argument('--dimension-inspect-ticks', type=int, default=0, help='Hold each validated dimension for scoped visual inspection')
     parser.add_argument('--scene', action='store_true', help='Build a shader validation scene in the new smoke world')
     parser.add_argument('--terrain', action='store_true', help='With --scene: benchmark a fixed viewpoint over generated terrain instead of the flat diagnostic scene')
+    parser.add_argument('--terrain-probe', action='store_true', help='GL timer and sample queries around Sodium terrain passes; Sodium 0.6 only')
+    parser.add_argument('--section-probe', action='store_true', help='GL timestamps at Minecraft profiler section changes: comparable GPU time per render stage')
     parser.add_argument('--benchmark-only', action='store_true', help='Leave the world after the sample instead of running the resize/reload checks')
     parser.add_argument('--render-ceiling', action='store_true', help='Replace swapchains with offscreen images: FPS measures rendering, not the window system')
     parser.add_argument('--render-probe', type=Path, help='Write per-second Vulkan timing and draw statistics to PATH.<pid>')
