@@ -89,6 +89,7 @@ public final class BackendBootstrap {
                 }
                 MesaEnvironment.configure(selection.vendor().toString());
                 if (nativeWindow) {
+                    MesaEnvironment.configureSwapInterval(savedVsync(FMLLoader.getGamePath()));
                     zinkNative = true;
                     reason = "Zink native Vulkan presentation: " + selection.result().detail();
                     return;
@@ -108,6 +109,16 @@ public final class BackendBootstrap {
             LogManager.getLogger("AllForVulkan").info("AFV_SHADER_BACKEND: requested={}, active={}, coverage={}, fallback={}",
                     shaderDecision.requested(), shaderDecision.active(), shaderDecision.coverage(), shaderDecision.fallback());
         }
+    }
+
+    /** Read before the client options load; Minecraft's default applies to a new instance. */
+    private static boolean savedVsync(Path game) {
+        Path options = game.resolve("options.txt");
+        if (!Files.isRegularFile(options)) return true;
+        try (var lines = Files.lines(options)) {
+            return lines.filter(line -> line.startsWith("enableVsync:")).findFirst()
+                    .map(line -> line.substring("enableVsync:".length()).trim().equals("true")).orElse(true);
+        } catch (IOException | RuntimeException failure) { return true; }
     }
 
     public static boolean vulkan() { initialize(); return vulkan; }
