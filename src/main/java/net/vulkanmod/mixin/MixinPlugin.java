@@ -38,10 +38,12 @@ public class MixinPlugin implements IMixinConfigPlugin {
             return dev.allforvulkan.neoforge.BackendBootstrap.zinkNative() || (!dev.allforvulkan.neoforge.BackendBootstrap.usesVulkan() && Boolean.getBoolean("afv.validationEgl"));
         if (mixinClassName.endsWith(".PackValidationMixin"))
             return Boolean.getBoolean("afv.validationPack");
+        // Experimental hooks are written against pinned mod versions. A player's pack must never
+        // load them: a descriptor mismatch aborts the game as soon as the target class loads.
         if (mixinClassName.endsWith(".IrisShadowPassMixin"))
-            return irisShadowRendererPresent();
+            return shadowExperimentRequested() && irisShadowRendererPresent();
         if (mixinClassName.endsWith(".SodiumShadowMeshMixin") || mixinClassName.endsWith(".SodiumShadowUploadMixin"))
-            return sodiumPresent();
+            return shadowExperimentRequested() && pinnedSodiumPresent();
         return dev.allforvulkan.neoforge.BackendBootstrap.vulkan();
     }
 
@@ -64,32 +66,37 @@ public class MixinPlugin implements IMixinConfigPlugin {
         }
     }
 
-    private static Boolean sodiumLoaded;
-
-    /** Do not load Sodium's renderer. Its mixins are still being applied at this point. */
-    private static boolean sodiumPresent() {
-        if (sodiumLoaded != null && sodiumLoaded) return true;
-        boolean present = sodiumModId() || sodiumJar();
-        if (present) sodiumLoaded = true;
-        return present;
+    private static boolean shadowExperimentRequested() {
+        return dev.allforvulkan.neoforge.BackendBootstrap.irisShadow() || System.getProperty("afv.irisShadow") != null;
     }
 
-    private static boolean sodiumModId() {
+    /** The Sodium series the compile-time stubs and shadow mesh decoder describe. */
+    private static final String PINNED_SODIUM = "0.6.";
+    private static Boolean pinnedSodium;
+
+    /** Do not load Sodium's renderer. Its mixins are still being applied at this point. */
+    private static boolean pinnedSodiumPresent() {
+        if (pinnedSodium == null || !pinnedSodium) pinnedSodium = pinnedSodiumMod() || pinnedSodiumJar();
+        return pinnedSodium;
+    }
+
+    private static boolean pinnedSodiumMod() {
         try {
             var mods = net.neoforged.fml.loading.FMLLoader.getLoadingModList();
-            return mods != null && mods.getMods().stream().anyMatch(mod -> "sodium".equals(mod.getModId()));
+            return mods != null && mods.getMods().stream().anyMatch(mod -> "sodium".equals(mod.getModId())
+                    && mod.getVersion().toString().startsWith(PINNED_SODIUM));
         } catch (Throwable failure) {
             return false;
         }
     }
 
-    private static boolean sodiumJar() {
+    private static boolean pinnedSodiumJar() {
         try {
             var mods = net.neoforged.fml.loading.FMLLoader.getGamePath().resolve("mods");
             try (var files = java.nio.file.Files.list(mods)) {
                 return files.anyMatch(path -> {
                     String name = path.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-                    return name.startsWith("sodium-") && name.endsWith(".jar");
+                    return name.startsWith("sodium-neoforge-" + PINNED_SODIUM) && name.endsWith(".jar");
                 });
             }
         } catch (Throwable failure) {
