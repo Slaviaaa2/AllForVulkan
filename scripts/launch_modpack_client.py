@@ -208,10 +208,11 @@ def launch(args):
         config = game / 'config/fml.toml'
         config.parent.mkdir(exist_ok=True)
         content = config.read_text() if config.exists() else ''
-        content = re.sub(r'(?m)^earlyWindowControl\s*=.*$', 'earlyWindowControl = false', content)
-        if not re.search(r'(?m)^earlyWindowControl\s*=', content):
-            content += '\nearlyWindowControl = false\n'
-        config.write_text(content)
+        if not args.keep_early_window:
+            content = re.sub(r'(?m)^earlyWindowControl\s*=.*$', 'earlyWindowControl = false', content)
+            if not re.search(r'(?m)^earlyWindowControl\s*=', content):
+                content += '\nearlyWindowControl = false\n'
+            config.write_text(content)
         options = game / 'options.txt'
         lines = options.read_text().splitlines() if options.exists() else []
         lines = [line for line in lines if not line.startswith(('onboardAccessibility:', 'pauseOnLostFocus:'))]
@@ -454,6 +455,7 @@ if __name__ == '__main__':
     parser.add_argument('--heap', default='6G')
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--smoke', action='store_true')
+    parser.add_argument('--keep-early-window', action='store_true')
     parser.add_argument('--inspect-ticks', type=int, default=0)
     parser.add_argument('--benchmark-ticks', type=int, default=0)
     parser.add_argument('--warmup-ticks', type=int, default=900)

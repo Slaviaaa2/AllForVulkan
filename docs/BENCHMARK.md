@@ -38,7 +38,7 @@ python3 scripts/benchmark_desktop.py \
   --instance /path/to/private-client \
   --install /path/to/CurseForge/Install \
   --java-home /path/to/jdk21 \
-  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.2.jar \
+  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.3.jar \
   --shader-pack /path/to/ComplementaryReimagined_r5.9.3.zip \
   --display :0 \
   --output ~/afv-bench
@@ -51,7 +51,7 @@ python3 scripts/benchmark_desktop.py \
   --instance /path/to/private-client \
   --install /path/to/CurseForge/Install \
   --java-home /path/to/jdk21 \
-  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.2.jar \
+  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.3.jar \
   --shader-pack /path/to/ComplementaryReimagined_r5.9.3.zip \
   --display :0 \
   --rounds 5 --benchmark-ticks 1200 --warmup-ticks 1200 \
@@ -80,7 +80,7 @@ python3 scripts/benchmark_desktop.py \
   --instance /path/to/private-client \
   --install /path/to/CurseForge/Install \
   --java-home /path/to/jdk21 \
-  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.2.jar \
+  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.3.jar \
   --shader-pack /path/to/ComplementaryReimagined_r5.9.3.zip \
   --display :0 \
   --route afv-bridge --route afv-direct \

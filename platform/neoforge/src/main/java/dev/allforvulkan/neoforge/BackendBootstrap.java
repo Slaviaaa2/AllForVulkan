@@ -20,7 +20,7 @@ public final class BackendBootstrap {
     public enum Presentation { BRIDGE, NATIVE }
     public enum ShaderBackend { ZINK, DIRECT }
     private static final Set<String> BASE_MODS = Set.of("minecraft", "neoforge", "allforvulkan");
-    private static boolean initialized, vulkan, zinkClient, zinkNative, presentationFailure;
+    private static boolean initialized, vulkan, zinkClient, zinkNative, presentationFailure, bridgeUnsupported;
     private static Mode requested = Mode.AUTO;
     private static Presentation presentation = Presentation.BRIDGE;
     private static ShaderBackend shaderBackend = ShaderBackend.ZINK;
@@ -64,8 +64,14 @@ public final class BackendBootstrap {
             if (nativeWindow && (Boolean.getBoolean("afv.experimentalDirectOutput") || Boolean.getBoolean("afv.experimentalFramePipeline")
                     || asyncForced || Boolean.getBoolean("afv.smokeFinalOutput")))
                 throw new IllegalArgumentException("Native Zink presentation cannot use AFV bridge experiments or bridge readback");
+            bridgeUnsupported = clientBridge && !linux();
+            if (bridgeUnsupported) {
+                reason = "OpenGL fallback: Zink client bridge requires Linux and an installed Mesa EGL vendor";
+                return;
+            }
             if (net.neoforged.fml.loading.FMLConfig.getBoolConfigValue(net.neoforged.fml.loading.FMLConfig.ConfigValue.EARLY_WINDOW_CONTROL)) {
-                reason = "OpenGL selected: save Auto or Vulkan in AFV settings and restart to prepare the Vulkan window";
+                reason = "OpenGL selected: the early window is open, so Vulkan can start on a later launch";
+                if (clientBridge && !Files.exists(pending)) prepareNextLaunch(nativeWindow);
                 return;
             }
             if (Files.exists(pending)) {
@@ -76,11 +82,6 @@ public final class BackendBootstrap {
             // Also survives a native driver crash, which Java cannot catch.
             Files.writeString(pending, "Vulkan startup pending\n", StandardOpenOption.CREATE_NEW);
             if (clientBridge) {
-                if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux")) {
-                    reason = "OpenGL fallback: Zink client bridge requires Linux and an installed Mesa EGL vendor";
-                    Files.deleteIfExists(pending);
-                    return;
-                }
                 var selection = ZinkPreflight.select(FMLLoader.getGamePath(), MesaVendors.discover(), nativeWindow);
                 if (selection.vendor() == null) {
                     reason = "OpenGL fallback: " + selection.result().detail();
@@ -109,6 +110,24 @@ public final class BackendBootstrap {
             LogManager.getLogger("AllForVulkan").info("AFV_SHADER_BACKEND: requested={}, active={}, coverage={}, fallback={}",
                     shaderDecision.requested(), shaderDecision.active(), shaderDecision.coverage(), shaderDecision.fallback());
         }
+    }
+
+    private static boolean linux() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux");
+    }
+
+    /**
+     * The early window keeps the Windows message loop running during mod loading, so packs ship it
+     * enabled. Linux gives it up only after the driver passes, and only from the next launch.
+     */
+    private static void prepareNextLaunch(boolean nativeWindow) throws IOException {
+        var selection = ZinkPreflight.select(FMLLoader.getGamePath(), MesaVendors.discover(), nativeWindow);
+        if (selection.vendor() == null) {
+            reason = "OpenGL fallback: " + selection.result().detail();
+            return;
+        }
+        net.neoforged.fml.loading.FMLConfig.updateConfig(net.neoforged.fml.loading.FMLConfig.ConfigValue.EARLY_WINDOW_CONTROL, false);
+        reason = "OpenGL for this launch: Vulkan starts on the next launch";
     }
 
     /** Read before the client options load; Minecraft's default applies to a new instance. */
@@ -153,7 +172,7 @@ public final class BackendBootstrap {
             try { Files.move(temporary, config, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
             catch (AtomicMoveNotSupportedException ignored) { Files.move(temporary, config, StandardCopyOption.REPLACE_EXISTING); }
             Files.deleteIfExists(pending);
-            if (mode != Mode.OPENGL) net.neoforged.fml.loading.FMLConfig.updateConfig(
+            if (mode != Mode.OPENGL && !bridgeUnsupported) net.neoforged.fml.loading.FMLConfig.updateConfig(
                     net.neoforged.fml.loading.FMLConfig.ConfigValue.EARLY_WINDOW_CONTROL, false);
         } finally { Files.deleteIfExists(temporary); }
     }

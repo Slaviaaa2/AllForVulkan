@@ -14,9 +14,15 @@ python3 scripts/verify_artifact.py
 
 `runClient` prepares **only this repository's `run/config/fml.toml`** with
 `earlyWindowControl = false`. The NeoForge OpenGL splash window cannot be used
-as a Vulkan surface. For a separately installed client, set the same value in
-that instance's `config/fml.toml` before launch. If the splash is already enabled, startup selects OpenGL. Saving Auto or Vulkan
-in the AFV config screen disables the early GL splash for the next launch.
+as a Vulkan surface. A separately installed client needs no manual change. With
+the splash enabled, that launch uses OpenGL. On Linux, when the Zink preflight
+passes, AFV disables the splash so Vulkan starts on the next launch. Saving Auto
+or Vulkan in the AFV config screen does the same.
+
+Keep the splash enabled on Windows. Mod loading runs the main thread without
+polling window events unless the splash is active, so the window stops responding.
+A mod that touches the window from a loading thread can then wait forever. AFV
+never disables the splash where the Zink route cannot run.
 
 Do not install the original VulkanMod or another VulkanMod port alongside AFV.
 With any third-party mod installed, Auto and Vulkan preserve the existing GL
@@ -165,7 +171,7 @@ For an independently prepared test instance (see preparation commands below):
 ```sh
 python3 scripts/launch_modpack_client.py \
   --instance /path/to/private-client --install /path/to/CurseForge/Install \
-  --java-home /path/to/jdk21 --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.2.jar \
+  --java-home /path/to/jdk21 --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.3.jar \
   --smoke --local-xim --zink-client --backend AUTO --require-iris \
   --shader-pack /path/to/ComplementaryReimagined_r5.9.3.zip \
   --scene --final-output-probe --inspect-ticks 600
@@ -531,7 +537,7 @@ uses an offline QA identity, and never reads launcher accounts:
 python3 scripts/launch_modpack_client.py \
   --instance build/compatibility/test-client \
   --install /path/to/CurseForge/Install --java-home /path/to/jdk21 \
-  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.2.jar \
+  --afv-jar build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.3.jar \
   --smoke --local-xim --zink --x11-no-modifiers
 ```
 

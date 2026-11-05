@@ -60,7 +60,9 @@ python3 scripts/verify_artifact.py
 ./gradlew runClient
 ```
 
-出力: `build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.2.jar`。
+出力: `build/libs/AllForVulkan-1.21.1-neoforge-0.1.0-alpha.3.jar`。
 開発クライアントではNeoForgeのOpenGL早期ウィンドウを無効にします。
-別のMinecraftインスタンスでは、その `config/fml.toml` に
-`earlyWindowControl = false` を設定してください。詳細は[開発手順](docs/DEVELOPMENT.md)を参照。
+別のMinecraftインスタンスでは `config/fml.toml` を変更する必要はありません。LinuxではAFVが
+Zinkの検査に通ると、次回の起動からVulkanを使います。WindowsではMOD読み込み中に
+ウィンドウが応答しなくなるため、`earlyWindowControl = false` にしないでください。
+詳細は[開発手順](docs/DEVELOPMENT.md)を参照。
